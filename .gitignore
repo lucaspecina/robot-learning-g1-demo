@@ -1,3 +1,7 @@
+# go2-lab: clones externos y datos grabados
+external/
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
