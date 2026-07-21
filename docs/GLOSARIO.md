@@ -199,6 +199,11 @@ documento — corregirlo.
   `StandUp()`...). Para comandar motores directo por `rt/lowcmd` hay que
   apagarlo primero — si no, dos controladores pelean por los mismos motores.
   No existe en el simulador.
+- **VLM (vision-language model)**: modelo grande que recibe imágenes + texto y
+  responde texto (GPT-4V, Claude, Qwen-VL...). Entiende escenas en abierto
+  ("¿qué se ve acá? ¿hay algo fuera de lugar?") pero es poco confiable para
+  medir con precisión (leer una aguja, medir distancias). No mueve nada: para
+  que "actúe" hay que darle herramientas a las que llamar.
 - **VLA (vision-language-action)**: modelo grande que recibe cámara + una
   instrucción en lenguaje y emite directamente acciones: típicamente un
   "action chunk" — una ráfaga de objetivos de posición para las

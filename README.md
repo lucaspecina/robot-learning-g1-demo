@@ -68,10 +68,15 @@ python scripts/03_walk_policy.py          # CAMINAR: policy RL + teleop (w/s/a/d
 
 ### Policy de locomoción (03_walk_policy.py)
 
-Usa la policy pre-entrenada `robot_lab` de [rl_sar](https://github.com/fan-ziqi/rl_sar)
-(`external/rl_sar/policy/go2/robot_lab/policy.pt`, entrenada en IsaacLab; interfaz
-estándar: 45 obs → 12 objetivos de posición, 50 Hz, kp=20/kd=0.5). El script hace
-rampa a pose nominal → engancha la policy → teleop por teclado.
+Corre una policy pre-entrenada de [rl_sar](https://github.com/fan-ziqi/rl_sar)
+(`external/rl_sar/policy/go2/`): rampa a pose nominal → loop de policy a 50 Hz →
+teleop por teclado. Dos disponibles con `--policy`:
+
+- **`himloco`** (default): HIMLoco, obs de 45 con historia de 6 pasos (input 270),
+  orden de articulaciones propio (FL,FR,RL,RR — el script traduce). La más limpia:
+  gyro std ~0.2 rad/s trotando en nuestro sim.
+- **`robot_lab`**: IsaacLab, 45 obs sin historia, orden = SDK. Funciona pero más
+  sucia (gyro std ~0.45, deriva de rumbo notoria).
 
 | Tecla | Efecto | | Tecla | Efecto |
 |---|---|---|---|---|
@@ -83,13 +88,26 @@ Sin teclado (corridas fijas / headless): `python scripts/03_walk_policy.py --cmd
 Flags: `--device cuda` (innecesario: CPU infiere en <1 ms), `--real IFACE` (robot real,
 libera el sport mode solo — ¡primero en arnés!).
 
-⚠️ Sim2sim gap visible: entrenada en IsaacLab y corriendo en MuJoCo, la policy
-camina y no se cae, pero deriva (avanza ~0.1 m/s con comando cero y tuerce en
-marcha). Corregible con el teleop; la solución de fondo es entrenar en el mismo
-motor (mjlab) o una policy más robusta (la variante `himloco` con historia).
+⚠️ Lecciones de deployment aprendidas debugueando el "temblor" (todas aplicadas
+por `setup.sh` / el script):
 
-Después: [notebooks/01_explore_lowstate.ipynb](notebooks/01_explore_lowstate.ipynb)
-para graficar lo grabado (kernel = Python de `~/.venvs/go2` en WSL).
+1. **`SIMULATE_DT = 0.002`** (era 0.005): el culpable principal. Con paso de
+   física grueso los contactos pie-piso se integran mal y cualquier policy
+   tiembla (roll std 0.93 → 0.26 rad/s solo con este cambio).
+2. **Escena plana**: la escena go2 de unitree_mujoco trae cordones (x=1.2) y una
+   escalera (x=2.3+) — el robot se los llevaba puestos caminando hacia +x.
+   `setup.sh` los saca; para recuperarlos: `git -C external/unitree_mujoco checkout .`
+3. **Re-publicar lowcmd a 500 Hz** aunque la policy decida a 50: el bridge Python
+   recalcula el PD solo al recibir mensaje (el robot real lo hace a kHz solo).
+4. **Timing con agenda absoluta**: `sleep(resto)` en WSL corre ~8% lento
+   (policy a 46 Hz en vez de 50).
+
+El gap sim2sim residual (entrenadas en IsaacGym/Lab, corren en MuJoCo) sigue
+existiendo — la solución de fondo sigue siendo entrenar en el mismo motor (mjlab).
+
+Después, notebooks (kernel = Python de `~/.venvs/go2` en WSL):
+- [01_explore_lowstate.ipynb](notebooks/01_explore_lowstate.ipynb) — señales básicas de una grabación (stand).
+- [02_explore_gait.ipynb](notebooks/02_explore_gait.ipynb) — autopsia del trote: patrón diagonal, frecuencia de zancada (FFT), temblor cuantificado.
 
 Tip del viewer de MuJoCo: Ctrl+click derecho y arrastrar aplica fuerzas al robot
 (empujalo mientras está parado y mirá la IMU).
