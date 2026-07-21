@@ -102,12 +102,94 @@ documento — corregirlo.
 - **Pose**: una "foto" de los 12 ángulos articulares. Pose de parado, pose
   agachada, etc.
 
+## Locomoción (caminar)
+
+- **Marcha (gait)**: el patrón rítmico de qué pata se levanta cuándo. Los
+  cuadrúpedos tienen varias (como caballo: paso, trote, galope). El Go2 usa
+  casi siempre **trote**: las patas se mueven en pares diagonales — delantera
+  derecha + trasera izquierda juntas, después el otro par. Unas 2-3 zancadas
+  por segundo.
+- **Apoyo / vuelo (stance / swing)**: las dos fases de cada pata dentro del
+  ciclo. Apoyo = el pie está en el piso empujando. Vuelo = el pie está en el
+  aire viajando hacia su próximo lugar de pisada.
+- **Centro de masa**: el punto donde se concentra "el peso promedio" del
+  cuerpo. Para el equilibrio, lo que importa es dónde cae su vertical
+  respecto de los apoyos.
+- **Polígono de soporte**: la figura que dibujan en el piso los pies apoyados.
+  Con 4 pies: un rectángulo. Con 2 pies (trote): apenas una línea. Regla de
+  oro: si la vertical del centro de masa cae dentro del polígono, el robot se
+  sostiene solo (estabilidad estática); si cae afuera, se está cayendo y
+  alguien tiene que hacer algo.
+- **Comando de velocidad (vx, vy, vyaw)**: la orden estándar que recibe la
+  capa de locomoción: velocidad hacia adelante, hacia el costado, y de giro.
+  Nota: no le decís adónde ir ni qué pata mover — solo a qué velocidad
+  querés que se traslade el cuerpo.
+- **Locomoción ciega / perceptiva**: ciega = caminar solo con propiocepción
+  (IMU, articulaciones, pies), sin ver el terreno — reacciona al pisar.
+  Perceptiva = además usa cámara/lidar para ver el terreno y elegir dónde
+  pisar antes de llegar. La ciega resuelve muchísimo más de lo que uno
+  esperaría; la perceptiva hace falta para escaleras rápidas, huecos,
+  pisadas de precisión.
+
+- **Gravedad proyectada**: la forma estándar de meter "cómo estoy inclinado"
+  en la observación de una policy: el vector de la gravedad expresado en el
+  marco del cuerpo (3 números). Derecho = (0, 0, −1); inclinado hacia
+  adelante, la componente x crece. Se prefiere a roll/pitch/yaw porque es
+  suave, no tiene discontinuidades, e ignora el yaw (mirar al norte o al sur
+  no cambia nada para el equilibrio).
+
+## Navegación (ir a lugares)
+
+- **Teleoperación (teleop)**: un humano mandando los comandos de velocidad en
+  vivo — joystick, gamepad o teclado. La capa de navegación más simple: el
+  cerebro sos vos.
+- **Odometría**: estimar dónde estás acumulando pistas del propio movimiento
+  (cuánto giró cada pata, qué dice la IMU). Funciona en el corto plazo pero
+  el error se acumula: tras 20 metros podés estar 1 metro desviado. Es lo
+  que publica rt/sportmodestate en el robot real.
+- **SLAM**: construir un mapa del entorno con lidar/cámara y ubicarte dentro
+  de él, al mismo tiempo. A diferencia de la odometría, no acumula deriva:
+  reconocer un lugar ya visto corrige la posición. Es lo que hace falta para
+  "andá al punto (3, 2)" de verdad y sin trampa.
+
+## Entrenar policies
+
+- **Domain randomization**: entrenar con la física deliberadamente variada
+  entre episodios — fricción del piso, masa del robot, potencia de motores,
+  retardos de comunicación, empujones aleatorios. Objetivo: que la policy no
+  memorice UN simulador sino que sea robusta a una familia de mundos, entre
+  los cuales (con suerte) está el real.
+- **Sim2sim / sim2real**: las dos validaciones del pipeline. Sim2sim = correr
+  la policy entrenada en el simulador A en un simulador B distinto (p. ej.
+  entrenada en Isaac Gym, validada en MuJoCo): si solo funciona en A,
+  aprendió trucos del motor de física, no a caminar. Sim2real = el paso
+  final al robot físico.
+- **rsl_rl**: la librería de PPO que usa todo el ecosistema legged (la hizo
+  el lab de ETH que creó ANYmal). Optimizada para miles de entornos
+  paralelos en GPU.
+
 ## Las capas de arriba (aún no las usamos)
 
 - **Política (policy)**: en RL, la función que decide acciones a partir de
   observaciones. En locomoción: entra el lowstate (+ el comando de velocidad
   deseado), salen los 12 objetivos de posición para el PD, ~50 veces/s. Una
   política entrenada ocupa el lugar exacto de la rampa tanh del stand.
+- **Observación (obs)**: el vector concreto que entra a la política en cada
+  paso. Para locomoción ciega del Go2, ~45 números: orientación y velocidad
+  angular del cuerpo (IMU), las 12 q y 12 dq, la acción del paso anterior y
+  el comando de velocidad. Todo sale de rt/lowstate + el comando.
+- **Pose nominal / action scale**: truco estándar de las políticas de
+  locomoción: la red no emite ángulos absolutos sino desvíos chicos respecto
+  de una pose de referencia (la de parado): `q_des = pose_nominal +
+  escala × acción`. Arranca "cerca de bien" y el espacio de acciones queda
+  acotado y centrado.
+- **Model-free / model-based**: cuidado con la palabra "modelo", que en esta
+  zona significa dos cosas distintas. (1) El modelo-red-neuronal: los pesos
+  de la política. (2) El modelo-del-mundo: las ecuaciones físicas del robot.
+  Las políticas de locomoción típicas se entrenan model-free (PPO): no
+  aprenden ni usan un modelo del mundo explícito — la física existe solo
+  adentro del simulador durante el entrenamiento. MPC es lo contrario:
+  model-based puro, usa las ecuaciones online y no aprende nada.
 - **MPC (control predictivo)**: la alternativa clásica a RL para la misma capa:
   con un modelo físico del robot, optimizar numéricamente el movimiento de los
   próximos ~0.5 s, ejecutar solo el primer pasito, y volver a optimizar —

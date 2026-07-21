@@ -46,9 +46,10 @@ adelante; el sim clásico de MuJoCo es CPU).
   ```bash
   uv venv ~/.venvs/go2 --python 3.10
   uv pip install --python ~/.venvs/go2/bin/python \
-      -e external/unitree_sdk2_python mujoco pygame matplotlib ipykernel jupyterlab
+      -e external/unitree_sdk2_python mujoco pygame matplotlib ipykernel jupyterlab \
+      torch pyyaml
   ```
-  (o directamente `bash scripts/setup.sh`, que hace todo esto)
+  (o directamente `bash scripts/setup.sh`, que además clona los repos de `external/`)
 
 ## Uso (dos terminales WSL)
 
@@ -62,7 +63,30 @@ bash scripts/sim.sh
 python scripts/00_read_lowstate.py        # ver telemetría en vivo
 python scripts/01_stand.py                # pararse y agacharse (control PD)
 python scripts/02_record_lowstate.py      # grabar datos a data/*.npz
+python scripts/03_walk_policy.py          # CAMINAR: policy RL + teleop (w/s/a/d/q/e, x=salir)
 ```
+
+### Policy de locomoción (03_walk_policy.py)
+
+Usa la policy pre-entrenada `robot_lab` de [rl_sar](https://github.com/fan-ziqi/rl_sar)
+(`external/rl_sar/policy/go2/robot_lab/policy.pt`, entrenada en IsaacLab; interfaz
+estándar: 45 obs → 12 objetivos de posición, 50 Hz, kp=20/kd=0.5). El script hace
+rampa a pose nominal → engancha la policy → teleop por teclado.
+
+| Tecla | Efecto | | Tecla | Efecto |
+|---|---|---|---|---|
+| `w` / `s` | vx ±0.1 m/s (adelante/atrás) | | `q` / `e` | vyaw ±0.1 rad/s (girar) |
+| `a` / `d` | vy ±0.1 m/s (de costado) | | `espacio` | comando (0,0,0) — frenar |
+| `x` | salir (deja el robot en amortiguación) | | `Ctrl+C` | ídem x |
+
+Sin teclado (corridas fijas / headless): `python scripts/03_walk_policy.py --cmd 0.4 0 0 --dur 10`.
+Flags: `--device cuda` (innecesario: CPU infiere en <1 ms), `--real IFACE` (robot real,
+libera el sport mode solo — ¡primero en arnés!).
+
+⚠️ Sim2sim gap visible: entrenada en IsaacLab y corriendo en MuJoCo, la policy
+camina y no se cae, pero deriva (avanza ~0.1 m/s con comando cero y tuerce en
+marcha). Corregible con el teleop; la solución de fondo es entrenar en el mismo
+motor (mjlab) o una policy más robusta (la variante `himloco` con historia).
 
 Después: [notebooks/01_explore_lowstate.ipynb](notebooks/01_explore_lowstate.ipynb)
 para graficar lo grabado (kernel = Python de `~/.venvs/go2` en WSL).
