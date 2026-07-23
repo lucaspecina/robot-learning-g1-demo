@@ -138,6 +138,57 @@ documento — corregirlo.
   suave, no tiene discontinuidades, e ignora el yaw (mirar al norte o al sur
   no cambia nada para el equilibrio).
 
+## Conectividad (cómo se habla todo)
+
+- **Bit y byte (las unidades de datos)**: el bit es un 0 o un 1 — el átomo de
+  la información. Un byte = 8 bits ≈ una letra de texto. La escalera: KB (mil
+  bytes ≈ media página de texto), MB (un millón ≈ una foto), GB (mil millones
+  ≈ una película). Anclas útiles: una frase ≈ 100 B · una foto ≈ 3 MB · el
+  modelo Whisper small ≈ 500 MB · un VLM de 7B cuantizado ≈ 4-5 GB.
+- **Mbps vs MB/s (la trampa clásica)**: las velocidades de red se miden en
+  megaBITS por segundo (Mbps); los archivos en megaBYTES (MB). Como 1 byte =
+  8 bits, para pasar de la velocidad de red a "cuántos MB por segundo bajo",
+  dividí por 8: 100 Mbps ≈ 12.5 MB/s.
+
+- **IP / subred**: la IP es la dirección de una compu en una red ("casa número
+  161"); la subred es la calle (192.168.123.x = todas las casas que empiezan
+  igual). Dos dispositivos se hablan directo solo si están en la misma calle.
+  El Go2 vive en la calle 192.168.123.x: el robot es .161, tu PC debe ponerse
+  .99, la Jetson de expansión suele ser .18.
+- **Switch**: un "zapatillón" de red: aparatito con varios enchufes ethernet
+  donde todo lo enchufado queda en la misma calle y se puede hablar entre sí.
+  El Go2 tiene uno ADENTRO del cuerpo — el puerto RJ45 de la panza es
+  simplemente un enchufe libre de ese switch interno.
+- **DHCP**: el "recepcionista" que reparte direcciones IP automáticamente.
+  Lo tienen los routers. Un cable directo PC↔robot NO tiene recepcionista —
+  por eso ahí tu IP la configurás a mano (estática).
+- **Ethernet (RJ45)**: red por cable. Rápida (1 Gbps), latencia bajísima
+  (<1 ms) y estable. La única opción seria para control de bajo nivel a
+  500 Hz. El Go2 tiene un puerto RJ45 para esto.
+- **AP vs station (WiFi)**: un dispositivo WiFi puede CREAR su propia red
+  (modo AP/hotspot — lo que hace el Go2 de fábrica para hablar con la app) o
+  UNIRSE a una red existente (modo station). WiFi sirve para telemetría,
+  video y comandos de alto nivel; para el loop de 500 Hz es ruleta (picos de
+  latencia y cortes).
+- **Puerto**: si la IP es la dirección del edificio, el puerto es el número
+  de departamento. Una misma compu puede tener muchos programas atendiendo a
+  la vez, cada uno en su puerto (un número: 8000, 8080...). "Mandar al
+  servidor" siempre significa, concretamente: mandar a IP:puerto, donde un
+  programa específico está escuchando.
+- **SSH**: terminal remota — abrís una consola de otra compu desde la tuya,
+  por la red. Es como se trabaja "adentro" de la Jetson sin conectarle
+  teclado ni monitor.
+- **Streaming de video**: la cámara no "manda fotos": comprime el video
+  (H.264) y lo emite como un mini-Twitch privado (~2-8 Mbps) que tu pantalla
+  decodifica. El Go2 lo hace vía GStreamer/WebRTC.
+- **VPN**: túnel cifrado por internet que te "teletransporta" a una red
+  lejana: tu notebook en tu casa aparece como una casa más en la calle del
+  lab, y podés hablar con el robot como si estuvieras ahí.
+- **Latencia vs ancho de banda**: cuánto TARDA un mensaje vs cuánto VOLUMEN
+  por segundo entra. La escalera típica: cable <1 ms · WiFi 2-20 ms (con
+  picos) · servidor en la misma red ~1 ms · nube 50-200 ms. Esta escalera es
+  la que decide qué parte de la inteligencia puede vivir dónde.
+
 ## Navegación (ir a lugares)
 
 - **Teleoperación (teleop)**: un humano mandando los comandos de velocidad en
