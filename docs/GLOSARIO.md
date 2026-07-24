@@ -181,6 +181,11 @@ documento — corregirlo.
 - **Streaming de video**: la cámara no "manda fotos": comprime el video
   (H.264) y lo emite como un mini-Twitch privado (~2-8 Mbps) que tu pantalla
   decodifica. El Go2 lo hace vía GStreamer/WebRTC.
+- **Túnel SSH (port forwarding)**: `ssh -L 8888:localhost:8888 usuario@vm`
+  hace que un puerto de la máquina remota aparezca como puerto TUYO local:
+  abrís `localhost:8888` en tu navegador y en realidad estás hablando con la
+  VM, viajando por dentro del ssh (cifrado incluido). Es la VPN de bolsillo
+  para UN puerto — así usamos Jupyter que corre en la nube.
 - **VPN**: túnel cifrado por internet que te "teletransporta" a una red
   lejana: tu notebook en tu casa aparece como una casa más en la calle del
   lab, y podés hablar con el robot como si estuvieras ahí.
