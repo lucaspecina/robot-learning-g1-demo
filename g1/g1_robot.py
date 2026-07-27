@@ -49,6 +49,9 @@ parser.add_argument("--payload_kg", type=float, default=0.0,
                     help="masa extra repartida entre las dos manos, para medir "
                          "cuanta carga tolera la locomocion (la policy de "
                          "Unitree fue entrenada con el robot vacio)")
+parser.add_argument("--scene", action="store_true",
+                    help="construir la habitacion de la demo (mesa, botella, "
+                         "reloj y dos personas)")
 parser.add_argument("--camera", action="store_true",
                     help="montar la camara de la cabeza y publicarla por ROS 2")
 parser.add_argument("--render_hz", type=float, default=20.0,
@@ -80,6 +83,7 @@ from std_msgs.msg import String as RosString
 
 sys.path.insert(0, _here)
 from arm_control import ARM_JOINTS, POSES, PoseArmController  # noqa: E402
+from demo_scene import build_demo_scene  # noqa: E402
 from g1_asset import make_g1_cfg  # noqa: E402
 from perception import CameraPublisher, make_camera_cfg  # noqa: E402
 from locomotion import (  # noqa: E402
@@ -177,6 +181,9 @@ def main():
     sim_utils.GroundPlaneCfg().func("/World/ground", sim_utils.GroundPlaneCfg())
     light = sim_utils.DomeLightCfg(intensity=2000.0)
     light.func("/World/light", light)
+
+    if args_cli.scene:
+        build_demo_scene()
 
     robot = Articulation(make_g1_cfg(cfg, model=args_cli.model))
 
