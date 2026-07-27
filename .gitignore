@@ -220,3 +220,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# assets generados (se regeneran con convert_urdf.py; pesan y son binarios)
+g1/assets/

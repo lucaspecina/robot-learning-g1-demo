@@ -1,0 +1,58 @@
+# Configuracion compartida de la locomocion del G1.
+#
+# Estos valores vienen de unitree_rl_gym (deploy/deploy_mujoco/configs/g1.yaml),
+# que es la referencia oficial de como se despliega la policy pre-entrenada.
+# Los usan DOS componentes distintos:
+#   - g1_rl_locomotion: para armar las observaciones y escalar las acciones
+#   - isaac_g1_backend: para las ganancias del control de articulaciones
+# Manteniendolos en un solo archivo evitamos que se desincronicen.
+
+# --- articulaciones que controla la policy (EN SU ORDEN EXACTO) ---
+# La policy fue entrenada con este orden; los nombres son los del modelo del
+# G1. El backend publica el estado CON nombres, asi que el mapeo se resuelve
+# por nombre y no por posicion: si el orden interno del simulador cambia, nada
+# se rompe.
+joint_names:
+  - left_hip_pitch_joint
+  - left_hip_roll_joint
+  - left_hip_yaw_joint
+  - left_knee_joint
+  - left_ankle_pitch_joint
+  - left_ankle_roll_joint
+  - right_hip_pitch_joint
+  - right_hip_roll_joint
+  - right_hip_yaw_joint
+  - right_knee_joint
+  - right_ankle_pitch_joint
+  - right_ankle_roll_joint
+
+# --- pose nominal (radianes), en el mismo orden ---
+# Es la postura de referencia: la policy no emite angulos absolutos sino
+# desviaciones respecto de esta pose.
+default_angles: [-0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
+                 -0.1, 0.0, 0.0, 0.3, -0.2, 0.0]
+
+# --- ganancias del control de articulacion, en el mismo orden ---
+# kp = rigidez (N.m/rad), kd = amortiguacion (N.m/(rad/s))
+kps: [100, 100, 100, 150, 40, 40, 100, 100, 100, 150, 40, 40]
+kds: [2, 2, 2, 4, 2, 2, 2, 2, 2, 4, 2, 2]
+
+# --- escalas de la interfaz de la policy ---
+# Cada entrada se normaliza antes de entrar a la red; estos factores son parte
+# del contrato con la policy entrenada y NO se tocan.
+ang_vel_scale: 0.25
+dof_pos_scale: 1.0
+dof_vel_scale: 0.05
+action_scale: 0.25
+cmd_scale: [2.0, 2.0, 0.25]
+
+# --- dimensiones y ritmo ---
+num_actions: 12
+num_obs: 47          # 3 vel.ang + 3 gravedad + 3 comando + 12 q + 12 dq + 12 accion + 2 fase
+control_dt: 0.02     # 50 Hz: cada cuanto decide la policy
+gait_period: 0.8     # segundos por ciclo de paso (alimenta la señal de fase)
+
+# --- limites de seguridad del comando de velocidad ---
+max_lin_vel: 0.8     # m/s
+max_ang_vel: 0.8     # rad/s
+cmd_timeout: 0.5     # s sin cmd_vel fresco -> comando a cero (watchdog)

@@ -19,8 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iputils-ping \
     curl \
+    python3-pip \
     python3-requests \
+    python3-numpy \
+    python3-yaml \
     && rm -rf /var/lib/apt/lists/*
+
+# PyTorch en version CPU: la policy de locomocion es una red chica (47 -> 12);
+# la CPU la resuelve en menos de un milisegundo y evitamos arrastrar CUDA.
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    torch --index-url https://download.pytorch.org/whl/cpu
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 

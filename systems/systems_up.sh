@@ -16,13 +16,19 @@ echo ">> Imagen de la jetson (build solo si cambio el Dockerfile)..."
 sudo docker build -q -t jetson-sim ./jetson
 
 echo ">> Red del wifi simulado..."
-sudo docker network create --subnet 172.30.0.0/16 robotnet 2>/dev/null \
-    && echo "   creada" || echo "   ya existia"
+if sudo docker network inspect robotnet >/dev/null 2>&1; then
+    echo "   ya existia"
+else
+    # Si la creacion falla (p.ej. otra red ocupa la misma subred) hay que
+    # enterarse: sin la red, los contenedores no arrancan.
+    sudo docker network create --subnet 172.30.0.0/16 robotnet >/dev/null
+    echo "   creada"
+fi
 
 echo ">> Contenedor jetson (2 CPU, 8 GB, red del host)..."
 if ! sudo docker ps --format '{{.Names}}' | grep -q '^jetson$'; then
     sudo docker rm -f jetson >/dev/null 2>&1 || true
-    sudo docker run -d --name jetson \
+    sudo docker run -d --restart unless-stopped --name jetson \
         --network host \
         --cpus=2 --memory=8g \
         --cap-add=NET_ADMIN \
@@ -36,7 +42,7 @@ fi
 echo ">> Contenedor server (red aparte, IP fija 172.30.0.20)..."
 if ! sudo docker ps --format '{{.Names}}' | grep -q '^server$'; then
     sudo docker rm -f server >/dev/null 2>&1 || true
-    sudo docker run -d --name server \
+    sudo docker run -d --restart unless-stopped --name server \
         --network robotnet --ip 172.30.0.20 \
         --cap-add=NET_ADMIN \
         -v /home/lucas/go2-lab/systems/server:/app -w /app \
