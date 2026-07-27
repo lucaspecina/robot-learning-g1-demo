@@ -59,6 +59,18 @@ mission)
     echo "seguila en el tablero, o con: bash run_demo.sh status"
     ;;
 
+reset)
+    # Devuelve el robot al punto de partida y reinicia las capas de arriba,
+    # para poder repetir la mision desde cero sin relanzar el simulador.
+    sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
+    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py" 2>/dev/null
+    sleep 2
+    lanzar "navegacion"  goto.log      skills/go_to.py
+    lanzar "percepcion"  detector.log  skills/detector.py
+    lanzar "agente"      agent.log     agent/agent.py
+    echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
+    ;;
+
 status)
     echo "== el robot =="
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
@@ -81,5 +93,5 @@ down)
     echo "capas de arriba detenidas (el robot sigue)"
     ;;
 
-*) echo "uso: $0 {up|mission [texto]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|mission [texto]|reset|status|down}"; exit 1;;
 esac

@@ -54,6 +54,11 @@ parser.add_argument("--scene", action="store_true",
                          "reloj y dos personas)")
 parser.add_argument("--camera", action="store_true",
                     help="montar la camara de la cabeza y publicarla por ROS 2")
+parser.add_argument("--camera_hz", type=float, default=3.0,
+                    help="imagenes por segundo de la camara del robot. Cada una "
+                         "cuesta un render completo: bajarla de 10 a 3 recupera "
+                         "casi un tercio de la velocidad de simulacion, y a la "
+                         "percepcion le alcanza de sobra")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
 AppLauncher.add_app_launcher_args(parser)
@@ -108,11 +113,17 @@ class G1RobotNode(Node):
         self.last_cmd_time = 0.0
 
         self.arm_pose_request = None   # lo lee el lazo principal
+        self.reset_request = False     # idem
 
         self.pub_state = self.create_publisher(JointState, "/g1/joint_states", 10)
         self.pub_odom = self.create_publisher(Odometry, "/g1/odom", 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)
+        self.create_subscription(RosString, "/g1/reset", self.on_reset, 10)
+
+    def on_reset(self, msg: RosString):
+        """Pide devolver el robot al punto de partida."""
+        self.reset_request = True
 
     def on_arm_pose(self, msg: RosString):
         """Pide una pose de brazos por nombre: reposo | listo | transporte."""
@@ -178,7 +189,18 @@ def main():
     # --- escena ---
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=physics_dt, device=args_cli.device))
     sim.set_camera_view(eye=(2.5, 2.5, 1.8), target=(0.0, 0.0, 0.8))
-    sim_utils.GroundPlaneCfg().func("/World/ground", sim_utils.GroundPlaneCfg())
+    # Piso con la MISMA friccion que el simulador donde Unitree valida la
+    # policy. IsaacLab trae 0.5 por defecto; MuJoCo usa 1.0. Con la mitad de
+    # agarre los pies patinan, y el robot deriva varios centimetros por segundo
+    # aunque el comando sea cero. La policy no aprendio a caminar sobre hielo.
+    suelo = sim_utils.GroundPlaneCfg(
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        )
+    )
+    suelo.func("/World/ground", suelo)
     light = sim_utils.DomeLightCfg(intensity=2000.0)
     light.func("/World/light", light)
 
@@ -191,7 +213,7 @@ def main():
     camera = None
     if args_cli.camera:
         from isaaclab.sensors import Camera
-        camera = Camera(make_camera_cfg(update_period=0.1))
+        camera = Camera(make_camera_cfg(update_period=1.0 / args_cli.camera_hz))
 
     sim.reset()
     print(f"[robot] articulaciones del modelo: {robot.num_joints} "
@@ -292,6 +314,24 @@ def main():
                                   device=args_cli.device).unsqueeze(0)
             robot.set_joint_position_target(target, joint_ids=sim_ids)
 
+            # Reinicio: devolver el robot al punto de partida, de pie y quieto.
+            # Sirve para repetir la mision desde cero sin relanzar el simulador
+            # (que tarda un minuto en arrancar).
+            if node.reset_request:
+                node.reset_request = False
+                robot.write_root_pose_to_sim(robot.data.default_root_state[:, :7])
+                robot.write_root_velocity_to_sim(torch.zeros_like(
+                    robot.data.default_root_state[:, 7:]))
+                joint_pos = robot.data.default_joint_pos.clone()
+                joint_pos[0, sim_ids] = default_angles
+                robot.write_joint_state_to_sim(joint_pos,
+                                               torch.zeros_like(robot.data.default_joint_vel))
+                robot.reset()
+                controller.reset()
+                if arms is not None:
+                    arms.set_pose("reposo")
+                print("\n[robot] reiniciado en el punto de partida", flush=True)
+
             # Los brazos, en paralelo: su propio controlador, sus propias
             # articulaciones. La locomocion no se entera.
             if arms is not None:
@@ -331,6 +371,16 @@ def main():
             if cam_pub is not None:
                 cam_pub.publish()
             rclpy.spin_once(node, timeout_sec=0.0)
+
+        # --- la camara del visor sigue al robot ---
+        # Sin esto se va de cuadro apenas camina unos metros. Se recoloca
+        # pocas veces por segundo: mover la camara es barato pero no gratis.
+        if step % (steps_per_control * 5) == 0:
+            p = robot.data.root_pos_w[0].cpu().numpy()
+            sim.set_camera_view(
+                eye=(float(p[0]) - 3.0, float(p[1]) - 3.0, float(p[2]) + 1.5),
+                target=(float(p[0]), float(p[1]), float(p[2])),
+            )
 
         # --- telemetria: cuanto tarda el simulador vs el tiempo real ---
         if step % 500 == 0:

@@ -34,6 +34,8 @@ from std_msgs.msg import String
 
 # --- parametros de navegacion ---
 TOLERANCIA_M = 0.35        # a esta distancia del objetivo damos por llegado
+DERIVA_MAX_M = 0.25        # si se aleja mas que esto del punto donde debe estar,
+                           # lo traemos de vuelta (ver "mantener posicion")
 TOLERANCIA_RAD = 0.25      # error de rumbo tolerado antes de empezar a avanzar
 VEL_LINEAL = 0.3           # m/s de crucero
 VEL_ANGULAR = 0.5          # rad/s al girar
@@ -55,6 +57,7 @@ class GoTo(Node):
         super().__init__("go_to")
         self.pose = None            # (x, y, yaw) del robot
         self.goal = None            # (x, y) objetivo
+        self.anclaje = None         # donde tiene que quedarse cuando no hay objetivo
 
         self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
         self.pub_status = self.create_publisher(String, "/g1/nav_status", 10)
@@ -79,9 +82,39 @@ class GoTo(Node):
     def frenar(self):
         self.pub_cmd.publish(Twist())
 
+    def mantener_posicion(self):
+        """Corrige la deriva: si se alejo del anclaje, lo trae de vuelta."""
+        x, y, yaw = self.pose
+        ax, ay = self.anclaje
+        dx, dy = ax - x, ay - y
+        error = math.hypot(dx, dy)
+
+        if error < DERIVA_MAX_M:
+            self.frenar()
+            return
+
+        # Correccion suave: caminar despacio hacia el punto, sin girar el cuerpo
+        # (el robot puede desplazarse de costado, asi no pierde su orientacion).
+        rumbo = normalizar(math.atan2(dy, dx) - yaw)
+        cmd = Twist()
+        cmd.linear.x = 0.15 * math.cos(rumbo)
+        cmd.linear.y = 0.15 * math.sin(rumbo)
+        self.pub_cmd.publish(cmd)
+
     def tick(self):
         """Un ciclo de navegacion: mirar donde estoy, decidir, mandar velocidad."""
-        if self.goal is None or self.pose is None:
+        if self.pose is None:
+            return
+
+        # Sin objetivo: mantener la posicion. La policy de locomocion, con
+        # comando cero, no queda perfectamente quieta — deriva unos centimetros
+        # por segundo porque sigue su ciclo de paso y los pies patinan. Ninguna
+        # policy es perfecta en esto, y el robot real tampoco lo es. La solucion
+        # no es pedirle mas a la locomocion sino ponerle realimentacion de
+        # posicion encima: si se corrio, se le ordena volver.
+        if self.goal is None:
+            if self.anclaje is not None:
+                self.mantener_posicion()
             return
 
         x, y, yaw = self.pose
@@ -95,6 +128,7 @@ class GoTo(Node):
             self.get_logger().info(f"llegue: quede a {distancia:.2f} m del objetivo")
             self.publicar_estado("llegue")
             self.goal = None
+            self.anclaje = (x, y)     # de aca en mas, quedarse en este punto
             return
 
         # Error de rumbo: cuanto tengo que girar para apuntar al objetivo.
