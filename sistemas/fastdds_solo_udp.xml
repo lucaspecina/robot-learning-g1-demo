@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fuerza a FastDDS (el motor de mensajeria que usa ROS 2) a mandar TODO por red
+  UDP, desactivando el atajo de memoria compartida.
+
+  Por que: memoria compartida solo funciona entre procesos de la MISMA maquina y
+  el mismo espacio de nombres. Un contenedor tiene el suyo propio, asi que el
+  atajo falla en silencio: el descubrimiento (que va por red) funciona y se ven
+  los topics, pero los datos nunca llegan.
+
+  Y ademas es lo REALISTA: en el robot de verdad, la Jetson y la computadora de
+  control son maquinas distintas conectadas por cable. Nunca comparten memoria.
+  Todo su trafico es de red, con su latencia y su posibilidad de perderse.
+
+  Se activa con la variable de entorno:
+      export FASTDDS_DEFAULT_PROFILES_FILE=/ruta/a/fastdds_solo_udp.xml
+  y hay que aplicarla en LOS DOS extremos (el simulador y el contenedor).
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <profiles>
+        <transport_descriptors>
+            <transport_descriptor>
+                <transport_id>udp_solo</transport_id>
+                <type>UDPv4</type>
+            </transport_descriptor>
+        </transport_descriptors>
+
+        <participant profile_name="participante_solo_udp" is_default_profile="true">
+            <rtps>
+                <userTransports>
+                    <transport_id>udp_solo</transport_id>
+                </userTransports>
+                <!-- false = no agregar los transportes por defecto (que incluyen
+                     memoria compartida); usar solo el que declaramos arriba -->
+                <useBuiltinTransports>false</useBuiltinTransports>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
