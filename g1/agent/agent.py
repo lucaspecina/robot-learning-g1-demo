@@ -31,10 +31,16 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 
-# El mapa semantico: lo que el robot ya sabe donde esta.
+# El mapa semantico: donde PARARSE para usar cada cosa.
+#
+# Ojo con esto, que es un error facil de cometer: los destinos de navegacion no
+# son las coordenadas del objeto sino POSES DE APROXIMACION — el lugar desde el
+# cual el robot puede usarlo. Si el destino fuera el centro de la mesa, el robot
+# caminaria contra el mueble, quedaria trabado a medio metro y la navegacion
+# nunca daria por cumplido el objetivo (nos paso).
 SEMANTIC_MAP = {
-    "mesa": (3.0, 0.0),
-    "reloj": (0.0, 2.5),
+    "mesa": (1.8, 0.0),     # 1.2 m delante de la mesa, que esta en (3.0, 0.0)
+    "reloj": (0.8, 1.8),    # a unos pasos del reloj, que esta en (0.0, 2.5)
 }
 
 # El catalogo de skills: lo que el robot sabe hacer. Esto es, literalmente, lo
