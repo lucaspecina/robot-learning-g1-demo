@@ -40,10 +40,10 @@ bash scripts/lab_down.sh    # cierra todo y desasigna la VM (deja de facturar)
 - **La notebook** [03_ros2_observatory.ipynb](notebooks/03_ros2_observatory.ipynb):
   hablarle al robot desde un kernel en la VM — censo de topics, odometría,
   comandos, un mini-navegador y la cámara. Su celda 0 es el manual de arranque.
-- **Los sistemas simulados** ([sistemas/](sistemas/)): la "Jetson" (contenedor
+- **Los sistemas simulados** ([systems/](systems/)): la "Jetson" (contenedor
   con ROS 2, 2 CPU / 8 GB, CycloneDDS — ver el porqué en su Dockerfile) y el
-  "servidor" (contenedor en red aparte), con el enlace entre ellos degradable
-  a perfiles de wifi reales (`red_degradar.sh`). Curva medida: red limpia
+  "server" (contenedor en red aparte), con el enlace entre ellos degradable
+  a perfiles de wifi reales (`degrade_network.sh`). Curva medida: red limpia
   ~2 ms; wifi normal ~43 ms; wifi malo ~190 ms con picos de 1.3 s por
   retransmisiones TCP; corte 100% pérdida.
 
@@ -164,11 +164,14 @@ Tip del viewer de MuJoCo: Ctrl+click derecho y arrastrar aplica fuerzas al robot
 
 ```
 docs/        contexto: simuladores, ecosistema DDS, arquitectura, GLOSARIO
-sistemas/    fase 2: la jetson y el servidor simulados + degradador de wifi
+systems/    fase 2: la jetson y el servidor simulados + degradador de wifi
 external/    clones (gitignored): unitree_mujoco, unitree_sdk2_python
 scripts/     fase 1: loops de control · fase 2: lab_up.sh / lab_down.sh
 notebooks/   fase 1: datos grabados · fase 2: 03_ros2_observatory (kernel en VM)
 data/        grabaciones .npz (gitignored)
+
+Convención: nombres de archivos, carpetas e identificadores en inglés;
+comentarios, documentación y notas en español.
 ```
 
 ### Contra el robot real (cuando toque)
