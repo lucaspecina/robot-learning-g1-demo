@@ -45,6 +45,10 @@ parser.add_argument("--settle_s", type=float, default=0.0,
 parser.add_argument("--model", default="12dof", choices=["12dof", "29dof"],
                     help="cuerpo del robot: 12dof (el que la policy conoce) o "
                          "29dof (con brazos, el que necesita la demo)")
+parser.add_argument("--payload_kg", type=float, default=0.0,
+                    help="masa extra repartida entre las dos manos, para medir "
+                         "cuanta carga tolera la locomocion (la policy de "
+                         "Unitree fue entrenada con el robot vacio)")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
 AppLauncher.add_app_launcher_args(parser)
@@ -224,6 +228,18 @@ def main():
         print(f"[robot] brazos: {len(ARM_JOINTS)} articulaciones, pose inicial reposo", flush=True)
     else:
         arm_ids, arms = None, None
+
+    # --- carga en las manos (para medir cuanto tolera la locomocion) ---
+    if args_cli.payload_kg > 0 and tiene_brazos:
+        manos = [i for i, n in enumerate(robot.body_names) if "rubber_hand" in n]
+        if manos:
+            masas = robot.root_physx_view.get_masses()
+            extra = args_cli.payload_kg / len(manos)
+            for i in manos:
+                masas[0, i] += extra
+            robot.root_physx_view.set_masses(masas, torch.arange(1))
+            print(f"[robot] carga: {args_cli.payload_kg:.2f} kg repartidos en "
+                  f"{len(manos)} manos ({extra:.2f} kg c/u)", flush=True)
 
     rclpy.init()
     node = G1RobotNode(cfg)
