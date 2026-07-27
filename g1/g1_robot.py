@@ -49,6 +49,8 @@ parser.add_argument("--payload_kg", type=float, default=0.0,
                     help="masa extra repartida entre las dos manos, para medir "
                          "cuanta carga tolera la locomocion (la policy de "
                          "Unitree fue entrenada con el robot vacio)")
+parser.add_argument("--camera", action="store_true",
+                    help="montar la camara de la cabeza y publicarla por ROS 2")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
 AppLauncher.add_app_launcher_args(parser)
@@ -79,6 +81,7 @@ from std_msgs.msg import String as RosString
 sys.path.insert(0, _here)
 from arm_control import ARM_JOINTS, POSES, PoseArmController  # noqa: E402
 from g1_asset import make_g1_cfg  # noqa: E402
+from perception import CameraPublisher, make_camera_cfg  # noqa: E402
 from locomotion import (  # noqa: E402
     LocomotionState,
     RLPolicyLocomotion,
@@ -176,6 +179,13 @@ def main():
     light.func("/World/light", light)
 
     robot = Articulation(make_g1_cfg(cfg, model=args_cli.model))
+
+    # Los ojos: se crean con la escena, antes del reset.
+    camera = None
+    if args_cli.camera:
+        from isaaclab.sensors import Camera
+        camera = Camera(make_camera_cfg(update_period=0.1))
+
     sim.reset()
     print(f"[robot] articulaciones del modelo: {robot.num_joints} "
           f"({', '.join(robot.joint_names[:3])}...)", flush=True)
@@ -243,6 +253,9 @@ def main():
 
     rclpy.init()
     node = G1RobotNode(cfg)
+    cam_pub = CameraPublisher(node, camera) if camera is not None else None
+    if cam_pub is not None:
+        print("[robot] camara de cabeza publicando en /g1/head_cam/image", flush=True)
 
     # El robot arranca sosteniendo la pose nominal: la policy necesita partir
     # de una postura que conozca, no de una arbitraria.
@@ -296,6 +309,9 @@ def main():
         step += 1
 
         # --- publicar estado y atender ROS (al ritmo del control) ---
+        if camera is not None:
+            camera.update(physics_dt)
+
         if step % steps_per_control == 0:
             node.publish(
                 robot.data.joint_pos[0, sim_ids].cpu().numpy(),
@@ -305,6 +321,8 @@ def main():
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
             )
+            if cam_pub is not None:
+                cam_pub.publish()
             rclpy.spin_once(node, timeout_sec=0.0)
 
         # --- telemetria: cuanto tarda el simulador vs el tiempo real ---
