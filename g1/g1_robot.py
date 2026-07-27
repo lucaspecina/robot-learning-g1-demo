@@ -70,8 +70,10 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState
 from nav_msgs.msg import Odometry
+from std_msgs.msg import String as RosString
 
 sys.path.insert(0, _here)
+from arm_control import ARM_JOINTS, POSES, PoseArmController  # noqa: E402
 from g1_asset import make_g1_cfg  # noqa: E402
 from locomotion import (  # noqa: E402
     LocomotionState,
@@ -94,9 +96,16 @@ class G1RobotNode(Node):
         self.command = np.zeros(3, dtype=np.float32)
         self.last_cmd_time = 0.0
 
+        self.arm_pose_request = None   # lo lee el lazo principal
+
         self.pub_state = self.create_publisher(JointState, "/g1/joint_states", 10)
         self.pub_odom = self.create_publisher(Odometry, "/g1/odom", 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
+        self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)
+
+    def on_arm_pose(self, msg: RosString):
+        """Pide una pose de brazos por nombre: reposo | listo | transporte."""
+        self.arm_pose_request = msg.data.strip()
 
     def on_cmd_vel(self, msg: Twist):
         self.command = np.array([
@@ -207,6 +216,15 @@ def main():
         controller = StandStillLocomotion(cfg)
         print("[robot] locomocion: solo pararse (sin policy)", flush=True)
 
+    # --- control de brazos (solo en el cuerpo que los tiene) ---
+    tiene_brazos = args_cli.model != "12dof"
+    if tiene_brazos:
+        arm_ids = [robot.joint_names.index(n) for n in ARM_JOINTS]
+        arms = PoseArmController()
+        print(f"[robot] brazos: {len(ARM_JOINTS)} articulaciones, pose inicial reposo", flush=True)
+    else:
+        arm_ids, arms = None, None
+
     rclpy.init()
     node = G1RobotNode(cfg)
 
@@ -237,6 +255,20 @@ def main():
             target = torch.tensor(objetivo, dtype=torch.float32,
                                   device=args_cli.device).unsqueeze(0)
             robot.set_joint_position_target(target, joint_ids=sim_ids)
+
+            # Los brazos, en paralelo: su propio controlador, sus propias
+            # articulaciones. La locomocion no se entera.
+            if arms is not None:
+                if node.arm_pose_request is not None:
+                    try:
+                        arms.set_pose(node.arm_pose_request)
+                        print(f"\n[robot] brazos -> pose '{node.arm_pose_request}'", flush=True)
+                    except ValueError as e:
+                        print(f"\n[robot] brazos: {e}", flush=True)
+                    node.arm_pose_request = None
+                arm_target = torch.tensor(arms.compute(control_dt), dtype=torch.float32,
+                                          device=args_cli.device).unsqueeze(0)
+                robot.set_joint_position_target(arm_target, joint_ids=arm_ids)
 
         # --- avanzar la fisica ---
         # render=False en la mayoria de los pasos: dibujar la escena cuesta
