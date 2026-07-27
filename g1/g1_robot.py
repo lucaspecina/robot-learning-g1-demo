@@ -42,6 +42,9 @@ parser.add_argument("--policy", default=None, help="motion.pt; si falta, modo so
 parser.add_argument("--settle_s", type=float, default=0.0,
                     help="segundos con las piernas rigidas antes de soltar la policy; "
                          "en un bipedo conviene 0: rigido se cae, la policy es quien lo para")
+parser.add_argument("--model", default="12dof", choices=["12dof", "29dof"],
+                    help="cuerpo del robot: 12dof (el que la policy conoce) o "
+                         "29dof (con brazos, el que necesita la demo)")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
 AppLauncher.add_app_launcher_args(parser)
@@ -69,7 +72,7 @@ from sensor_msgs.msg import JointState
 from nav_msgs.msg import Odometry
 
 sys.path.insert(0, _here)
-from g1_asset import make_g1_12dof_cfg  # noqa: E402
+from g1_asset import make_g1_cfg  # noqa: E402
 from locomotion import (  # noqa: E402
     LocomotionState,
     RLPolicyLocomotion,
@@ -159,8 +162,7 @@ def main():
     light = sim_utils.DomeLightCfg(intensity=2000.0)
     light.func("/World/light", light)
 
-    # El robot que la policy conoce: el G1 de 12 articulaciones de Unitree.
-    robot = Articulation(make_g1_12dof_cfg(cfg))
+    robot = Articulation(make_g1_cfg(cfg, model=args_cli.model))
     sim.reset()
     print(f"[robot] articulaciones del modelo: {robot.num_joints} "
           f"({', '.join(robot.joint_names[:3])}...)", flush=True)
