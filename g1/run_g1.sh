@@ -49,9 +49,21 @@ case "$EXTRA" in
     *--camera*) ARGS="$ARGS --enable_cameras" ;;
 esac
 
+# Modo de video: con "--visible" transmite la escena al cliente de Isaac; por
+# defecto corre sin dibujar la ventana (mas rapido, para pruebas automaticas).
+MODO_VIDEO="--headless"
+case "$EXTRA" in
+    *--visible*)
+        IP_PUBLICA=$(curl -s --max-time 5 https://api.ipify.org)
+        MODO_VIDEO="--livestream 2 --/app/livestream/publicEndpointAddress=$IP_PUBLICA"
+        ARGS="${ARGS//--visible/}"
+        echo "video: transmitiendo a $IP_PUBLICA (conectate con el cliente de Isaac)"
+        ;;
+esac
+
 cd ~/go2-lab/g1 || exit 1
 source ~/go2-lab/isaac_ros_env.sh
-setsid nohup ~/go2-lab/IsaacLab/isaaclab.sh -p g1_robot.py --headless $ARGS \
+setsid nohup ~/go2-lab/IsaacLab/isaaclab.sh -p g1_robot.py $MODO_VIDEO $ARGS \
     > "$LOG" 2>&1 < /dev/null &
 echo "lanzado: modo=$MODE modelo=$MODEL carga=${PAYLOAD}kg ${EXTRA}"
 echo "seguir con: bash run_g1.sh status"
