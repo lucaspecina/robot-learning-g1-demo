@@ -4,7 +4,7 @@ El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 
 ```bash
 # el robot (necesita GPU: corre Isaac)
-bash run_g1.sh policy 29dof 0 "--camera --scene"
+bash run_g1.sh wbc 29dof 0 "--camera --scene"
 
 # las capas de arriba (dentro del contenedor jetson)
 python3 mobility_authority.py  # único dueño de /cmd_vel
@@ -18,15 +18,19 @@ ros2 topic pub --once /g1/mission std_msgs/msg/String \
   "{data: fijate la hora en el reloj y llevale la botella a quien corresponda}"
 ```
 
+El lanzador requiere WBC-AGILE en `~/go2-lab/WBC-AGILE` y verifica el commit
+`7259792cf10803aab814d101134d493d24c8f22f`. Una versión distinta no arranca
+hasta volver a pasar las pruebas físicas.
+
 ## Qué funciona hoy
 
 | Pieza | Estado |
 |---|---|
-| Locomoción (camina, gira) | funciona — policy pre-entrenada de Unitree |
-| Cuerpo con brazos (29 articulaciones) | funciona — camina igual que sin brazos |
+| Locomoción (camina, gira) | funciona — conjunto NVIDIA AGILE verificado |
+| Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
-| Carga en las manos | hasta ~1 kg cómodo, 3 kg al límite |
-| Cámara de cabeza | funciona — `/g1/head_cam/image`, 15 Hz |
+| Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
+| Cámara de cabeza | funciona — `/g1/head_cam/image`, 3 Hz simulados |
 | Percepción por color | funciona — `/g1/detections` |
 | Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
 | Agente con plan y decisión | funciona — 8 de 10 pasos de la misión |
@@ -97,7 +101,7 @@ por un modelo de lenguaje, el robot simulado por el real.
 | Archivo | Qué hace |
 |---|---|
 | `g1_robot.py` | el robot: física, locomoción, brazos, cámara. Un proceso, lazo cerrado |
-| `locomotion.py` | controladores de locomoción intercambiables (policy RL / solo pararse) |
+| `locomotion.py` | controladores intercambiables (NVIDIA AGILE / anterior / diagnóstico) |
 | `arm_control.py` | control de brazos por poses con nombre |
 | `perception.py` | la cámara de la cabeza y su publicación |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
@@ -111,18 +115,15 @@ por un modelo de lenguaje, el robot simulado por el real.
 
 ## Lo que costó acertar (para no repetirlo)
 
-**El robot tiene que ser el que la policy conoce.** La policy de Unitree fue
-entrenada sobre el G1 de 12 articulaciones (32 kg, brazos soldados). Puesta en
-otro cuerpo se cae, y ningún ajuste de ganancias lo arregla. El modelo se
-convierte del URDF original con `IsaacLab/scripts/tools/convert_urdf.py`.
+**Cuerpo, motores, entradas y policy forman un conjunto.** Mezclar la policy
+anterior del G1 simplificado con nuestro cuerpo convertido producía unos
+`9 cm/s` de deriva. La base actual importa desde NVIDIA AGILE el G1 oficial,
+sus motores simulados, el descriptor de 80 entradas y la policy recurrente.
+Copiar solamente un `.pt` volvería a repetir el error.
 
-**La cintura va rígida en el cuerpo de 29.** En el modelo de 12 la cintura no
-existe. Si en el de 29 se bambolea, el torso se mueve y la policy —que solo
-controla piernas— no tiene con qué compensarlo: con la cintura blanda el robot
-termina en el piso.
-
-**Física a 500 Hz.** Con pasos más gruesos los contactos pie-piso se integran
-mal. Misma lección que el temblor del Go2, peor en un bípedo.
+**Física a 200 Hz y control a 50 Hz.** Son las frecuencias ejecutables de la
+policy de altura y velocidad elegida en AGILE. Se conserva la configuración
+oficial aunque comentarios antiguos de ese repositorio mencionen 500 Hz.
 
 **Escribir el estado inicial explícitamente** después de crear la escena, o el
 articulado nace colapsado.
@@ -149,12 +150,11 @@ fondo es el reloj simulado de ROS 2 (`/clock` + `use_sim_time`).
 
 ## Lo siguiente
 
-1. **Reducir la deriva física**: explicar y cerrar la brecha Isaac–MuJoCo sin
-   esconderla con `stand_hold.py`.
-2. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+1. **Mirar las pruebas por video** y relacionar las métricas con el movimiento.
+2. **Rediseñar `transporte`**: quieto es estable, pero caminando sesga el rumbo;
+   probar una postura más cercana a neutral y luego la escalera de cargas.
+3. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-3. **Que la cámara vea la mesa**: inclinarla hacia abajo o acercar la pose de
-   aproximación. Sin eso no hay nada que agarrar.
 4. **`buscar_persona` de verdad**: girar en el lugar hasta tener a la persona
    en el centro de la imagen, en vez de esperar pasivamente.
 5. **El agarre** con un VLA entrenado por nosotros.

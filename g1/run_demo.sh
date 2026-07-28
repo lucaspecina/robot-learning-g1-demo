@@ -65,10 +65,10 @@ case "${1:-up}" in
 up)
     preflight
     echo ">> El robot (Isaac, ~1 min de arranque)..."
-    bash ~/go2-lab/g1/run_g1.sh policy 29dof 0 "--camera --scene --visible" | tail -1
+    bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 "--camera --scene --visible" | tail -1
 
     echo ">> Esperando a que el robot este en pie..."
-    until tr '\r' '\n' < ~/g1.log 2>/dev/null | grep -q "RTF"; do
+    until tr '\r' '\n' < ~/g1.log 2>/dev/null | grep -q "LISTO:"; do
         pgrep -f "g1_robot.p[y]" >/dev/null || { echo "   el robot no arranco"; exit 1; }
         sleep 5
     done

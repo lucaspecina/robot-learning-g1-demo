@@ -82,11 +82,15 @@ class CameraPublisher:
         self.pub = node.create_publisher(ImageMsg, topic, 1)
         self.node = node
         self.frames = 0
+        self.last_camera_frame = -1
 
     def publish(self):
         """Publica el ultimo cuadro disponible. Silencioso si todavia no hay."""
         datos = self.camera.data.output.get("rgb")
         if datos is None or datos.shape[0] == 0:
+            return False
+        camera_frame = int(self.camera.frame[0].item())
+        if camera_frame == self.last_camera_frame:
             return False
 
         img = datos[0]                        # primer (unico) robot
@@ -106,4 +110,5 @@ class CameraPublisher:
         msg.data = img.tobytes()
         self.pub.publish(msg)
         self.frames += 1
+        self.last_camera_frame = camera_frame
         return True

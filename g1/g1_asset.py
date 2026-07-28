@@ -49,24 +49,72 @@ WAIST_STIFFNESS = 800.0
 WAIST_DAMPING = 40.0
 
 
-def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -> ArticulationCfg:
+def rated_leg_effort_limits(joint_names) -> dict:
+    """Límites de par del URDF usado por Unitree, por articulación."""
+    limits = {}
+    for name in joint_names:
+        if "ankle" in name:
+            limits[name] = 50.0
+        elif "hip_roll" in name or "knee" in name:
+            limits[name] = 139.0
+        else:
+            limits[name] = 88.0
+    return limits
+
+
+def rated_leg_velocity_limits(joint_names) -> dict:
+    """Velocidades nominales del URDF; en PhysX actúan como freno duro."""
+    limits = {}
+    for name in joint_names:
+        if "ankle" in name:
+            limits[name] = 37.0
+        elif "hip_roll" in name or "knee" in name:
+            limits[name] = 20.0
+        else:
+            limits[name] = 32.0
+    return limits
+
+
+def make_g1_cfg(
+    cfg: dict,
+    model: str = "12dof",
+    prim_path: str = "/World/G1",
+    leg_effort_mode: str = "wide",
+    leg_velocity_mode: str = "wide",
+    solver_position_iterations: int = 8,
+    solver_velocity_iterations: int = 4,
+) -> ArticulationCfg:
     """Arma la configuracion del robot a partir del yaml de locomocion.
 
     model: "12dof" (el cuerpo que la policy conoce) o "29dof" (con brazos).
     """
     if model not in MODELS:
         raise ValueError(f"modelo desconocido: {model}. Opciones: {list(MODELS)}")
+    if leg_effort_mode not in ("wide", "rated"):
+        raise ValueError(f"límite de fuerza desconocido: {leg_effort_mode}")
+    if leg_velocity_mode not in ("wide", "rated"):
+        raise ValueError(f"límite de velocidad desconocido: {leg_velocity_mode}")
 
     leg_names = cfg["joint_names"]
     leg_angles = cfg["default_angles"]
     kps = cfg["kps"]
     kds = cfg["kds"]
+    effort_limits = (
+        300.0
+        if leg_effort_mode == "wide"
+        else rated_leg_effort_limits(leg_names)
+    )
+    velocity_limits = (
+        100.0
+        if leg_velocity_mode == "wide"
+        else rated_leg_velocity_limits(leg_names)
+    )
 
     actuadores = {
         "legs": ImplicitActuatorCfg(
             joint_names_expr=list(leg_names),
-            effort_limit_sim=300.0,
-            velocity_limit_sim=100.0,
+            effort_limit_sim=effort_limits,
+            velocity_limit_sim=velocity_limits,
             stiffness={n: float(k) for n, k in zip(leg_names, kps)},
             damping={n: float(d) for n, d in zip(leg_names, kds)},
             armature=0.01,
@@ -109,8 +157,8 @@ def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                 enabled_self_collisions=False,
-                solver_position_iteration_count=8,
-                solver_velocity_iteration_count=4,
+                solver_position_iteration_count=solver_position_iterations,
+                solver_velocity_iteration_count=solver_velocity_iterations,
             ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
@@ -127,6 +175,24 @@ def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -
         soft_joint_pos_limit_factor=0.9,
         actuators=actuadores,
     )
+
+
+def make_wbc_agile_g1_cfg(prim_path: str = "/World/G1") -> ArticulationCfg:
+    """Devuelve el G1 exacto con el que NVIDIA entrenó WBC-AGILE.
+
+    La configuración se importa desde una versión fijada del repositorio
+    oficial. Duplicarla aquí convertiría futuras correcciones de NVIDIA en
+    diferencias invisibles de cuerpo, motores o límites.
+    """
+    try:
+        from agile.rl_env.assets.robots.unitree_g1 import G1_29DOF
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "no se encontró WBC-AGILE; ejecutá el robot mediante run_g1.sh "
+            "para cargar la dependencia oficial fijada"
+        ) from error
+
+    return G1_29DOF.replace(prim_path=prim_path)
 
 
 # Compatibilidad con el nombre anterior

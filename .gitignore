@@ -223,3 +223,6 @@ __marimo__/
 
 # assets generados (se regeneran con convert_urdf.py; pesan y son binarios)
 g1/assets/
+
+# telemetría cruda de Isaac; los resultados resumidos viven en la documentación
+g1/tools/wbc_*.csv

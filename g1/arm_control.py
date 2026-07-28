@@ -11,11 +11,12 @@ Igual que la locomocion, es una clase con interfaz fija para poder cambiarla:
     controller.set_pose(nombre)          # ir a una pose con nombre
     targets = controller.compute(dt)     # angulos objetivo de los 14 brazos
 
-Empezamos con poses predefinidas e interpolacion suave entre ellas. Es
-suficiente para la demo (llevar los brazos a "listo para agarrar", cerrar sobre
-un objeto, pasar a "transporte") y no necesita entrenamiento. El paso siguiente
-—apuntar la mano a un punto del espacio calculado por la camara— es cinematica
-inversa, y se agrega como otra implementacion de esta misma interfaz.
+Empezamos con poses predefinidas e interpolacion suave entre ellas. Esto sólo
+prepara los brazos y permite medir la locomoción con distintas distribuciones
+de peso. Todavía no alcanza para agarrar: falta llevar la mano a la posición
+medida del objeto y controlar los dedos. El primer paso se puede resolver con
+cinemática inversa —calcular los ángulos que colocan la mano en un punto— y el
+agarre completo se agregará como otra implementación de esta misma interfaz.
 
 Por que interpolar en vez de saltar al objetivo: un movimiento brusco del brazo
 corre el centro de masa de golpe, y las piernas —que no saben que el brazo se
@@ -39,8 +40,8 @@ ARM_JOINTS = [
 POSES = {
     "reposo": np.zeros(14, dtype=np.float32),
 
-    # Brazos adelante, codos flexionados: la postura desde la que se alcanza
-    # un objeto sobre una mesa.
+    # Esta pose sólo deja los brazos preparados; la posición exacta de la mano
+    # dependerá de dónde mida la cámara que está el objeto.
     "listo": np.array([
         0.35, 0.16, 0.0, 0.87, 0.0, 0.0, 0.0,      # izquierdo
         0.35, -0.16, 0.0, 0.87, 0.0, 0.0, 0.0,     # derecho
