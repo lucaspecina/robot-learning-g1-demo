@@ -15,7 +15,7 @@ set -uo pipefail
 D=/workspace/g1          # ruta dentro del contenedor jetson
 ROS="source /opt/ros/jazzy/setup.bash"
 
-lanzar() {   # nombre archivo_log script
+launch() {   # nombre archivo_log script
     sudo docker exec -d jetson bash -c "$ROS && python3 $D/$3 > /tmp/$2 2>&1"
     echo "   $1"
 }
@@ -35,10 +35,10 @@ up)
     echo ">> Las capas de arriba, en la jetson:"
     sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py|dashboard.py" 2>/dev/null
     sleep 2
-    lanzar "navegacion"  goto.log      skills/go_to.py
-    lanzar "percepcion"  detector.log  skills/detector.py
-    lanzar "agente"      agent.log     agent/agent.py
-    lanzar "tablero"     dashboard.log dashboard/dashboard.py
+    launch "navegacion"  goto.log      skills/go_to.py
+    launch "percepcion"  detector.log  skills/detector.py
+    launch "agente"      agent.log     agent/agent.py
+    launch "tablero"     dashboard.log dashboard/dashboard.py
     sleep 6
 
     echo ""
@@ -51,11 +51,11 @@ up)
     ;;
 
 mission)
-    MISION="${2:-fijate la hora en el reloj y llevale la botella a quien corresponda}"
+    MISSION="${2:-fijate la hora en el reloj y llevale la botella a quien corresponda}"
     sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/mission std_msgs/msg/String \"{data: $MISION}\"" \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/mission std_msgs/msg/String \"{data: $MISSION}\"" \
         >/dev/null 2>&1
-    echo "mision enviada: $MISION"
+    echo "mision enviada: $MISSION"
     echo "seguila en el tablero, o con: bash run_demo.sh status"
     ;;
 
@@ -65,9 +65,9 @@ reset)
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
     sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py" 2>/dev/null
     sleep 2
-    lanzar "navegacion"  goto.log      skills/go_to.py
-    lanzar "percepcion"  detector.log  skills/detector.py
-    lanzar "agente"      agent.log     agent/agent.py
+    launch "navegacion"  goto.log      skills/go_to.py
+    launch "percepcion"  detector.log  skills/detector.py
+    launch "agente"      agent.log     agent/agent.py
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
     ;;
 

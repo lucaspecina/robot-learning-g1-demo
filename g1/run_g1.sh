@@ -23,11 +23,26 @@ MODEL="${2:-12dof}"
 PAYLOAD="${3:-0}"
 EXTRA="${4:-}"
 
+# Matar TODAS las instancias previas y verificar que murieron de verdad.
+# Un solo pkill no alcanza: una instancia arrancando puede escaparse y quedar
+# de zombi, compitiendo por la GPU y hablando por los mismos topics de ROS
+# (nos paso: tres robots a la vez, RTF degradado y caidas inexplicables).
+kill_all_robots() {
+    for _ in 1 2 3 4 5; do
+        pgrep -f "g1_robot.p[y]" >/dev/null || return 0
+        pkill -9 -f "g1_robot.p[y]" 2>/dev/null
+        sleep 2
+    done
+    echo "AVISO: no pude matar todas las instancias previas:" >&2
+    pgrep -af "g1_robot.p[y]" >&2
+    return 1
+}
+
 case "$MODE" in
     stop|status) ;;
     *)
-        pkill -9 -f "g1_robot.p[y]" 2>/dev/null
-        sleep 3
+        kill_all_robots
+        sleep 1
         ;;
 esac
 
@@ -35,7 +50,7 @@ case "$MODE" in
     policy) ARGS="--policy $POLICY --model $MODEL --payload_kg $PAYLOAD $EXTRA" ;;
     stand)  ARGS="--model $MODEL --payload_kg $PAYLOAD $EXTRA" ;;
     stop)
-        pkill -9 -f "g1_robot.p[y]" && echo "detenido" || echo "no habia nada"
+        kill_all_robots && echo "detenido (todas las instancias)" || echo "quedaron instancias vivas"
         exit 0;;
     status)
         pgrep -f "g1_robot.p[y]" >/dev/null && echo "corriendo" || echo "detenido"

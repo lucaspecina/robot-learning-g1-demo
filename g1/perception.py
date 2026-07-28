@@ -11,6 +11,8 @@ Dibujar cuesta caro y ningun consumidor necesita 500 imagenes por segundo —
 un detector de objetos trabaja a 10-30 por segundo y un modelo de lenguaje con
 vision, a una cada varios segundos. Publicar mas es tirar computo.
 """
+import math
+
 import numpy as np
 
 import isaaclab.sim as sim_utils
@@ -22,6 +24,29 @@ from sensor_msgs.msg import Image as ImageMsg
 CAMERA_PRIM = "/World/G1/head_link/head_cam"
 CAMERA_OFFSET = (0.08, 0.0, 0.05)      # metros, respecto de head_link
 RESOLUTION = (320, 240)                 # suficiente para deteccion; barato de renderizar
+
+# Inclinacion de la camara hacia abajo, en grados. Con la camara mirando al
+# frente (0 grados) el robot nunca ve lo que tiene sobre la mesa: los objetos a
+# ~0.8 m de altura quedan fuera del cuadro cuando esta cerca. El G1 real monta
+# su camara tambien inclinada hacia abajo por el mismo motivo.
+CAMERA_PITCH_DEG = 20.0
+
+
+def _camera_rotation(pitch_deg: float):
+    """Cuaternion (w,x,y,z) de la camara: mirar al frente + inclinar abajo.
+
+    Parte de la rotacion base (0.5, -0.5, 0.5, -0.5), que lleva la camara a
+    mirar hacia el +X del robot, y le compone una rotacion sobre el eje
+    horizontal de la propia camara (su +X, que apunta a la derecha en la
+    convencion "ros": z adelante, x derecha, y abajo).
+    """
+    half = math.radians(pitch_deg) / 2.0
+    c, s = math.cos(half), math.sin(half)
+    w1, x1, y1, z1 = 0.5, -0.5, 0.5, -0.5
+    return (w1 * c - x1 * s,
+            w1 * s + x1 * c,
+            y1 * c + z1 * s,
+            z1 * c - y1 * s)
 
 
 def make_camera_cfg(update_period: float = 0.1) -> CameraCfg:
@@ -41,11 +66,9 @@ def make_camera_cfg(update_period: float = 0.1) -> CameraCfg:
             horizontal_aperture=20.955,
             clipping_range=(0.05, 50.0),
         ),
-        # Isaac usa la convencion de camara de graficos ("world"): mirando por
-        # -Z. Rotamos para que mire hacia adelante del robot (+X).
         offset=CameraCfg.OffsetCfg(
             pos=CAMERA_OFFSET,
-            rot=(0.5, -0.5, 0.5, -0.5),   # (w, x, y, z)
+            rot=_camera_rotation(CAMERA_PITCH_DEG),
             convention="ros",
         ),
     )

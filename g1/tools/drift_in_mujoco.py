@@ -11,7 +11,7 @@ La misma policy, con comando cero, en el simulador donde Unitree la valida.
 Es el codigo del despliegue oficial de Unitree (deploy_mujoco.py) reducido a lo
 minimo: sin visor, con comando cero, midiendo cuanto se desplaza el pelvis.
 
-Uso (dentro del contenedor jetson):
+Uso (inside del contenedor jetson):
     python3 drift_in_mujoco.py [segundos]
 """
 import sys
@@ -25,7 +25,7 @@ BASE = "/workspace/unitree_rl_gym"
 XML = f"{BASE}/resources/robots/g1_description/scene.xml"
 POLICY = f"{BASE}/deploy/pre_train/g1/motion.pt"
 CFG = f"{BASE}/deploy/deploy_mujoco/configs/g1.yaml"
-DURACION_S = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
+DURATION_S = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
 
 
 def gravity_orientation(quaternion):
@@ -63,25 +63,25 @@ d = mujoco.MjData(m)
 m.opt.timestep = sim_dt
 policy = torch.jit.load(POLICY)
 
-inicio = np.array([d.qpos[0], d.qpos[1]])
-pasos = int(DURACION_S / sim_dt)
-contador = 0
-muestras = []
+start = np.array([d.qpos[0], d.qpos[1]])
+steps = int(DURATION_S / sim_dt)
+counter = 0
+samples = []
 
-for i in range(pasos):
+for i in range(steps):
     tau = pd_control(target_dof_pos, d.qpos[7:], kps, np.zeros_like(kds), d.qvel[6:], kds)
     d.ctrl[:] = tau
     mujoco.mj_step(m, d)
-    contador += 1
+    counter += 1
 
-    if contador % decimation == 0:
+    if counter % decimation == 0:
         qj = (d.qpos[7:] - default_angles) * c["dof_pos_scale"]
         dqj = d.qvel[6:] * c["dof_vel_scale"]
         omega = d.qvel[3:6] * c["ang_vel_scale"]
         grav = gravity_orientation(d.qpos[3:7])
 
-        periodo = 0.8
-        fase = (contador * sim_dt) % periodo / periodo
+        period = 0.8
+        phase = (counter * sim_dt) % period / period
 
         obs[:3] = omega
         obs[3:6] = grav
@@ -89,22 +89,22 @@ for i in range(pasos):
         obs[9:9 + num_actions] = qj
         obs[9 + num_actions:9 + 2 * num_actions] = dqj
         obs[9 + 2 * num_actions:9 + 3 * num_actions] = action
-        obs[9 + 3 * num_actions:9 + 3 * num_actions + 2] = [np.sin(2 * np.pi * fase),
-                                                            np.cos(2 * np.pi * fase)]
+        obs[9 + 3 * num_actions:9 + 3 * num_actions + 2] = [np.sin(2 * np.pi * phase),
+                                                            np.cos(2 * np.pi * phase)]
         action = policy(torch.from_numpy(obs).unsqueeze(0)).detach().numpy().squeeze()
         target_dof_pos = action * c["action_scale"] + default_angles
 
-    if contador % int(5.0 / sim_dt) == 0:   # cada 5 s simulados
-        t = contador * sim_dt
+    if counter % int(5.0 / sim_dt) == 0:   # cada 5 s simulados
+        t = counter * sim_dt
         pos = np.array([d.qpos[0], d.qpos[1]])
-        muestras.append((t, pos - inicio, d.qpos[2]))
+        samples.append((t, pos - start, d.qpos[2]))
 
-print(f"\n=== DERIVA EN MUJOCO (comando cero, {DURACION_S:.0f} s simulados) ===")
-for t, delta, altura in muestras:
+print(f"\n=== DERIVA EN MUJOCO (comando cero, {DURATION_S:.0f} s simulados) ===")
+for t, delta, height in samples:
     print(f"  t={t:5.1f}s   desplazamiento {np.linalg.norm(delta):.3f} m "
-          f"(x {delta[0]:+.3f}, y {delta[1]:+.3f})   altura {altura:.3f} m")
+          f"(x {delta[0]:+.3f}, y {delta[1]:+.3f})   height {height:.3f} m")
 
-final = np.array([d.qpos[0], d.qpos[1]]) - inicio
+final = np.array([d.qpos[0], d.qpos[1]]) - start
 total = np.linalg.norm(final)
-print(f"\n  TOTAL: {total:.3f} m en {DURACION_S:.0f} s = {total/DURACION_S*100:.1f} cm/s")
-print(f"  altura final: {d.qpos[2]:.3f} m  ({'de pie' if d.qpos[2] > 0.5 else 'CAIDO'})")
+print(f"\n  TOTAL: {total:.3f} m en {DURATION_S:.0f} s = {total/DURATION_S*100:.1f} cm/s")
+print(f"  height final: {d.qpos[2]:.3f} m  ({'de pie' if d.qpos[2] > 0.5 else 'CAIDO'})")

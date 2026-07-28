@@ -73,12 +73,12 @@ class RLPolicyLocomotion:
 
     def _reset_memory(self):
         """Pone en cero la memoria recurrente de la policy, si la tiene."""
-        borrados = 0
-        for nombre, buf in self.policy.named_buffers():
-            if any(k in nombre for k in ("hidden_state", "cell_state")):
+        cleared = 0
+        for name, buf in self.policy.named_buffers():
+            if any(k in name for k in ("hidden_state", "cell_state")):
                 buf.zero_()
-                borrados += 1
-        self.memoria_borrada = borrados
+                cleared += 1
+        self.memory_buffers_cleared = cleared
 
     def compute(self, state: LocomotionState, command) -> np.ndarray:
         """Devuelve los 12 angulos objetivo para este ciclo."""
