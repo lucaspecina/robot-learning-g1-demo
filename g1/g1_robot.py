@@ -61,6 +61,9 @@ parser.add_argument("--camera_hz", type=float, default=3.0,
                          "percepcion le alcanza de sobra")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
+parser.add_argument("--free", action="store_true",
+                    help="arrancar con la policy andando directamente, sin pasar "
+                         "por el estado congelado (para pruebas automaticas)")
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _extra = parser.parse_known_args()
 sys.argv = [sys.argv[0]] + [a for a in _extra if a.startswith("--/")]
@@ -115,11 +118,26 @@ class G1RobotNode(Node):
         self.arm_pose_request = None   # lo lee el lazo principal
         self.reset_request = False     # idem
 
+        # El robot nace CONGELADO: cargado, de pie y quieto, sin que la policy
+        # intervenga. Asi se puede acomodar el cliente de Isaac y el tablero
+        # con calma, y soltar cuando uno quiere (run_demo.sh start). Volver a
+        # congelar (freeze) lo teletransporta al origen sin recargar Isaac.
+        self.frozen = not args_cli.free
+
         self.pub_state = self.create_publisher(JointState, "/g1/joint_states", 10)
         self.pub_odom = self.create_publisher(Odometry, "/g1/odom", 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)
         self.create_subscription(RosString, "/g1/reset", self.on_reset, 10)
+        self.create_subscription(RosString, "/g1/control", self.on_control, 10)
+
+    def on_control(self, msg: RosString):
+        """start = soltar la policy | freeze = volver al origen, quieto."""
+        order = msg.data.strip().lower()
+        if order == "start":
+            self.frozen = False
+        elif order == "freeze":
+            self.frozen = True
 
     def on_reset(self, msg: RosString):
         """Pide devolver el robot al punto de partida."""
@@ -297,7 +315,52 @@ def main():
     print(f"[robot] corriendo: fisica {1/physics_dt:.0f} Hz, control {1/control_dt:.0f} Hz, "
           f"asentando {args_cli.settle_s:.1f} s", flush=True)
 
+    was_frozen = None
     while simulation_app.is_running():
+        # --- congelado: clavado en el punto de partida, la policy no toca ---
+        # La fisica sigue corriendo (para dibujar y para la camara), pero en
+        # cada paso se reescribe el estado inicial: el robot ni se mueve ni se
+        # cae. Se sale con la orden "start" en /g1/control.
+        if node.frozen:
+            if was_frozen is not True:
+                print("\n[robot] CONGELADO en el punto de partida. "
+                      "Soltar con: run_demo.sh start", flush=True)
+                was_frozen = True
+            robot.write_root_pose_to_sim(robot.data.default_root_state[:, :7])
+            robot.write_root_velocity_to_sim(
+                torch.zeros_like(robot.data.default_root_state[:, 7:]))
+            frozen_pos = robot.data.default_joint_pos.clone()
+            frozen_pos[0, sim_ids] = default_angles
+            robot.write_joint_state_to_sim(
+                frozen_pos, torch.zeros_like(robot.data.default_joint_vel))
+            robot.set_joint_position_target(default_angles.unsqueeze(0),
+                                            joint_ids=sim_ids)
+            robot.write_data_to_sim()
+            sim.step(render=(step % render_every == 0))
+            robot.update(physics_dt)
+            step += 1
+            if camera is not None:
+                camera.update(physics_dt)
+            if step % steps_per_control == 0:
+                if cam_pub is not None:
+                    cam_pub.publish()
+                node.publish(
+                    robot.data.joint_pos[0, sim_ids].cpu().numpy(),
+                    robot.data.joint_vel[0, sim_ids].cpu().numpy(),
+                    robot.data.root_pos_w[0].cpu().numpy(),
+                    robot.data.root_quat_w[0].cpu().numpy(),
+                    robot.data.root_lin_vel_w[0].cpu().numpy(),
+                    robot.data.root_ang_vel_w[0].cpu().numpy(),
+                )
+                rclpy.spin_once(node, timeout_sec=0.0)
+            continue
+
+        if was_frozen is not False:
+            # Recien soltado: la policy arranca de cero, como recien encendida.
+            controller.reset()
+            print("\n[robot] SOLTADO: la policy toma el control", flush=True)
+            was_frozen = False
+
         # --- decidir (cada steps_per_control pasos de fisica) ---
         if step >= settle_steps and step % steps_per_control == 0:
             q = robot.data.joint_pos[0, sim_ids].cpu().numpy()

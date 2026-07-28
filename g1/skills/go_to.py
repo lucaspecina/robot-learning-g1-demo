@@ -70,6 +70,15 @@ class GoTo(Node):
     def on_odom(self, msg: Odometry):
         p, o = msg.pose.pose.position, msg.pose.pose.orientation
         self.pose = (p.x, p.y, yaw_from_quaternion(o.w, o.x, o.y, o.z))
+        # Anclarse donde nace: la policy con comando cero deriva varios cm/s,
+        # y sin anclaje inicial el robot se va caminando solo hasta que alguien
+        # le da el primer objetivo. Desde el primer dato de odometria, su
+        # lugar es donde esta parado.
+        if self.anchor is None:
+            self.anchor = (p.x, p.y)
+            self.get_logger().info(
+                f"anclado al nacer en ({p.x:.2f}, {p.y:.2f}): "
+                f"si deriva mas de {MAX_DRIFT_M} m, vuelve solo")
 
     def on_goal(self, msg: PoseStamped):
         self.goal = (msg.pose.position.x, msg.pose.position.y)
