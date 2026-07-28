@@ -38,6 +38,7 @@ class Checker(Node):
         self.pose = None
         self.nav = None
         self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.pub_hold = self.create_publisher(String, "/g1/hold", 10)
         self.pub_goal = self.create_publisher(PoseStamped, "/g1/goal", 10)
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
@@ -62,6 +63,16 @@ class Checker(Node):
         while self.pose is None and time.time() < fin:
             rclpy.spin_once(self, timeout_sec=0.1)
         return self.pose is not None
+
+    def hold(self, on: bool):
+        """Prende o apaga el modo quieto de la navegacion.
+
+        Antes de manejar al robot a mano hay que pedirle a la navegacion que
+        suelte el volante: si los dos publican en /cmd_vel, se pelean y el
+        robot no se mueve.
+        """
+        self.pub_hold.publish(String(data="on" if on else "off"))
+        self.spin_for(1.0)
 
     def send_cmd(self, vx=0.0, vy=0.0, vyaw=0.0):
         t = Twist()
@@ -121,6 +132,7 @@ def check_walk(c: Checker) -> bool:
     print(f"  Le mandamos {WALK_SPEED} m/s directo a las piernas, 40 s de reloj,")
     print("  y despues comando cero. Sin navegacion: esto prueba SOLO caminar.\n")
 
+    c.hold(False)   # la navegacion suelta el volante: manejamos nosotros
     x0, y0, z0, yaw0 = c.pose
     print(f"  arranca: altura {z0:.3f} m en ({x0:.2f}, {y0:.2f}), rumbo {math.degrees(yaw0):.0f} grados")
 
@@ -137,6 +149,7 @@ def check_walk(c: Checker) -> bool:
     print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
           f"giro {giro:.0f} grados en total")
 
+    c.hold(True)    # devolver el volante a la navegacion
     if z2 <= STANDING_HEIGHT_MIN:
         return veredicto(False, f"termino en el piso (altura {z2:.3f} m)")
     if recorrido < 0.3:

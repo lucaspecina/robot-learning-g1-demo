@@ -35,7 +35,7 @@ preflight() {
     # Verificar y limpiar ANTES de arrancar, no despues de que falle.
     echo ">> Revisando que no haya restos de corridas anteriores..."
     local zombis
-    zombis=$(pgrep -fc "g1_robot.p[y]" 2>/dev/null || echo 0)
+    zombis=$(pgrep -f "g1_robot.p[y]" 2>/dev/null | wc -l)
     if [ "$zombis" -gt 0 ]; then
         echo "   habia $zombis instancia(s) del robot dando vueltas: matando"
         bash ~/go2-lab/g1/run_g1.sh stop >/dev/null
