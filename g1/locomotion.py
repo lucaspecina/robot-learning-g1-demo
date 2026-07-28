@@ -58,27 +58,8 @@ class RLPolicyLocomotion:
         self.reset()
 
     def reset(self):
-        """Deja la policy como recien cargada.
-
-        Ojo con la memoria: esta policy es RECURRENTE — tiene una red LSTM
-        interna con estado propio (hidden_state y cell_state, 64 numeros cada
-        uno) que recuerda lo que vino pasando. Si no se borra, cada corrida
-        arranca contaminada con el estado de la anterior (incluidas las
-        caidas), las mediciones dejan de ser independientes y la policy puede
-        partir de un estado interno que nunca vio al entrenar.
-        """
         self.last_action = np.zeros(self.n, dtype=np.float32)
         self.phase_time = 0.0
-        self._reset_memory()
-
-    def _reset_memory(self):
-        """Pone en cero la memoria recurrente de la policy, si la tiene."""
-        cleared = 0
-        for name, buf in self.policy.named_buffers():
-            if any(k in name for k in ("hidden_state", "cell_state")):
-                buf.zero_()
-                cleared += 1
-        self.memory_buffers_cleared = cleared
 
     def compute(self, state: LocomotionState, command) -> np.ndarray:
         """Devuelve los 12 angulos objetivo para este ciclo."""

@@ -50,10 +50,15 @@ HISTORY_MAX = 60
 # La altura del pelvis separa "de pie" de "fallen": parado mide ~0.72 m.
 FALLEN_HEIGHT = 0.45
 
+# Sin noticias del robot por mas de estos segundos, lo damos por apagado.
+# El robot publica su estado 50 veces por segundo: 3 s de silencio es muchisimo.
+OFFLINE_AFTER_S = 3.0
+
 # Estado compartido entre el nodo ROS y el servidor web.
 state = {
     "camera_jpeg": None,
     "camera_time": 0.0,
+    "odom_time": 0.0,      # cuando llego el ultimo dato del robot
     "frames": 0,
     "detections": {},
     "pose": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
@@ -133,6 +138,7 @@ class DashboardNode(Node):
                               "z": round(p.z, 3), "yaw": round(math.degrees(yaw))}
             state["real_speed"] = round(math.hypot(v.x, v.y), 2)
             state["fallen"] = p.z < FALLEN_HEIGHT
+            state["odom_time"] = time.time()
 
     def on_cmd(self, msg: Twist):
         with lock:
@@ -241,7 +247,7 @@ PAGINA = """<!doctype html>
 const cam = document.getElementById('cam');
 function refreshCam(){ cam.src = '/camera.jpg?' + Date.now(); }
 cam.onload  = () => setTimeout(refreshCam, 300);
-cam.onerror = () => setTimeout(refreshCam, 1200);
+cam.onerror = () => { cam.removeAttribute('src'); setTimeout(refreshCam, 1200); };
 refreshCam();
 
 // --- mapa ---
@@ -300,9 +306,42 @@ function drawMap(s){
 }
 
 // --- state ---
+const APAGADO = '—';
+let estabaOnline = false;
+
+function apagarPanel(s){
+  // Robot apagado: ningun numero viejo en pantalla. Guiones en todo, para que
+  // nunca se confunda lo que pasa ahora con lo que paso antes de matarlo.
+  ['pos','yaw','vreal','cmd','nav','goal','arm','vida'].forEach(id =>
+    document.getElementById(id).textContent = APAGADO);
+  document.getElementById('fr').textContent = APAGADO;
+  document.getElementById('dets').innerHTML =
+    '<span style="color:#5f6675">sin datos</span>';
+  document.getElementById('alerta').textContent =
+    '⏻ ROBOT APAGADO' + (s.silencio_s != null
+      ? ' — sin datos hace ' + s.silencio_s + ' s' : '');
+  document.getElementById('hb').textContent = 'esperando al robot...';
+  const c = document.getElementById('mapa'), g = c.getContext('2d');
+  g.clearRect(0,0,c.width,c.height);
+  g.fillStyle = '#5f6675'; g.font = '13px sans-serif';
+  g.fillText('el robot no esta corriendo', 90, 180);
+}
+
 async function tick(){
   try{
     const s = await (await fetch('/state')).json();
+
+    if(!s.online){
+      trail.length = 0;          // la estela vieja no sobrevive al apagado
+      estabaOnline = false;
+      apagarPanel(s);
+      return setTimeout(tick, 600);
+    }
+    if(!estabaOnline){           // volvio: arrancamos de cero
+      trail.length = 0;
+      estabaOnline = true;
+    }
+
     document.getElementById('hb').textContent =
       'actualizado ' + new Date().toLocaleTimeString();
     document.getElementById('alerta').textContent =
@@ -319,7 +358,8 @@ async function tick(){
     document.getElementById('goal').textContent =
       s.goal ? `(${s.goal.x}, ${s.goal.y})` : '-';
     document.getElementById('arm').textContent = s.arms;
-    document.getElementById('fr').textContent = s.frames;
+    document.getElementById('fr').textContent =
+      s.frames + (s.video_online ? '' : '  (video detenido)');
     document.getElementById('dets').innerHTML = Object.keys(s.detections).length
       ? Object.entries(s.detections).map(([k,v]) =>
           `<span class="tag">${k} · centro ${v.cx} · tamaño ${v.area}</span>`).join('')
@@ -362,7 +402,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(PAGINA.encode())
         elif route == "/camera.jpg":
             with lock:
-                jpeg = state["camera_jpeg"]
+                viejo = time.time() - state["camera_time"] > OFFLINE_AFTER_S
+                jpeg = None if viejo else state["camera_jpeg"]
             if jpeg is None:
                 self._headers(404, "text/plain")
                 self.wfile.write(b"sin imagen todavia")
@@ -370,8 +411,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._headers(200, "image/jpeg")
                 self.wfile.write(jpeg)
         elif route == "/state":
+            # Un tablero que muestra datos viejos como si fueran de ahora es
+            # peor que uno vacio: no se puede distinguir lo que pasa de lo que
+            # paso. Si hace mas de OFFLINE_AFTER_S que no llega nada del robot,
+            # lo decimos y la pagina apaga todos los valores.
             with lock:
                 data = {k: v for k, v in state.items() if k != "camera_jpeg"}
+                ahora = time.time()
+                data["online"] = (ahora - state["odom_time"]) < OFFLINE_AFTER_S
+                data["silencio_s"] = (round(ahora - state["odom_time"])
+                                      if state["odom_time"] else None)
+                data["video_online"] = (ahora - state["camera_time"]) < OFFLINE_AFTER_S
             self._headers(200, "application/json")
             self.wfile.write(json.dumps(data).encode())
         else:

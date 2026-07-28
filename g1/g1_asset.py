@@ -43,29 +43,10 @@ MODELS = {
 # cintura tiene que comportarse como si estuviera soldada. Si se bambolea, el
 # torso entero se mueve y la policy (que solo controla piernas) no tiene con
 # que compensarlo.
-# OJO: estas gains_for difieren A PROPOSITO de las oficiales de unitree_rl_lab
-# (brazos 40/1, cintura 200/5). Las oficiales asumen una policy de 29 dof que
-# controla la cintura activamente. Nuestra policy es de 12 dof y cree que el
-# torso esta soldado al pelvis: la cintura DEBE ser rigida como una soldadura.
-# Lo medimos dos veces: con la cintura en 100 el robot termina en el piso, y al
-# "alinearla con lo oficial" (200/5) tambien se cayo. 800/40 la mantiene firme.
 ARM_STIFFNESS = 100.0
 ARM_DAMPING = 2.0
 WAIST_STIFFNESS = 800.0
 WAIST_DAMPING = 40.0
-
-# Limites reales de cada motor del G1, de la configuracion oficial de Unitree
-# para IsaacLab (unitree_rl_lab/assets/robots/unitree.py). El G1 monta cuatro
-# modelos de motor distintos y cada uno tiene su effort y velocity maximas.
-# Ponerles a todos un limite generoso e igual (lo que haciamos antes: 300 N.m)
-# le da al robot musculos que no tiene.
-MOTOR_LIMITS = {
-    # motor            effort max [N.m], velocity max [rad/s]
-    "hip_pitch_yaw":   (88.0, 32.0),    # N7520-14.3
-    "hip_roll_knee":   (139.0, 20.0),   # N7520-22.5
-    "ankle_arm_waist": (25.0, 37.0),    # N5020-16
-    "wrist":           (5.0, 22.0),     # W4010-25
-}
 
 
 def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -> ArticulationCfg:
@@ -81,61 +62,33 @@ def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -
     kps = cfg["kps"]
     kds = cfg["kds"]
 
-    # Las piernas se agrupan POR MODELO DE MOTOR, como en la configuracion
-    # oficial: cada grupo tiene los limites de effort y velocity de su motor,
-    # y las gains_for que le corresponden a cada articulacion.
-    def gains_for(joint_subset):
-        return ({n: float(k) for n, k in zip(leg_names, kps) if n in joint_subset},
-                {n: float(d) for n, d in zip(leg_names, kds) if n in joint_subset})
-
-    hip_pitch_yaw_joints = [n for n in leg_names if "hip_pitch" in n or "hip_yaw" in n]
-    hip_roll_knee_joints = [n for n in leg_names if "hip_roll" in n or "knee" in n]
-    ankle_joints = [n for n in leg_names if "ankle" in n]
-
-    actuators = {}
-    for label, joints, motor in (
-        ("hip_pitch_yaw", hip_pitch_yaw_joints, "hip_pitch_yaw"),
-        ("hip_roll_knee", hip_roll_knee_joints, "hip_roll_knee"),
-        ("ankles", ankle_joints, "ankle_arm_waist"),
-    ):
-        if not joints:
-            continue
-        k, d = gains_for(joints)
-        effort, velocity = MOTOR_LIMITS[motor]
-        actuators[label] = ImplicitActuatorCfg(
-            joint_names_expr=joints,
-            effort_limit_sim=effort,
-            velocity_limit_sim=velocity,
-            stiffness=k,
-            damping=d,
+    actuadores = {
+        "legs": ImplicitActuatorCfg(
+            joint_names_expr=list(leg_names),
+            effort_limit_sim=300.0,
+            velocity_limit_sim=100.0,
+            stiffness={n: float(k) for n, k in zip(leg_names, kps)},
+            damping={n: float(d) for n, d in zip(leg_names, kds)},
             armature=0.01,
-        )
+        ),
+    }
 
     # El modelo con brazos necesita quien sostenga todo lo que la policy de
     # locomocion no toca: brazos, muñecas y cintura.
     if model != "12dof":
-        actuators["arms"] = ImplicitActuatorCfg(
-            joint_names_expr=[".*_shoulder_.*", ".*_elbow_.*", ".*_wrist_roll.*"],
-            effort_limit_sim=MOTOR_LIMITS["ankle_arm_waist"][0],
-            velocity_limit_sim=MOTOR_LIMITS["ankle_arm_waist"][1],
+        actuadores["arms"] = ImplicitActuatorCfg(
+            joint_names_expr=[".*_shoulder_.*", ".*_elbow_.*", ".*_wrist_.*"],
+            effort_limit_sim=100.0,
+            velocity_limit_sim=100.0,
             stiffness=ARM_STIFFNESS,
             damping=ARM_DAMPING,
             armature=0.01,
         )
-        actuators["wrists"] = ImplicitActuatorCfg(
-            joint_names_expr=[".*_wrist_pitch.*", ".*_wrist_yaw.*"],
-            effort_limit_sim=MOTOR_LIMITS["wrist"][0],
-            velocity_limit_sim=MOTOR_LIMITS["wrist"][1],
-            stiffness=ARM_STIFFNESS,
-            damping=ARM_DAMPING,
-            armature=0.01,
-        )
-        actuators["waist"] = ImplicitActuatorCfg(
+        actuadores["waist"] = ImplicitActuatorCfg(
             joint_names_expr=["waist_.*"],
-            effort_limit_sim=MOTOR_LIMITS["hip_pitch_yaw"][0],
-            velocity_limit_sim=MOTOR_LIMITS["hip_pitch_yaw"][1],
-            stiffness={"waist_yaw_joint": WAIST_STIFFNESS,
-                       "waist_roll_joint": 40.0, "waist_pitch_joint": 40.0},
+            effort_limit_sim=300.0,
+            velocity_limit_sim=100.0,
+            stiffness=WAIST_STIFFNESS,
             damping=WAIST_DAMPING,
             armature=0.01,
         )
@@ -172,7 +125,7 @@ def make_g1_cfg(cfg: dict, model: str = "12dof", prim_path: str = "/World/G1") -
             joint_vel={".*": 0.0},
         ),
         soft_joint_pos_limit_factor=0.9,
-        actuators=actuators,
+        actuators=actuadores,
     )
 
 

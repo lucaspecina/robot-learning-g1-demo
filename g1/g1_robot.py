@@ -46,7 +46,7 @@ parser.add_argument("--model", default="12dof", choices=["12dof", "29dof"],
                     help="cuerpo del robot: 12dof (el que la policy conoce) o "
                          "29dof (con brazos, el que necesita la demo)")
 parser.add_argument("--payload_kg", type=float, default=0.0,
-                    help="masa extra repartida entre las dos hands, para medir "
+                    help="masa extra repartida entre las dos manos, para medir "
                          "cuanta carga tolera la locomocion (la policy de "
                          "Unitree fue entrenada con el robot vacio)")
 parser.add_argument("--scene", action="store_true",
@@ -61,13 +61,6 @@ parser.add_argument("--camera_hz", type=float, default=3.0,
                          "percepcion le alcanza de sobra")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
-parser.add_argument("--pd", default="implicit", choices=["implicit", "explicit"],
-                    help="como se aplica el control de las piernas. implicit: lo "
-                         "resuelve PhysX internamente (recomendacion de NVIDIA). "
-                         "explicit: calculamos la fuerza a mano en cada paso de "
-                         "fisica, exactamente como el despliegue oficial de "
-                         "Unitree en MuJoCo — sirve para medir si la diferencia "
-                         "entre ambos explica el gap de deriva con MuJoCo")
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _extra = parser.parse_known_args()
 sys.argv = [sys.argv[0]] + [a for a in _extra if a.startswith("--/")]
@@ -196,18 +189,18 @@ def main():
     # --- escena ---
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=physics_dt, device=args_cli.device))
     sim.set_camera_view(eye=(2.5, 2.5, 1.8), target=(0.0, 0.0, 0.8))
-    # Piso con la MISMA joint_friction que el simulador donde Unitree valida la
+    # Piso con la MISMA friccion que el simulador donde Unitree valida la
     # policy. IsaacLab trae 0.5 por defecto; MuJoCo usa 1.0. Con la mitad de
     # agarre los pies patinan, y el robot deriva varios centimetros por segundo
     # aunque el comando sea cero. La policy no aprendio a caminar sobre hielo.
-    ground = sim_utils.GroundPlaneCfg(
+    suelo = sim_utils.GroundPlaneCfg(
         physics_material=sim_utils.RigidBodyMaterialCfg(
             static_friction=1.0,
             dynamic_friction=1.0,
             restitution=0.0,
         )
     )
-    ground.func("/World/ground", ground)
+    suelo.func("/World/ground", suelo)
     light = sim_utils.DomeLightCfg(intensity=2000.0)
     light.func("/World/light", light)
 
@@ -237,7 +230,7 @@ def main():
     # Y un detalle que importa: las piernas arrancan en la pose nominal DE LA
     # POLICY, no en la que trae la configuracion de IsaacLab (que es parecida
     # pero no igual). Si arrancaran distintas, el robot se moveria en el primer
-    # instante para alcanzar el target_angles y se desestabilizaria justo cuando la
+    # instante para alcanzar el objetivo y se desestabilizaria justo cuando la
     # policy todavia no tomo el control. Ademas la policy espera partir de una
     # postura que conoce.
     root_state = robot.data.default_root_state.clone()
@@ -255,35 +248,8 @@ def main():
     # en la electronica de cada motor).
     kp = torch.tensor(cfg["kps"], dtype=torch.float32, device=args_cli.device).unsqueeze(0)
     kd = torch.tensor(cfg["kds"], dtype=torch.float32, device=args_cli.device).unsqueeze(0)
-    explicit_pd = args_cli.pd == "explicit"
-    if explicit_pd:
-        # Modo explicito: PhysX no controla nada (ganancias a cero); nosotros
-        # calculamos la fuerza a mano en cada paso, igual que deploy_mujoco.py.
-        zeros = torch.zeros_like(kp)
-        robot.write_joint_stiffness_to_sim(zeros, joint_ids=sim_ids)
-        robot.write_joint_damping_to_sim(zeros, joint_ids=sim_ids)
-        print("[robot] PD EXPLICITO: fuerza calculada a mano a 500 Hz "
-              "(como el deploy oficial en MuJoCo)", flush=True)
-    else:
-        robot.write_joint_stiffness_to_sim(kp, joint_ids=sim_ids)
-        robot.write_joint_damping_to_sim(kd, joint_ids=sim_ids)
-
-    # Propiedades mecanicas de las articulaciones, copiadas del modelo oficial
-    # de Unitree (g1_12dof.xml: armature=0.01, frictionloss=0.1). La joint_friction
-    # seca es la que faltaba: es una resistencia constante que se opone a
-    # cualquier movimiento de la articulacion. Sin ella las articulaciones se
-    # mueven mas libres de lo que la policy espera, y los micro-movimientos que
-    # deberian morir ahi se acumulan en desplazamiento.
-    n_legs = len(sim_ids)
-    joint_friction = torch.full((1, n_legs), 0.1, dtype=torch.float32, device=args_cli.device)
-    joint_armature = torch.full((1, n_legs), 0.01, dtype=torch.float32, device=args_cli.device)
-    try:
-        robot.write_joint_friction_coefficient_to_sim(joint_friction, joint_ids=sim_ids)
-    except AttributeError:
-        robot.write_joint_friction_to_sim(joint_friction, joint_ids=sim_ids)
-    robot.write_joint_armature_to_sim(joint_armature, joint_ids=sim_ids)
-    print("[robot] articulaciones: joint_friction 0.1, joint_armature 0.01 (del modelo oficial)",
-          flush=True)
+    robot.write_joint_stiffness_to_sim(kp, joint_ids=sim_ids)
+    robot.write_joint_damping_to_sim(kd, joint_ids=sim_ids)
 
     # --- controlador de locomocion (intercambiable) ---
     if args_cli.policy:
@@ -294,25 +260,25 @@ def main():
         print("[robot] locomocion: solo pararse (sin policy)", flush=True)
 
     # --- control de brazos (solo en el cuerpo que los tiene) ---
-    has_arms = args_cli.model != "12dof"
-    if has_arms:
+    tiene_brazos = args_cli.model != "12dof"
+    if tiene_brazos:
         arm_ids = [robot.joint_names.index(n) for n in ARM_JOINTS]
         arms = PoseArmController()
         print(f"[robot] brazos: {len(ARM_JOINTS)} articulaciones, pose inicial reposo", flush=True)
     else:
         arm_ids, arms = None, None
 
-    # --- carga en las hands (para medir cuanto tolera la locomocion) ---
-    if args_cli.payload_kg > 0 and has_arms:
-        hands = [i for i, n in enumerate(robot.body_names) if "rubber_hand" in n]
-        if hands:
-            masses = robot.root_physx_view.get_masses()
-            extra = args_cli.payload_kg / len(hands)
-            for i in hands:
-                masses[0, i] += extra
-            robot.root_physx_view.set_masses(masses, torch.arange(1))
+    # --- carga en las manos (para medir cuanto tolera la locomocion) ---
+    if args_cli.payload_kg > 0 and tiene_brazos:
+        manos = [i for i, n in enumerate(robot.body_names) if "rubber_hand" in n]
+        if manos:
+            masas = robot.root_physx_view.get_masses()
+            extra = args_cli.payload_kg / len(manos)
+            for i in manos:
+                masas[0, i] += extra
+            robot.root_physx_view.set_masses(masas, torch.arange(1))
             print(f"[robot] carga: {args_cli.payload_kg:.2f} kg repartidos en "
-                  f"{len(hands)} hands ({extra:.2f} kg c/u)", flush=True)
+                  f"{len(manos)} manos ({extra:.2f} kg c/u)", flush=True)
 
     rclpy.init()
     node = G1RobotNode(cfg)
@@ -343,8 +309,8 @@ def main():
                 joint_pos=q, joint_vel=dq, ang_vel=ang,
                 gravity=gravity_in_body_frame(*quat),
             )
-            target_angles = controller.compute(state, node.current_command())
-            target = torch.tensor(target_angles, dtype=torch.float32,
+            objetivo = controller.compute(state, node.current_command())
+            target = torch.tensor(objetivo, dtype=torch.float32,
                                   device=args_cli.device).unsqueeze(0)
             robot.set_joint_position_target(target, joint_ids=sim_ids)
 
@@ -381,16 +347,6 @@ def main():
                 robot.set_joint_position_target(arm_target, joint_ids=arm_ids)
 
         # --- avanzar la fisica ---
-        # En modo explicito, la fuerza se recalcula EN CADA PASO DE FISICA con
-        # el estado mas fresco (el target_angles se mantiene entre decisiones de la
-        # policy). Es exactamente el lazo del despliegue oficial en MuJoCo:
-        #   tau = kp*(target_angles - q) - kd*dq
-        if explicit_pd:
-            q_now = robot.data.joint_pos[:, sim_ids]
-            dq_now = robot.data.joint_vel[:, sim_ids]
-            tau = kp * (target - q_now) - kd * dq_now
-            robot.set_joint_effort_target(tau, joint_ids=sim_ids)
-
         # render=False en la mayoria de los pasos: dibujar la escena cuesta
         # tanto como la fisica y no aporta nada al control. Se renderiza cada
         # render_every pasos, suficiente para mirar por el visor.
