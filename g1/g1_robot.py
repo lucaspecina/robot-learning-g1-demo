@@ -251,6 +251,23 @@ def main():
     robot.write_joint_stiffness_to_sim(kp, joint_ids=sim_ids)
     robot.write_joint_damping_to_sim(kd, joint_ids=sim_ids)
 
+    # Propiedades mecanicas de las articulaciones, copiadas del modelo oficial
+    # de Unitree (g1_12dof.xml: armature=0.01, frictionloss=0.1). La friccion
+    # seca es la que faltaba: es una resistencia constante que se opone a
+    # cualquier movimiento de la articulacion. Sin ella las articulaciones se
+    # mueven mas libres de lo que la policy espera, y los micro-movimientos que
+    # deberian morir ahi se acumulan en desplazamiento.
+    n_legs = len(sim_ids)
+    friccion = torch.full((1, n_legs), 0.1, dtype=torch.float32, device=args_cli.device)
+    armadura = torch.full((1, n_legs), 0.01, dtype=torch.float32, device=args_cli.device)
+    try:
+        robot.write_joint_friction_coefficient_to_sim(friccion, joint_ids=sim_ids)
+    except AttributeError:
+        robot.write_joint_friction_to_sim(friccion, joint_ids=sim_ids)
+    robot.write_joint_armature_to_sim(armadura, joint_ids=sim_ids)
+    print("[robot] articulaciones: friccion 0.1, armadura 0.01 (del modelo oficial)",
+          flush=True)
+
     # --- controlador de locomocion (intercambiable) ---
     if args_cli.policy:
         controller = RLPolicyLocomotion(cfg, args_cli.policy, device="cpu")
