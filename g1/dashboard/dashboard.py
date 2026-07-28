@@ -12,6 +12,7 @@ mira el que supervisa al robot. No decide nada ni toca nada: solo observa.
            /g1/detections       lo que reconoce
            /g1/odom             donde esta y a que velocidad
            /cmd_vel             que se le esta ordenando
+           /g1/mobility/status  quien tiene permiso para moverlo
            /g1/goal             a donde lo mandaron
            /g1/nav_status       si la navegacion llego
            /g1/mission_status   el relato de la mission
@@ -38,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
@@ -65,6 +67,12 @@ state = {
     "real_speed": 0.0,
     "fallen": False,
     "cmd": {"vx": 0.0, "vy": 0.0, "vyaw": 0.0},
+    "mobility": {
+        "owner": "-",
+        "requester": "-",
+        "transition_reason": "-",
+        "rejected_commands": 0,
+    },
     "goal": None,
     "nav": "-",
     "arms": "reposo",
@@ -97,6 +105,12 @@ class DashboardNode(Node):
         self.create_subscription(String, "/g1/detections", self.on_detections, 10)
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd, 10)
+        self.create_subscription(
+            String,
+            "/g1/mobility/status",
+            self.on_mobility,
+            10,
+        )
         self.create_subscription(PoseStamped, "/g1/goal", self.on_goal, 10)
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
         self.create_subscription(String, "/g1/mission_status", self.on_mission, 10)
@@ -145,6 +159,14 @@ class DashboardNode(Node):
             state["cmd"] = {"vx": round(msg.linear.x, 2),
                              "vy": round(msg.linear.y, 2),
                              "vyaw": round(msg.angular.z, 2)}
+
+    def on_mobility(self, msg: String):
+        try:
+            mobility = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        with lock:
+            state["mobility"] = mobility
 
     def on_goal(self, msg: PoseStamped):
         with lock:
@@ -224,8 +246,11 @@ PAGINA = """<!doctype html>
         TIEMPO SIMULADO (el simulador corre al ~20%: se ve 5x mas lento)</small></td>
         <td id="vreal">-</td></tr>
       <tr><td>orden de velocidad<small>lo que la navegacion le pide a las
-        piernas: adelante (vx), costado (vy), giro. Cero = "quedate
-        quieto"</small></td><td id="cmd">-</td></tr>
+        piernas: adelante (vx), costado (vy), giro. Es la salida ya
+        arbitrada, no la suma de fuentes.</small></td><td id="cmd">-</td></tr>
+      <tr><td>dueño de movilidad<small>única fuente autorizada a mover la base;
+        los comandos de las demás se descartan</small></td>
+        <td id="mobility">-</td></tr>
       <tr><td>navegacion<small>moviendo = yendo a un objetivo; llegue = lo
         alcanzo; guion = sin objetivo</small></td><td id="nav">-</td></tr>
       <tr><td>objetivo<small>a donde lo mando la ultima orden de navegacion,
@@ -312,7 +337,7 @@ let estabaOnline = false;
 function apagarPanel(s){
   // Robot apagado: ningun numero viejo en pantalla. Guiones en todo, para que
   // nunca se confunda lo que pasa ahora con lo que paso antes de matarlo.
-  ['pos','yaw','vreal','cmd','nav','goal','arm','vida'].forEach(id =>
+  ['pos','yaw','vreal','cmd','mobility','nav','goal','arm','vida'].forEach(id =>
     document.getElementById(id).textContent = APAGADO);
   document.getElementById('fr').textContent = APAGADO;
   document.getElementById('dets').innerHTML =
@@ -354,6 +379,9 @@ async function tick(){
     document.getElementById('vreal').textContent = s.real_speed + ' m/s';
     document.getElementById('cmd').textContent =
       `vx ${s.cmd.vx}  vy ${s.cmd.vy}  giro ${s.cmd.vyaw}`;
+    document.getElementById('mobility').textContent =
+      `${s.mobility.owner}:${s.mobility.requester} · ` +
+      `${s.mobility.transition_reason} · descartados ${s.mobility.rejected_commands}`;
     document.getElementById('nav').textContent = s.nav;
     document.getElementById('goal').textContent =
       s.goal ? `(${s.goal.x}, ${s.goal.y})` : '-';
@@ -440,11 +468,13 @@ def main():
 
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    server.shutdown()
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        server.shutdown()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

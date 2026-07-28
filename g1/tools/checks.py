@@ -5,9 +5,10 @@ No tiene sentido probar la mision de 10 pasos si el robot no se sostiene
 parado. Cada peldaño verifica UNA cosa, imprime los numeros y da un veredicto
 claro. Si un peldaño falla, los de arriba no significan nada.
 
-    python3 checks.py stand    peldaño 0: se queda de pie sin hacer nada?
-    python3 checks.py walk     peldaño 1: camina hacia adelante y frena?
-    python3 checks.py goto     peldaño 2: llega a un punto y avisa que llego?
+    python3 checks.py authority peldaño 0: hay un solo dueño y cancela bien?
+    python3 checks.py stand     peldaño 1: se queda de pie sin hacer nada?
+    python3 checks.py walk      peldaño 2: camina hacia adelante y frena?
+    python3 checks.py goto      peldaño 3: llega a un punto y avisa que llego?
     python3 checks.py all      los tres en orden, frenando en el primero que falle
 
 Todo se mide en TIEMPO DE PARED (el del reloj de quien mira). El simulador
@@ -17,6 +18,7 @@ del robot: las duraciones estan elegidas para que alcancen igual.
 Uso (dentro del contenedor jetson):
     python3 /workspace/g1/tools/checks.py stand
 """
+import json
 import math
 import sys
 import time
@@ -28,6 +30,7 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 
 STANDING_HEIGHT_MIN = 0.60   # por debajo de esto ya no esta de pie
+STAND_MAX_ERROR_M = 0.15     # sobre de espera libre; manipular exige mucho menos
 WALK_SPEED = 0.3             # m/s que le pedimos al caminar
 GOTO_DISTANCE = 1.0          # metros hacia adelante para el peldaño 2
 
@@ -37,11 +40,21 @@ class Checker(Node):
         super().__init__("checks")
         self.pose = None
         self.nav = None
-        self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
-        self.pub_hold = self.create_publisher(String, "/g1/hold", 10)
+        self.mobility_owner = None
+        self.pub_cmd = self.create_publisher(Twist, "/g1/cmd_vel/test", 10)
+        self.pub_mobility = self.create_publisher(
+            String, "/g1/mobility/request", 10
+        )
         self.pub_goal = self.create_publisher(PoseStamped, "/g1/goal", 10)
+        self.pub_reset = self.create_publisher(String, "/g1/reset", 10)
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
+        self.create_subscription(
+            String,
+            "/g1/mobility/status",
+            self.on_mobility_status,
+            10,
+        )
 
     def on_odom(self, msg: Odometry):
         p, o = msg.pose.pose.position, msg.pose.pose.orientation
@@ -51,6 +64,12 @@ class Checker(Node):
 
     def on_nav(self, msg: String):
         self.nav = msg.data
+
+    def on_mobility_status(self, msg: String):
+        try:
+            self.mobility_owner = json.loads(msg.data)["owner"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
 
     def spin_for(self, seconds: float):
         """Atiende ROS durante N segundos de reloj de pared."""
@@ -64,15 +83,43 @@ class Checker(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
         return self.pose is not None
 
-    def hold(self, on: bool):
-        """Prende o apaga el modo quieto de la navegacion.
+    def request_mobility(
+        self,
+        operation: str,
+        reason: str = None,
+        source: str = "test",
+        requester: str = "checks",
+    ):
+        request = {
+            "operation": operation,
+            "source": source,
+            "requester": requester,
+        }
+        if reason is not None:
+            request["reason"] = reason
+        self.pub_mobility.publish(String(data=json.dumps(request)))
 
-        Antes de manejar al robot a mano hay que pedirle a la navegacion que
-        suelte el volante: si los dos publican en /cmd_vel, se pelean y el
-        robot no se mueve.
-        """
-        self.pub_hold.publish(String(data="on" if on else "off"))
-        self.spin_for(1.0)
+    def acquire_test_mobility(self, timeout_s: float = 5.0) -> bool:
+        """Espera confirmación: publicar al topic de prueba no alcanza."""
+        end = time.monotonic() + timeout_s
+        while time.monotonic() < end:
+            self.request_mobility("acquire")
+            self.spin_for(0.25)
+            if self.mobility_owner == "test":
+                return True
+        return False
+
+    def release_test_mobility(self, reason: str):
+        self.send_cmd()
+        self.request_mobility("release", reason)
+        self.spin_for(0.25)
+
+    def reset_robot(self):
+        """Devuelve el banco al origen para no encadenar posiciones peligrosas."""
+        self.pub_reset.publish(String(data="prueba reproducible"))
+        # El reinicio se aplica dentro del lazo de física. Esperar también deja
+        # que navegación detecte el salto y entregue cualquier concesión vieja.
+        self.spin_for(2.0)
 
     def send_cmd(self, vx=0.0, vy=0.0, vyaw=0.0):
         t = Twist()
@@ -95,35 +142,121 @@ def veredicto(ok: bool, detalle: str) -> bool:
 
 
 # --------------------------------------------------------------------------
+def check_authority(c: Checker) -> bool:
+    """Peldaño 0: una intervención manual cancela una navegación vieja."""
+    print("\n=== PELDAÑO 0: la movilidad tiene un solo dueño? ===")
+    print("  Inicio una navegación, la interrumpo como operador y verifico")
+    print("  que no vuelva a arrancar sola cuando el operador libera el control.\n")
+
+    c.reset_robot()
+    x0, y0, _, yaw0 = c.pose
+    goal = PoseStamped()
+    goal.pose.position.x = x0 + 1.0 * math.cos(yaw0)
+    goal.pose.position.y = y0 + 1.0 * math.sin(yaw0)
+    c.nav = None
+    c.pub_goal.publish(goal)
+
+    end = time.monotonic() + 5.0
+    while c.mobility_owner != "navigation" and time.monotonic() < end:
+        c.spin_for(0.1)
+    if c.mobility_owner != "navigation":
+        return veredicto(
+            False,
+            f"navegación no obtuvo la movilidad; dueño: {c.mobility_owner}",
+        )
+
+    c.request_mobility(
+        "acquire",
+        source="manual",
+        requester="authority_check",
+    )
+    end = time.monotonic() + 0.5
+    while (
+        (c.mobility_owner != "manual" or c.nav != "cancelado")
+        and time.monotonic() < end
+    ):
+        c.spin_for(0.05)
+
+    preempted = c.mobility_owner == "manual" and c.nav == "cancelado"
+    c.request_mobility(
+        "release",
+        "prueba de intervención manual terminada",
+        source="manual",
+        requester="authority_check",
+    )
+    c.spin_for(1.5)
+
+    resumed = c.mobility_owner == "navigation"
+    c.reset_robot()
+    if not preempted:
+        return veredicto(
+            False,
+            f"la intervención no canceló limpiamente: dueño "
+            f"{c.mobility_owner}, estado de navegación {c.nav}",
+        )
+    if resumed:
+        return veredicto(
+            False,
+            "la navegación vieja recuperó control sin recibir un objetivo nuevo",
+        )
+    return veredicto(
+        True,
+        f"manual interrumpió, navegación confirmó 'cancelado' y el dueño "
+        f"quedó en {c.mobility_owner}",
+    )
+
+
+# --------------------------------------------------------------------------
 def check_stand(c: Checker) -> bool:
-    """Peldaño 0: parado y quieto, sin ninguna orden, durante 60 s de reloj."""
-    print("\n=== PELDAÑO 0: se queda de pie sin hacer nada? ===")
-    print("  Nadie le manda ordenes. Solo tiene que sostenerse.")
+    """Peldaño 0: equilibrio y mantenimiento de pose durante 60 s de reloj."""
+    print("\n=== PELDAÑO 0: se mantiene de pie y cerca de su anclaje? ===")
+    print("  stand_hold es el único dueño; navegación y pruebas no intervienen.")
     print("  Dura 60 s de reloj (~11 s del mundo del robot).\n")
+
+    c.spin_for(0.5)
+    if c.mobility_owner != "stand":
+        return veredicto(
+            False,
+            f"la movilidad pertenece a {c.mobility_owner}; esta prueba necesita "
+            "stand_hold como único dueño",
+        )
 
     x0, y0, z0, _ = c.pose
     print(f"  arranca: altura {z0:.3f} m en ({x0:.2f}, {y0:.2f})")
 
-    alturas, cayo_en = [], None
-    for i in range(6):
-        c.spin_for(10.0)
+    alturas, errores, cayo_en = [], [], None
+    for i in range(60):
+        c.spin_for(1.0)
         x, y, z, _ = c.pose
         alturas.append(z)
         d = math.hypot(x - x0, y - y0)
+        errores.append(d)
         estado = "de pie" if z > STANDING_HEIGHT_MIN else "EN EL PISO"
-        print(f"  t={10*(i+1):3d}s   altura {z:.3f} m   corrido {d:.2f} m   {estado}")
+        if (i + 1) % 10 == 0:
+            print(f"  t={i+1:3d}s   altura {z:.3f} m   error {d:.2f} m   {estado}")
         if z <= STANDING_HEIGHT_MIN and cayo_en is None:
-            cayo_en = 10 * (i + 1)
+            cayo_en = i + 1
 
     x, y, z, _ = c.pose
     deriva = math.hypot(x - x0, y - y0)
+    p95 = sorted(errores)[round(0.95 * (len(errores) - 1))]
+    max_error = max(errores)
+    print(f"  error de posición: final {deriva:.2f} m, "
+          f"percentil 95 {p95:.2f} m, máximo {max_error:.2f} m")
     if cayo_en is not None:
         return veredicto(False, f"se cayo a los {cayo_en} s (altura minima "
                                 f"{min(alturas):.3f} m). Nada de lo de arriba "
                                 f"tiene sentido probar hasta arreglar esto.")
+    if max_error > STAND_MAX_ERROR_M:
+        return veredicto(
+            False,
+            f"se mantuvo de pie pero salió del sobre de {STAND_MAX_ERROR_M:.2f} m "
+            f"(máximo {max_error:.2f} m)",
+        )
     return veredicto(True, f"aguanto los 60 s de pie (altura {min(alturas):.3f}-"
-                           f"{max(alturas):.3f} m). Se corrio {deriva:.2f} m por "
-                           f"la deriva conocida de la policy.")
+                           f"{max(alturas):.3f} m). El error final respecto del "
+                           f"anclaje fue {deriva:.2f} m y el percentil 95 "
+                           f"{p95:.2f} m.")
 
 
 def check_walk(c: Checker) -> bool:
@@ -132,24 +265,31 @@ def check_walk(c: Checker) -> bool:
     print(f"  Le mandamos {WALK_SPEED} m/s directo a las piernas, 40 s de reloj,")
     print("  y despues comando cero. Sin navegacion: esto prueba SOLO caminar.\n")
 
-    c.hold(False)   # la navegacion suelta el volante: manejamos nosotros
+    c.reset_robot()
+    if not c.acquire_test_mobility():
+        return veredicto(
+            False,
+            f"el árbitro no concedió TEST; dueño actual: {c.mobility_owner}",
+        )
     x0, y0, z0, yaw0 = c.pose
     print(f"  arranca: altura {z0:.3f} m en ({x0:.2f}, {y0:.2f}), rumbo {math.degrees(yaw0):.0f} grados")
 
-    c.drive(40.0, vx=WALK_SPEED)
-    x1, y1, z1, _ = c.pose
-    recorrido = math.hypot(x1 - x0, y1 - y0)
-    print(f"  camino:  altura {z1:.3f} m, recorrio {recorrido:.2f} m")
+    try:
+        c.drive(40.0, vx=WALK_SPEED)
+        x1, y1, z1, _ = c.pose
+        recorrido = math.hypot(x1 - x0, y1 - y0)
+        print(f"  camino:  altura {z1:.3f} m, recorrio {recorrido:.2f} m")
 
-    print("  ahora comando cero: tiene que frenar y quedarse...")
-    c.spin_for(20.0)
-    x2, y2, z2, yaw2 = c.pose
-    despues_de_frenar = math.hypot(x2 - x1, y2 - y1)
-    giro = abs(math.degrees(yaw2 - yaw0))
-    print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
-          f"giro {giro:.0f} grados en total")
+        print("  ahora comando cero: tiene que frenar y quedarse...")
+        c.spin_for(20.0)
+        x2, y2, z2, yaw2 = c.pose
+        despues_de_frenar = math.hypot(x2 - x1, y2 - y1)
+        giro = abs(math.degrees(yaw2 - yaw0))
+        print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
+              f"giro {giro:.0f} grados en total")
+    finally:
+        c.release_test_mobility("prueba de caminar terminada")
 
-    c.hold(True)    # devolver el volante a la navegacion
     if z2 <= STANDING_HEIGHT_MIN:
         return veredicto(False, f"termino en el piso (altura {z2:.3f} m)")
     if recorrido < 0.3:
@@ -166,6 +306,7 @@ def check_goto(c: Checker) -> bool:
     print(f"  Objetivo: {GOTO_DISTANCE} m hacia adelante de donde esta.")
     print("  Ahora si interviene la navegacion. Hasta 3 minutos de reloj.\n")
 
+    c.reset_robot()
     x0, y0, z0, yaw0 = c.pose
     gx = x0 + GOTO_DISTANCE * math.cos(yaw0)
     gy = y0 + GOTO_DISTANCE * math.sin(yaw0)
@@ -195,7 +336,12 @@ def check_goto(c: Checker) -> bool:
                             f"objetivo tras 3 minutos — probablemente orbitando.")
 
 
-CHECKS = {"stand": check_stand, "walk": check_walk, "goto": check_goto}
+CHECKS = {
+    "authority": check_authority,
+    "stand": check_stand,
+    "walk": check_walk,
+    "goto": check_goto,
+}
 
 
 def main():
@@ -221,6 +367,15 @@ def main():
         return 0
     finally:
         c.send_cmd()
+        if c.mobility_owner == "test":
+            c.request_mobility("release", "banco de pruebas detenido")
+        elif c.mobility_owner == "manual":
+            c.request_mobility(
+                "release",
+                "banco de pruebas detenido",
+                source="manual",
+                requester="authority_check",
+            )
         c.destroy_node()
         rclpy.shutdown()
 

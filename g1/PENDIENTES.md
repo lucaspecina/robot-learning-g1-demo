@@ -6,16 +6,35 @@ funcionando.
 
 ---
 
-## Problema 1 — `/cmd_vel` no tiene dueño
+## Problema 1 — autoridad de `/cmd_vel`: estructura resuelta
 
 **El síntoma**: cualquier nodo publica órdenes de velocidad cuando quiere. Si
 dos publican a la vez, se anulan y el robot se queda quieto sin que ningún log
 diga nada raro. Nos pasó con la navegación manteniendo la posición mientras una
 prueba pedía caminar.
 
-**Lo que hay hoy** (paliativo, tres parches sobre el mismo agujero): la skill
-de navegación mantiene la posición cuando no tiene objetivo, y un interruptor
-`/g1/hold` le pide que suelte el volante.
+**Estado actual**: `mobility_authority.py` es el único publicador de
+`/cmd_vel`. Navegación, espera, control manual y pruebas tienen entradas
+separadas, piden una concesión exclusiva y dejan registro de cada transición.
+`stand_hold.py` corrige la deriva al esperar; navegación se calla al terminar.
+Se eliminó `/g1/hold`.
+
+La integración pasó, en una misma corrida y reiniciando la pose antes de cada
+movimiento: espera, caminata y navegación. Esto resuelve el conflicto de
+autoridad, pero **no** la causa física de la deriva: el mantenimiento de pose
+sigue siendo una capa necesaria y observable, no evidencia de que la física
+esté bien.
+
+Última corrida completa, 28-jul:
+
+- intervención manual: canceló navegación y no se reanudó sola;
+- espera de 60 s de pared: error final 9 cm, percentil 95 y máximo 13 cm;
+- caminata: 2,58 m, siguió 8 cm al frenar, desvío acumulado 2°;
+- navegación: llegó a 27 cm del objetivo.
+
+Los 13 cm de espera alcanzan para sala abierta, no para manipular. Por eso el
+problema no queda maquillado como “resuelto”: la precisión se debe medir y
+cerrar después de entender la deriva física.
 
 **El diagnóstico de Codex, que corrige el nuestro**: "quedarse quieto es un
 comportamiento activo" es correcto, pero "siempre debe haber navegación

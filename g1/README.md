@@ -7,6 +7,8 @@ El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 bash run_g1.sh policy 29dof 0 "--camera --scene"
 
 # las capas de arriba (dentro del contenedor jetson)
+python3 mobility_authority.py  # único dueño de /cmd_vel
+python3 stand_hold.py          # corrige la deriva durante una espera
 python3 skills/go_to.py       # navegación
 python3 skills/detector.py    # percepción
 python3 agent/agent.py        # el agente
@@ -58,8 +60,11 @@ buscar_persona   --   la skill no gira todavía: espera pasivamente
         /g1/goal   /g1/arm_pose   (lee /g1/detections, /g1/nav_status)
                         |
        [ skills/go_to.py ]  [ skills/detector.py ]   <- JETSON
+            /g1/cmd_vel/navigation
                         |
-                    /cmd_vel
+     [ stand_hold.py ] -> [ mobility_authority.py ]
+                                  |
+                              /cmd_vel
                         |
     +-------------------+--------------------------------+
     |  EL ROBOT (g1_robot.py)                            |
@@ -76,7 +81,10 @@ buscar_persona   --   la skill no gira todavía: espera pasivamente
 | `/g1/nav_status` | String | la navegación |
 | `/g1/detections` | String (JSON) | el detector |
 | `/g1/arm_pose` | String | el agente |
-| `/cmd_vel` | Twist | la navegación (o el teleop) |
+| `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
+| `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
+| `/g1/mobility/status` | String (JSON) | el árbitro de movilidad |
+| `/cmd_vel` | Twist | sólo `mobility_authority.py` |
 | `/g1/odom`, `/g1/joint_states` | Odometry, JointState | el robot |
 | `/g1/head_cam/image` | Image | el robot |
 
@@ -95,6 +103,8 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación: mesa, botella, reloj, dos personas |
 | `skills/go_to.py` | navegación a un punto |
+| `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |
+| `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/detector.py` | percepción por color |
 | `agent/agent.py` | el agente: plan y ejecución |
 | `run_g1.sh` | lanzador |
@@ -122,7 +132,8 @@ policy tiene que controlar desde el primer instante.
 
 **Física y locomoción en el mismo proceso.** Separarlas en procesos asíncronos
 abre el lazo de control en el tiempo y el bípedo se cae. La modularidad va en
-`/cmd_vel`, que es donde el robot real también la tiene.
+la orden de velocidad. En esta demo, un árbitro exclusivo deja una única salida
+en `/cmd_vel`; en el G1 real esa salida podrá alimentar la interfaz de Unitree.
 
 **No se puede esperar dentro de un callback de ROS** ("Executor is already
 spinning"): las tareas largas van en un hilo aparte que lee lo que los
@@ -138,13 +149,15 @@ fondo es el reloj simulado de ROS 2 (`/clock` + `use_sim_time`).
 
 ## Lo siguiente
 
-1. **Que la cámara vea la mesa**: inclinarla hacia abajo o acercar la pose de
+1. **Reducir la deriva física**: explicar y cerrar la brecha Isaac–MuJoCo sin
+   esconderla con `stand_hold.py`.
+2. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+   de simulación.
+3. **Que la cámara vea la mesa**: inclinarla hacia abajo o acercar la pose de
    aproximación. Sin eso no hay nada que agarrar.
-2. **`buscar_persona` de verdad**: girar en el lugar hasta tener a la persona
+4. **`buscar_persona` de verdad**: girar en el lugar hasta tener a la persona
    en el centro de la imagen, en vez de esperar pasivamente.
-3. **El agarre** con un VLA entrenado por nosotros.
-4. **El planificador con un modelo de lenguaje** (la estructura ya está;
+5. **El agarre** con un VLA entrenado por nosotros.
+6. **El planificador con un modelo de lenguaje** (la estructura ya está;
    falta el proveedor y las credenciales).
-5. **Reloj simulado** (`/clock` + `use_sim_time`) para que los plazos de todos
-   los nodos se midan en tiempo de simulación.
-6. **Leer el reloj de verdad** con un modelo con visión, en vez de la hora fija.
+7. **Leer el reloj de verdad** con un modelo con visión, en vez de la hora fija.

@@ -9,7 +9,9 @@ Corre en la Jetson (fuera del robot), y solo habla los canales publicos:
 
   recibe:  /g1/goal        (geometry_msgs/PoseStamped — a donde ir)
            /g1/odom        (nav_msgs/Odometry — donde esta)
-  publica: /cmd_vel        (geometry_msgs/Twist — como moverse)
+           /g1/mobility/status (quien tiene permiso para mover la base)
+  publica: /g1/cmd_vel/navigation (geometry_msgs/Twist — como moverse)
+           /g1/mobility/request (adquirir o liberar la movilidad)
            /g1/nav_status  (std_msgs/String — moviendo | llegue | cancelado)
 
 Como decide: primero se orienta hacia el objetivo girando en el lugar, despues
@@ -24,9 +26,12 @@ Uso (dentro del contenedor jetson):
     ros2 topic pub --once /g1/goal geometry_msgs/msg/PoseStamped \
         "{pose: {position: {x: 2.0, y: 1.0}}}"
 """
+import json
 import math
+import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
@@ -34,20 +39,13 @@ from std_msgs.msg import String
 
 # --- parametros de navegacion ---
 TOLERANCE_M = 0.35        # a esta distance del objetivo damos por llegado
-# --- mantener la posicion ---
-# La locomocion deriva ~9 cm/s con comando cero, asi que la correccion tiene
-# que ser MAS RAPIDA que la deriva o el robot pasa la vida afuera de su punto.
-# Un control proporcional con zona muerta chica: reacciona enseguida y empuja
-# con fuerza creciente segun cuanto se corrio.
-MAX_DRIFT_M = 0.05         # zona muerta: por debajo de esto no vale la pena tocar
-DRIFT_GAIN = 2.0           # cuanta velocidad por metro de error
-MAX_CORRECTION = 0.45      # m/s tope de la correccion (5x la deriva)
 SALTO_M = 1.0              # un salto mayor a esto entre dos lecturas solo puede
                            # ser un teletransporte (reinicio o freeze), no un paso
 TOLERANCE_RAD = 0.25      # error de heading tolerado antes de empezar a avanzar
 LINEAR_VEL = 0.3           # m/s de crucero
 ANGULAR_VEL = 0.5          # rad/s al girar
 RATE_HZ = 10.0            # cada cuanto recalculamos y publicamos
+CLAIM_RETRY_S = 0.5       # si otro dueño se retira, volver a pedir sin inundar ROS
 
 
 def yaw_from_quaternion(w, x, y, z) -> float:
@@ -65,14 +63,24 @@ class GoTo(Node):
         super().__init__("go_to")
         self.pose = None            # (x, y, yaw) del robot
         self.goal = None            # (x, y) objetivo
-        self.anchor = None         # donde tiene que quedarse cuando no hay objetivo
-        self.holding = True        # mantener la posicion cuando no hay objetivo
+        self.mobility_owner = None
+        self.last_claim_at = float("-inf")
 
-        self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.pub_cmd = self.create_publisher(
+            Twist, "/g1/cmd_vel/navigation", 10
+        )
+        self.pub_mobility = self.create_publisher(
+            String, "/g1/mobility/request", 10
+        )
         self.pub_status = self.create_publisher(String, "/g1/nav_status", 10)
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(PoseStamped, "/g1/goal", self.on_goal, 10)
-        self.create_subscription(String, "/g1/hold", self.on_hold, 10)
+        self.create_subscription(
+            String,
+            "/g1/mobility/status",
+            self.on_mobility_status,
+            10,
+        )
         self.create_timer(1.0 / RATE_HZ, self.tick)
 
         self.get_logger().info("go_to listo. Esperando objetivos en /g1/goal")
@@ -91,84 +99,78 @@ class GoTo(Node):
         # posicion donde habia estado la corrida anterior.)
         if anterior is not None:
             if math.hypot(p.x - anterior[0], p.y - anterior[1]) > SALTO_M:
+                had_goal = self.goal is not None
                 self.goal = None
-                self.anchor = (p.x, p.y)
                 self.get_logger().warn(
                     f"el robot se teletransporto a ({p.x:.2f}, {p.y:.2f}): "
-                    f"olvido el objetivo y me anclo aca")
+                    "cancelo el objetivo")
+                if had_goal:
+                    self.stop()
+                    self.publish_status("cancelado")
+                    self.request_mobility(
+                        "release", "salto de odometría durante navegación"
+                    )
                 return
 
-        # Anclarse donde nace: la policy con comando cero deriva varios cm/s,
-        # y sin anclaje inicial el robot se va caminando solo hasta que alguien
-        # le da el primer objetivo. Desde el primer dato de odometria, su
-        # lugar es donde esta parado.
-        if self.anchor is None and self.holding:
-            self.anchor = (p.x, p.y)
-            self.get_logger().info(
-                f"anclado al nacer en ({p.x:.2f}, {p.y:.2f}): "
-                f"si deriva mas de {MAX_DRIFT_M} m, vuelve solo")
-
-    def on_hold(self, msg: String):
-        """on/off del modo quieto.
-
-        Hace falta porque solo puede haber UN dueño de /cmd_vel a la vez: si
-        alguien maneja al robot a mano (una prueba, un teleop) y ademas esto
-        insiste en volver al anclaje, las dos ordenes se pelean diez veces por
-        segundo y el robot no va a ninguna parte.
-        """
-        self.holding = msg.data.strip().lower() in ("on", "true", "1")
-        self.get_logger().info(
-            f"modo quieto: {'activado' if self.holding else 'apagado'} "
-            f"(otro tiene el control de /cmd_vel)")
-        if not self.holding:
-            self.anchor = None     # al volver, se ancla donde este entonces
+    def on_mobility_status(self, msg: String):
+        try:
+            owner = json.loads(msg.data)["owner"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return
+        previous = self.mobility_owner
+        self.mobility_owner = owner
+        if owner == "navigation" and previous != "navigation":
+            self.get_logger().info("autoridad de navegación concedida")
+            if self.goal is not None:
+                self.publish_status("moviendo")
+        elif previous == "navigation" and owner != "navigation":
+            self.get_logger().warn(
+                f"perdí la autoridad de navegación; dueño actual: {owner}"
+            )
+            if self.goal is not None:
+                # Una orden manual o una falla de la concesión invalida el
+                # objetivo vigente. Reanudarlo al liberar el joystick haría
+                # que una intención vieja mueva el robot sin una orden nueva.
+                self.goal = None
+                self.publish_status("cancelado")
 
     def on_goal(self, msg: PoseStamped):
         self.goal = (msg.pose.position.x, msg.pose.position.y)
         self.get_logger().info(f"objetivo nuevo: ({self.goal[0]:.2f}, {self.goal[1]:.2f})")
-        self.publish_status("moviendo")
+        self.publish_status("esperando_control")
+        self.claim_mobility(force=True)
 
     def publish_status(self, text: str):
         self.pub_status.publish(String(data=text))
 
+    def request_mobility(self, operation: str, reason: str = None):
+        request = {
+            "operation": operation,
+            "source": "navigation",
+            "requester": "go_to",
+        }
+        if reason is not None:
+            request["reason"] = reason
+        self.pub_mobility.publish(String(data=json.dumps(request)))
+
+    def claim_mobility(self, force: bool = False):
+        now = time.monotonic()
+        if force or now - self.last_claim_at >= CLAIM_RETRY_S:
+            self.request_mobility("acquire")
+            self.last_claim_at = now
+
     def stop(self):
         self.pub_cmd.publish(Twist())
 
-    def hold_position(self):
-        """Corrige la deriva: control proporcional hacia el punto de anclaje."""
-        x, y, yaw = self.pose
-        ax, ay = self.anchor
-        dx, dy = ax - x, ay - y
-        error = math.hypot(dx, dy)
-
-        if error < MAX_DRIFT_M:
-            self.stop()
-            return
-
-        # Velocidad proporcional al error: cuanto mas se corrio, mas fuerte
-        # vuelve. Sin esto la correccion es mas lenta que la deriva y el robot
-        # nunca llega a su punto — se arrastra de vuelta mientras se sigue yendo.
-        speed = min(DRIFT_GAIN * error, MAX_CORRECTION)
-        heading = normalize_angle(math.atan2(dy, dx) - yaw)
-        cmd = Twist()
-        cmd.linear.x = speed * math.cos(heading)
-        cmd.linear.y = speed * math.sin(heading)
-        self.pub_cmd.publish(cmd)
-
     def tick(self):
         """Un ciclo de navegacion: mirar donde estoy, decidir, mandar velocidad."""
-        if self.pose is None:
+        if self.pose is None or self.goal is None:
             return
 
-        # Sin objetivo: mantener la posicion. La policy de locomocion, con
-        # comando cero, no queda perfectamente quieta — deriva unos centimetros
-        # por segundo porque sigue su ciclo de paso y los pies patinan. Ninguna
-        # policy es perfecta en esto, y el robot real tampoco lo es. La solucion
-        # no es pedirle mas a la locomocion sino ponerle realimentacion de
-        # posicion encima: si se corrio, se le ordena volver.
-        if self.goal is None:
-            if self.holding and self.anchor is not None:
-                self.hold_position()
+        # La navegación puede calcular todo lo que quiera, pero no publica
+        # movimiento hasta que el árbitro confirme que posee la movilidad.
+        if self.mobility_owner != "navigation":
+            self.claim_mobility()
             return
 
         x, y, yaw = self.pose
@@ -182,7 +184,7 @@ class GoTo(Node):
             self.get_logger().info(f"llegue: quede a {distance:.2f} m del objetivo")
             self.publish_status("llegue")
             self.goal = None
-            self.anchor = (x, y)     # de aca en mas, quedarse en este punto
+            self.request_mobility("release", "objetivo de navegación terminado")
             return
 
         # Error de heading: cuanto tengo que girar para apuntar al objetivo.
@@ -208,10 +210,14 @@ def main():
     node = GoTo()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
         node.stop()
-    node.destroy_node()
-    rclpy.shutdown()
+        node.request_mobility("release", "nodo de navegación detenido")
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

@@ -40,7 +40,9 @@ preflight() {
         echo "   habia $zombis instancia(s) del robot dando vueltas: matando"
         bash ~/go2-lab/g1/run_g1.sh stop >/dev/null
     fi
-    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py" 2>/dev/null
+    sudo docker exec jetson pkill -f \
+        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
+        2>/dev/null
     sleep 2
 
     local gpu
@@ -73,8 +75,14 @@ up)
     echo "   listo"
 
     echo ">> Las capas de arriba, en la jetson:"
-    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py|dashboard.py" 2>/dev/null
+    sudo docker exec jetson pkill -f \
+        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
+        2>/dev/null
     sleep 2
+    # El árbitro nace antes que cualquier fuente. Así nunca existe una ventana
+    # donde navegación o pruebas puedan hablar directo con el robot.
+    launch "autoridad"    mobility.log  mobility_authority.py
+    launch "quieto"       stand.log     stand_hold.py
     launch "navegacion"  goto.log      skills/go_to.py
     launch "percepcion"  detector.log  skills/detector.py
     launch "agente"      agent.log     agent/agent.py
@@ -154,7 +162,7 @@ status)
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
-    for p in go_to detector agent dashboard; do
+    for p in mobility_authority stand_hold go_to detector agent dashboard; do
         if sudo docker exec jetson pgrep -f "$p.py" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
@@ -170,7 +178,9 @@ kill)
     # MATAR TODO: robot + capas de arriba. El tablero sigue prendido para poder
     # ver como el sistema vuelve a levantarse (se apaga con: tablero off).
     bash ~/go2-lab/g1/run_g1.sh stop
-    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py" 2>/dev/null
+    sudo docker exec jetson pkill -f \
+        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
+        2>/dev/null
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
     echo "GPU:   $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
@@ -178,9 +188,10 @@ kill)
     ;;
 
 down)
-    # El tablero NO se apaga aca: sigue mirando mientras el resto se reinicia.
+    # La autoridad y stand_hold pertenecen al robot a bordo: siguen activos
+    # mientras el robot esté de pie. Sólo se detienen tareas y percepción.
     sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py"
-    echo "capas de arriba detenidas (el robot y el tablero siguen)"
+    echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
 *) echo "uso: $0 {up|start|freeze|check [stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
