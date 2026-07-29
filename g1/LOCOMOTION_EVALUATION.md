@@ -171,9 +171,86 @@ Pruebas dentro del proceso real de la demo:
 | Cámara a 3 Hz simulados | verificada; ya no repite cuadros a 50 Hz |
 | Arranque congelado | 74,4 cm, cámara y ROS activos |
 
-La traslación mientras está quieto está resuelta. El error de rumbo durante
-trayectos largos todavía requiere corrección activa de navegación y una
-alineación final cerca de la mesa.
+La traslación natural de la policy bajó mucho, pero eso no autoriza a declarar
+resuelta la quietud del sistema completo. `stand_hold` debe sostener un anclaje
+y aprobar repetidamente; la navegación no debe usarse para esconder este
+problema.
+
+## Comparación directa con el despliegue oficial
+
+La documentación de NVIDIA distingue dos archivos: el `checkpoint` sirve para
+entrenamiento y evaluación por lotes; el TorchScript junto con su YAML es el
+archivo listo para desplegar. La demo usa el segundo.
+
+Primero se comparó nuestro adaptador con las clases oficiales
+`ObservationProcessor` y `ActionProcessor`, usando el mismo TorchScript y ocho
+estados deterministas:
+
+| Contrato comparado | Resultado |
+|---|---:|
+| Nombres y orden de las 29 articulaciones observadas | iguales |
+| Nombres y orden de las 12 articulaciones controladas | iguales |
+| 80 entradas de la policy | error máximo `0.0` |
+| 12 salidas crudas de la policy | error máximo `0.0` |
+| 12 objetivos enviados a los motores | error máximo `0.0` |
+
+La auditoría encontró antes una diferencia real: NVIDIA conserva la salida
+anterior limitada a `±10` como memoria de la próxima decisión, pero limita a
+`±6` lo enviado al motor. Nosotros usábamos `±6` para ambas cosas. Se corrigió
+y recién entonces la comparación dio cero. El error sólo aparece ante picos
+mayores que seis, por lo que no explica por sí solo el desvío ordinario.
+
+El evaluador oficial no puede alimentar directamente el TorchScript recurrente
+con una sola réplica: agrega una dimensión y luego intenta abrirlo como si
+fuera un `checkpoint`. Para probar la física oficial se hizo una adaptación
+de forma solamente: `[1, 80] → [80]` antes de la policy y `[12] → [1, 12]`
+después. No se modificaron el cuerpo, la física, la policy, las mediciones ni
+los comandos.
+
+Comparación con la misma secuencia: 5 s quieto, 10 s a `0,3 m/s` y 15 s
+detenido:
+
+| Entorno | Corridas | Avance | Costado | Ángulo de trayectoria |
+|---|---:|---:|---:|---:|
+| MuJoCo, adaptador oficial y export oficial | 3 | 2,59 m | -8,2 cm | 1,82° |
+| Isaac oficial, export oficial | 3 | 1,82–2,07 m | -9,3 a -65,0 cm | 2,6–19,7° |
+| Demo Isaac, integración real | 3 | 2,47–2,56 m | -23 a -35 cm | 5,1–7,8° |
+
+En la demo el frenado fue bueno (`5–8 cm`) y no hubo caídas, pero las tres
+caminatas fallaron el límite de `5°`. La quietud con `stand_hold` aprobó dos
+veces y falló una: el máximo fue `0`, `5` y `17 cm`. Por lo tanto, el cableado
+de la policy está verificado, pero el comportamiento físico completo todavía
+no está aprobado.
+
+La escena oficial de Isaac deja libre la parte superior y en estas corridas
+los brazos se movieron varios radianes. No es idéntica a la demo, que sostiene
+los brazos, pero sirve para responder la sospecha principal: incluso el flujo
+oficial se desvía mucho y varía entre corridas. Nuestra integración no muestra
+la firma de ejes intercambiados ni un resultado peor que la referencia.
+
+La conclusión de diseño cambia el lugar donde se exige precisión:
+
+- La locomoción de piernas debe mantenerse de pie, responder en la dirección
+  pedida y frenar. No garantiza por sí sola una trayectoria global recta.
+- Navegación debe corregir rumbo y posición mientras es la única dueña del
+  movimiento. Esa corrección es parte normal del sistema, no un parche.
+- `stand_hold` debe mantener el anclaje cuando nadie navega. El fallo medido de
+  `17 cm` motivó el experimento separado que aparece debajo.
+- La alineación junto a mesa o persona debe tener su prueba propia y una
+  tolerancia mucho menor que la espera libre.
+
+El primer A/B de `stand_hold` cambió sólo la velocidad máxima de corrección de
+`0,45` a `0,15 m/s`. El límite anterior permitía perseguir el anclaje casi a
+velocidad de marcha.
+
+| Corrida quieto | Máximo respecto del anclaje |
+|---|---:|
+| 1 | 1 cm |
+| 2 | <1 cm |
+| 3 | <1 cm |
+
+Se conserva el cambio. La caminata posterior avanzó `2,56 m`, se desvió `4,8°`,
+no cayó y frenó en `5 cm`.
 
 ## Poses de brazos
 
@@ -220,14 +297,19 @@ como forma de ocultar una pose incompatible con la locomoción.
 
 ## Decisión
 
-WBC-AGILE reemplaza a la locomoción anterior como base de la demo. Las
-iteraciones del solucionador, la fricción y los contactos dejan de ser líneas
-principales de investigación porque el conjunto oficial funciona con `8/4` y
-su física sin ajustes.
+WBC-AGILE reemplaza a la locomoción anterior como base de la demo. El contrato
+de despliegue está integrado y verificado; no hay evidencia de articulaciones
+intercambiadas ni de entradas desordenadas.
 
-La locomoción base está integrada y verificada. Quedan como trabajos nuevos,
-separados:
+No está verificado todavía que nuestra ejecución física reproduzca la
+referencia oficial con precisión suficiente. Hasta terminar la comparación
+Isaac contra Isaac, no corresponde atribuir la diferencia a contactos,
+solucionador, control de brazos o navegación.
 
+Quedan como trabajos separados:
+
+- aislar la primera diferencia física contra la escena oficial de Isaac;
+- lograr que quietud y rumbo aprueben tres repeticiones;
 - inspección visual de las pruebas;
 - diseño de una pose de transporte compatible;
 - escalera de cargas;

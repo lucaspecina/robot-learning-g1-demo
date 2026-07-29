@@ -22,6 +22,7 @@ catalogo de skills y el formato del plan son los que se le pasarian al modelo.
 Cuando haya credenciales, se cambia el planificador y el resto sigue igual.
 """
 import json
+import math
 import os
 import threading
 import time
@@ -39,8 +40,10 @@ from std_msgs.msg import String
 # caminaria contra el mueble, quedaria trabado a medio metro y la navegacion
 # nunca daria por cumplido el objetivo (nos paso).
 SEMANTIC_MAP = {
-    "mesa": (1.8, 0.0),     # 1.2 m delante de la mesa, que esta en (3.0, 0.0)
-    "reloj": (0.8, 1.8),    # a unos pasos del reloj, que esta en (0.0, 2.5)
+    # Cada entrada es (x, y, yaw): no alcanza con llegar al lugar; la postura
+    # final debe dejar el sensor mirando al elemento que se quiere usar.
+    "mesa": (1.8, 0.0, 0.0),
+    "reloj": (0.8, 1.8, 2.4228),
 }
 
 # El catalogo de skills: lo que el robot sabe hacer. Esto es, literalmente, lo
@@ -174,10 +177,13 @@ class Agent(Node):
         if skill == "ir_a":
             if arg not in SEMANTIC_MAP:
                 return False
-            x, y = SEMANTIC_MAP[arg]
+            x, y, yaw = SEMANTIC_MAP[arg]
             goal = PoseStamped()
             goal.header.stamp = self.get_clock().now().to_msg()
+            goal.header.frame_id = "odom"
             goal.pose.position.x, goal.pose.position.y = float(x), float(y)
+            goal.pose.orientation.z = math.sin(yaw / 2.0)
+            goal.pose.orientation.w = math.cos(yaw / 2.0)
             self.nav_status = None
             self.pub_goal.publish(goal)
             return self.esperar_llegada()

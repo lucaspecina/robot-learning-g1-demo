@@ -4,6 +4,7 @@
 # Uso (en la VM):
 #   bash run_demo.sh up          arranca robot + skills + agente
 #   bash run_demo.sh check [cual] LA ESCALERA DE PRUEBAS: stand | walk | goto | all
+#   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
 #   bash run_demo.sh mission     le da la mision completa de 10 pasos
 #   bash run_demo.sh status      como viene todo
@@ -124,10 +125,11 @@ pose)
         exit 1
         ;;
     esac
+    # Publicar no prueba que el robot haya recibido ni ejecutado la orden.
+    # Este verificador espera confirmación y compara el objetivo con los
+    # ángulos reales de las catorce articulaciones.
     sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/arm_pose std_msgs/msg/String \"{data: $POSE}\"" \
-        >/dev/null 2>&1
-    echo "brazos -> $POSE"
+        "$ROS && python3 $D/tools/set_arm_pose.py $POSE"
     ;;
 
 tablero)
@@ -149,7 +151,33 @@ tablero)
 
 check)
     # La escalera de pruebas, de lo mas simple a lo mas complejo.
+    # Soltar antes evita que un robot clavado artificialmente apruebe quietud.
+    sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
+    # La confirmación se publica desde el lazo de física; el proceso de prueba
+    # no debe ganarle la carrera y leer todavía el estado congelado anterior.
+    sleep 2
     sudo docker exec jetson bash -c         "$ROS && python3 $D/tools/checks.py ${2:-all}"
+    ;;
+
+clock)
+    # Esta prueba aísla navegación, orientación y cámara. No usa todavía el
+    # agente ni la lectura de hora, porque mezclar esas capas ocultaría cuál
+    # falló si el reloj no termina dentro de la imagen.
+    sudo docker exec jetson bash -c \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: freeze}\"" \
+        >/dev/null 2>&1
+    sleep 1
+    sudo docker exec jetson bash -c \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\"" \
+        >/dev/null 2>&1
+    sleep 2
+    sudo docker exec jetson bash -c \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/goal geometry_msgs/msg/PoseStamped \
+        \"{header: {frame_id: odom}, pose: {position: {x: 0.8, y: 1.8, z: 0.0}, \
+        orientation: {x: 0.0, y: 0.0, z: 0.936109, w: 0.351709}}}\"" \
+        >/dev/null 2>&1
+    echo "prueba del reloj iniciada: llegada, orientación final y cámara"
+    echo "seguí el movimiento en Isaac y la imagen en el tablero"
     ;;
 
 mission)
@@ -213,5 +241,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|start|freeze|clock|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

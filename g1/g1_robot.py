@@ -7,7 +7,8 @@ del sistema es la misma que tendra el robot fisico:
 
   recibe:  /cmd_vel          (geometry_msgs/Twist — a que velocidad ir)
   publica: /g1/odom          (nav_msgs/Odometry — donde esta el cuerpo)
-           /g1/joint_states  (sensor_msgs/JointState — estado de las piernas)
+           /g1/joint_states  (sensor_msgs/JointState — estado del cuerpo completo)
+           /g1/arm_status    (std_msgs/String — orden y medición de los brazos)
 
 Por que fisica y locomocion van juntas: un bipedo necesita que la decision de
 la policy y el paso de fisica esten sincronizados. Separarlos en procesos
@@ -25,6 +26,7 @@ Uso:
 """
 import argparse
 import csv
+import json
 import math
 import os
 import sys
@@ -402,6 +404,12 @@ class G1RobotNode(Node):
 
         self.pub_state = self.create_publisher(JointState, "/g1/joint_states", 10)
         self.pub_odom = self.create_publisher(Odometry, "/g1/odom", 10)
+        self.pub_arm_status = self.create_publisher(
+            RosString, "/g1/arm_status", 10
+        )
+        self.pub_robot_status = self.create_publisher(
+            RosString, "/g1/robot_status", 10
+        )
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)
         self.create_subscription(RosString, "/g1/reset", self.on_reset, 10)
@@ -465,6 +473,47 @@ class G1RobotNode(Node):
         odom.twist.twist.angular.y = float(ang_vel[1])
         odom.twist.twist.angular.z = float(ang_vel[2])
         self.pub_odom.publish(odom)
+        # Una pose inmóvil no demuestra que el equilibrio esté funcionando:
+        # el modo congelado reescribe el estado y puede producir un falso éxito.
+        self.pub_robot_status.publish(RosString(data=json.dumps({
+            "mode": "frozen" if self.frozen else "active",
+        })))
+
+    def publish_arm_status(
+        self,
+        pose_name,
+        joint_names,
+        target,
+        actual,
+    ):
+        """Confirma la orden con mediciones; publicar el pedido no prueba movimiento."""
+        target = np.asarray(target, dtype=np.float32)
+        actual = np.asarray(actual, dtype=np.float32)
+        errors = np.abs(target - actual)
+        # Las muñecas del modelo oficial tienen mucha menos rigidez que
+        # hombros y codos. La prueba activa midió un piso repetible de 2,4°
+        # bajo gravedad; exigirles 1,7° convertía una limitación conocida del
+        # motor en un falso fallo de toda la pose.
+        tolerances = np.asarray(
+            [0.05 if "_wrist_" in name else 0.03 for name in joint_names],
+            dtype=np.float32,
+        )
+        max_error = float(np.max(errors))
+        max_error_ratio = float(np.max(errors / tolerances))
+        status = {
+            "pose": pose_name,
+            "mode": "frozen_preview" if self.frozen else "active",
+            "joint_names": list(joint_names),
+            "target_rad": target.round(4).tolist(),
+            "actual_rad": actual.round(4).tolist(),
+            "tolerance_rad": tolerances.round(4).tolist(),
+            "max_error_rad": round(max_error, 4),
+            "max_error_ratio": round(max_error_ratio, 4),
+            "reached": max_error_ratio < 1.0,
+        }
+        self.pub_arm_status.publish(
+            RosString(data=json.dumps(status, ensure_ascii=False))
+        )
 
 
 def main():
@@ -714,7 +763,9 @@ def main():
         )
 
     rclpy.init()
-    node = G1RobotNode(cfg, action_joint_names)
+    # joint_states representa al robot completo. Publicar sólo las piernas
+    # ocultaba si una orden de brazos se había ejecutado realmente.
+    node = G1RobotNode(cfg, robot.joint_names)
     cam_pub = CameraPublisher(node, camera) if camera is not None else None
     if cam_pub is not None:
         print("[robot] camara de cabeza publicando en /g1/head_cam/image", flush=True)
@@ -744,6 +795,18 @@ def main():
             diagnostic_damping,
         )
 
+    def consume_arm_pose_request():
+        """Aplica una orden pendiente y deja una confirmación inequívoca en el log."""
+        if arms is None or node.arm_pose_request is None:
+            return
+        requested_pose = node.arm_pose_request
+        node.arm_pose_request = None
+        try:
+            arms.set_pose(requested_pose)
+            print(f"\n[robot] brazos -> pose '{requested_pose}'", flush=True)
+        except ValueError as error:
+            print(f"\n[robot] brazos: {error}", flush=True)
+
     while simulation_app.is_running():
         # --- congelado: clavado en el punto de partida, la policy no toca ---
         # La fisica sigue corriendo (para dibujar y para la camara), pero en
@@ -756,11 +819,22 @@ def main():
                 print("\n[robot] CONGELADO en el punto de partida. "
                       "Soltar con: run_demo.sh start", flush=True)
                 was_frozen = True
+            if arms is not None and step % steps_per_control == 0:
+                # En congelado es una vista previa: movemos la pose de forma
+                # determinista, sin confundirla con una prueba de estabilidad.
+                consume_arm_pose_request()
+                arms.compute(control_dt)
             robot.write_root_pose_to_sim(home_root_state[:, :7])
             robot.write_root_velocity_to_sim(
                 torch.zeros_like(home_root_state[:, 7:]))
             frozen_pos = robot.data.default_joint_pos.clone()
             frozen_pos[0, sim_ids] = default_angles
+            if arms is not None:
+                frozen_pos[0, arm_ids] = torch.tensor(
+                    arms.actual,
+                    dtype=torch.float32,
+                    device=args_cli.device,
+                )
             robot.write_joint_state_to_sim(
                 frozen_pos, torch.zeros_like(robot.data.default_joint_vel))
             robot.set_joint_position_target(default_angles.unsqueeze(0),
@@ -775,13 +849,20 @@ def main():
                 if cam_pub is not None:
                     cam_pub.publish()
                 node.publish(
-                    robot.data.joint_pos[0, sim_ids].cpu().numpy(),
-                    robot.data.joint_vel[0, sim_ids].cpu().numpy(),
+                    robot.data.joint_pos[0].cpu().numpy(),
+                    robot.data.joint_vel[0].cpu().numpy(),
                     robot.data.root_pos_w[0].cpu().numpy(),
                     robot.data.root_quat_w[0].cpu().numpy(),
                     robot.data.root_lin_vel_w[0].cpu().numpy(),
                     robot.data.root_ang_vel_w[0].cpu().numpy(),
                 )
+                if arms is not None:
+                    node.publish_arm_status(
+                        arms.pose_actual,
+                        ARM_JOINTS,
+                        arms.objetivo,
+                        robot.data.joint_pos[0, arm_ids].cpu().numpy(),
+                    )
                 rclpy.spin_once(node, timeout_sec=0.0)
             continue
 
@@ -867,13 +948,7 @@ def main():
             # Los brazos, en paralelo: su propio controlador, sus propias
             # articulaciones. La locomocion no se entera.
             if arms is not None:
-                if node.arm_pose_request is not None:
-                    try:
-                        arms.set_pose(node.arm_pose_request)
-                        print(f"\n[robot] brazos -> pose '{node.arm_pose_request}'", flush=True)
-                    except ValueError as e:
-                        print(f"\n[robot] brazos: {e}", flush=True)
-                    node.arm_pose_request = None
+                consume_arm_pose_request()
                 arm_target = torch.tensor(arms.compute(control_dt), dtype=torch.float32,
                                           device=args_cli.device).unsqueeze(0)
                 robot.set_joint_position_target(arm_target, joint_ids=arm_ids)
@@ -893,13 +968,20 @@ def main():
 
         if step % steps_per_control == 0:
             node.publish(
-                robot.data.joint_pos[0, sim_ids].cpu().numpy(),
-                robot.data.joint_vel[0, sim_ids].cpu().numpy(),
+                robot.data.joint_pos[0].cpu().numpy(),
+                robot.data.joint_vel[0].cpu().numpy(),
                 robot.data.root_pos_w[0].cpu().numpy(),
                 robot.data.root_quat_w[0].cpu().numpy(),
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
             )
+            if arms is not None:
+                node.publish_arm_status(
+                    arms.pose_actual,
+                    ARM_JOINTS,
+                    arms.objetivo,
+                    robot.data.joint_pos[0, arm_ids].cpu().numpy(),
+                )
             if cam_pub is not None:
                 cam_pub.publish()
             rclpy.spin_once(node, timeout_sec=0.0)

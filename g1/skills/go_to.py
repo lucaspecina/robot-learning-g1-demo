@@ -38,11 +38,16 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 
 # --- parametros de navegacion ---
-TOLERANCE_M = 0.35        # a esta distance del objetivo damos por llegado
+# Nav2 usa 10 cm como tolerancia fina y reserva 25 cm para una salida
+# adaptativa cuando el robot deja de progresar. Primero medimos la condición
+# fina sola; 35 cm declaraba éxito demasiado lejos para nuestra demo.
+TOLERANCE_M = 0.10        # a esta distancia del objetivo damos por llegado
+FINAL_YAW_TOLERANCE_RAD = math.radians(5.0)
 SALTO_M = 1.0              # un salto mayor a esto entre dos lecturas solo puede
                            # ser un teletransporte (reinicio o freeze), no un paso
 TOLERANCE_RAD = 0.25      # error de heading tolerado antes de empezar a avanzar
 LINEAR_VEL = 0.3           # m/s de crucero
+MIN_APPROACH_VEL = 0.10    # por debajo, la medición mostró que no progresa
 ANGULAR_VEL = 0.5          # rad/s al girar
 RATE_HZ = 10.0            # cada cuanto recalculamos y publicamos
 CLAIM_RETRY_S = 0.5       # si otro dueño se retira, volver a pedir sin inundar ROS
@@ -62,7 +67,7 @@ class GoTo(Node):
     def __init__(self):
         super().__init__("go_to")
         self.pose = None            # (x, y, yaw) del robot
-        self.goal = None            # (x, y) objetivo
+        self.goal = None            # (x, y, yaw opcional) objetivo
         self.mobility_owner = None
         self.last_claim_at = float("-inf")
 
@@ -135,8 +140,27 @@ class GoTo(Node):
                 self.publish_status("cancelado")
 
     def on_goal(self, msg: PoseStamped):
-        self.goal = (msg.pose.position.x, msg.pose.position.y)
-        self.get_logger().info(f"objetivo nuevo: ({self.goal[0]:.2f}, {self.goal[1]:.2f})")
+        orientation = msg.pose.orientation
+        quaternion_norm = math.sqrt(
+            orientation.w * orientation.w
+            + orientation.x * orientation.x
+            + orientation.y * orientation.y
+            + orientation.z * orientation.z
+        )
+        goal_yaw = None
+        if quaternion_norm > 0.5:
+            goal_yaw = yaw_from_quaternion(
+                orientation.w,
+                orientation.x,
+                orientation.y,
+                orientation.z,
+            )
+        self.goal = (msg.pose.position.x, msg.pose.position.y, goal_yaw)
+        yaw_text = "libre" if goal_yaw is None else f"{math.degrees(goal_yaw):.1f}°"
+        self.get_logger().info(
+            f"objetivo nuevo: ({self.goal[0]:.2f}, {self.goal[1]:.2f}), "
+            f"orientación final {yaw_text}"
+        )
         self.publish_status("esperando_control")
         self.claim_mobility(force=True)
 
@@ -174,14 +198,28 @@ class GoTo(Node):
             return
 
         x, y, yaw = self.pose
-        gx, gy = self.goal
+        gx, gy, goal_yaw = self.goal
         dx, dy = gx - x, gy - y
         distance = math.hypot(dx, dy)
 
-        # ¿Llegamos?
+        # Llegar a un sensor o una mesa incluye terminar mirando hacia ellos.
+        # Un objetivo sin cuaternión conserva el comportamiento anterior y
+        # acepta cualquier orientación final.
         if distance < TOLERANCE_M:
+            if goal_yaw is not None:
+                final_yaw_error = normalize_angle(goal_yaw - yaw)
+                if abs(final_yaw_error) > FINAL_YAW_TOLERANCE_RAD:
+                    cmd = Twist()
+                    cmd.angular.z = ANGULAR_VEL * (
+                        1.0 if final_yaw_error > 0 else -1.0
+                    )
+                    self.pub_cmd.publish(cmd)
+                    return
+
             self.stop()
-            self.get_logger().info(f"llegue: quede a {distance:.2f} m del objetivo")
+            self.get_logger().info(
+                f"llegue: quedé a {distance:.2f} m del objetivo"
+            )
             self.publish_status("llegue")
             self.goal = None
             self.request_mobility("release", "objetivo de navegación terminado")
@@ -199,7 +237,14 @@ class GoTo(Node):
         else:
             # Alineado: avanzar corrigiendo el heading sobre la marcha. Cerca del
             # objetivo, bajar la velocidad para no pasarse de largo.
-            cmd.linear.x = LINEAR_VEL * min(1.0, distance / 1.0)
+            # Con 14 cm restantes la fórmula anterior pidió 0,04 m/s y la
+            # posición no cambió durante más de un minuto. Nav2 usa una
+            # velocidad mínima de aproximación; 0,10 m/s es el primer valor
+            # medido para este bípedo, no un ajuste copiado de otro robot.
+            cmd.linear.x = max(
+                MIN_APPROACH_VEL,
+                LINEAR_VEL * min(1.0, distance / 1.0),
+            )
             cmd.angular.z = 1.0 * heading_error
 
         self.pub_cmd.publish(cmd)
@@ -213,8 +258,11 @@ def main():
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.stop()
-        node.request_mobility("release", "nodo de navegación detenido")
+        # ExternalShutdownException significa que el contexto ya murió;
+        # publicar en ese punto sólo genera una traza roja engañosa.
+        if rclpy.ok():
+            node.stop()
+            node.request_mobility("release", "nodo de navegación detenido")
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

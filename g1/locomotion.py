@@ -75,6 +75,10 @@ class WbcAgileLocomotion:
         self.action_offset = np.asarray(action["offset"], dtype=np.float32)
         self.action_scale = np.asarray(action["scale"], dtype=np.float32).reshape(-1)
         self.action_clip = np.asarray(action["clip"], dtype=np.float32)
+        self.last_action_clip = np.asarray(
+            observations["last_action"]["overloads"]["clip"],
+            dtype=np.float32,
+        )
         self.pelvis_height = float(pelvis_height)
 
         all_joint_names = list(articulation["joint_names"])
@@ -98,8 +102,8 @@ class WbcAgileLocomotion:
         if hasattr(self.policy, "reset_flat"):
             self.policy.reset_flat()
 
-    def compute(self, state: LocomotionState, command) -> np.ndarray:
-        """Devuelve objetivos para las 12 piernas usando el contrato oficial."""
+    def build_observation(self, state: LocomotionState, command) -> np.ndarray:
+        """Construye las 80 entradas en el orden declarado por NVIDIA."""
         command = np.asarray(command, dtype=np.float32)
         if command.shape != (3,):
             raise ValueError(f"AGILE esperaba 3 órdenes de movimiento y recibió {command.shape}")
@@ -121,7 +125,33 @@ class WbcAgileLocomotion:
             raise ValueError(
                 f"AGILE esperaba 80 mediciones y recibió {observation.shape[0]}"
             )
+        return observation
 
+    def process_action(self, action) -> np.ndarray:
+        """Convierte las 12 salidas crudas en objetivos articulares."""
+        action = np.asarray(action, dtype=np.float32).reshape(-1)
+        if action.shape != (len(self.action_joint_names),):
+            raise ValueError(
+                "AGILE devolvió una cantidad inesperada de órdenes: "
+                f"{action.shape}"
+            )
+
+        # NVIDIA conserva dos versiones: la memoria recibe la salida cruda con
+        # su límite de observación, mientras el motor usa un límite más
+        # estricto. Mezclarlas cambia la próxima decisión cuando hay un pico.
+        self.last_action = np.clip(
+            action,
+            self.last_action_clip[0],
+            self.last_action_clip[1],
+        )
+        clip_min = self.action_clip[:, 0]
+        clip_max = self.action_clip[:, 1]
+        motor_action = np.clip(action, clip_min, clip_max)
+        return self.action_offset + motor_action * self.action_scale
+
+    def compute(self, state: LocomotionState, command) -> np.ndarray:
+        """Devuelve objetivos para las 12 piernas usando el contrato oficial."""
+        observation = self.build_observation(state, command)
         with torch.no_grad():
             action = (
                 self.policy(
@@ -133,12 +163,7 @@ class WbcAgileLocomotion:
                 .astype(np.float32)
             )
 
-        # AGILE usa la acción cruda anterior como parte de la próxima entrada;
-        # limitarla aquí reproduce el procesamiento de su entorno oficial.
-        clip_min = self.action_clip[:, 0]
-        clip_max = self.action_clip[:, 1]
-        self.last_action = np.clip(action, clip_min, clip_max)
-        return self.action_offset + self.last_action * self.action_scale
+        return self.process_action(action)
 
 
 class RLPolicyLocomotion:

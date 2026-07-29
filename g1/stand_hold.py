@@ -20,7 +20,10 @@ from std_msgs.msg import String
 
 POSITION_DEADBAND_M = 0.05
 POSITION_GAIN = 2.0
-MAX_CORRECTION_MPS = 0.45
+# La campaña del 29-jul midió un pico de 17 cm con el límite anterior de
+# 0,45 m/s: perseguir el anclaje casi a velocidad de marcha amplificaba el
+# error que debía corregir. Este primer A/B cambia sólo el límite.
+MAX_CORRECTION_MPS = 0.15
 TELEPORT_DISTANCE_M = 1.0
 RATE_HZ = 10.0
 

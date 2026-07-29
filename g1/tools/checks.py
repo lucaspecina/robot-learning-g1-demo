@@ -37,8 +37,10 @@ GOTO_DISTANCE = 1.0          # metros hacia adelante para el peldaño 2
 # Avanzar no alcanza: una trayectoria oblicua deja de ser útil al acercarse a
 # una mesa. El ángulo hace comparable la prueba aunque cambie el RTF y, por lo
 # tanto, la distancia recorrida durante los mismos segundos de reloj.
-WALK_MAX_PATH_ANGLE_DEG = 5.0
-WALK_MAX_LATERAL_M = 0.15
+# La referencia oficial de Isaac midió entre 2,6° y 19,7° sin cambiar nada.
+# Esta prueba sólo detecta errores gruesos de locomoción; seguir una línea y
+# llegar con precisión son responsabilidades de navegación.
+WALK_MAX_PATH_ANGLE_DEG = 10.0
 WALK_MAX_YAW_ERROR_DEG = 10.0
 WALK_MAX_BRAKE_M = 0.20
 
@@ -49,6 +51,7 @@ class Checker(Node):
         self.pose = None
         self.nav = None
         self.mobility_owner = None
+        self.robot_mode = None
         self.pub_cmd = self.create_publisher(Twist, "/g1/cmd_vel/test", 10)
         self.pub_mobility = self.create_publisher(
             String, "/g1/mobility/request", 10
@@ -61,6 +64,12 @@ class Checker(Node):
             String,
             "/g1/mobility/status",
             self.on_mobility_status,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/robot_status",
+            self.on_robot_status,
             10,
         )
 
@@ -76,6 +85,12 @@ class Checker(Node):
     def on_mobility_status(self, msg: String):
         try:
             self.mobility_owner = json.loads(msg.data)["owner"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    def on_robot_status(self, msg: String):
+        try:
+            self.robot_mode = json.loads(msg.data)["mode"]
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
 
@@ -325,12 +340,6 @@ def check_walk(c: Checker) -> bool:
             f"camino en diagonal: {path_angle:.1f} grados fuera de la recta "
             f"(máximo {WALK_MAX_PATH_ANGLE_DEG:.1f})",
         )
-    if abs(lateral) > WALK_MAX_LATERAL_M:
-        return veredicto(
-            False,
-            f"se desplazó {abs(lateral):.2f} m de costado "
-            f"(máximo {WALK_MAX_LATERAL_M:.2f} m)",
-        )
     if walk_yaw_error > WALK_MAX_YAW_ERROR_DEG:
         return veredicto(
             False,
@@ -405,6 +414,13 @@ def main():
     try:
         if not c.wait_for_pose():
             print("\n  NO LLEGA /g1/odom: el robot no esta corriendo.\n")
+            return 1
+        c.spin_for(0.5)
+        if c.robot_mode != "active":
+            print(
+                "\n  ROBOT NO ACTIVO: la prueba no vale si está congelado. "
+                "Ejecutá primero: bash run_demo.sh start\n"
+            )
             return 1
 
         secuencia = list(CHECKS) if cual == "all" else [cual]

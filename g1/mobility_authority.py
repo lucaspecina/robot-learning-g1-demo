@@ -150,8 +150,10 @@ def main():
         pass
     finally:
         # Publicar cero antes de salir reduce la ventana hasta que actúe el
-        # watchdog del robot. El watchdog sigue siendo la defensa definitiva.
-        node.pub_cmd.publish(Twist())
+        # watchdog del robot. Si ROS ya cerró, publicar sólo genera una traza
+        # engañosa y el watchdog sigue siendo la defensa definitiva.
+        if rclpy.ok():
+            node.pub_cmd.publish(Twist())
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

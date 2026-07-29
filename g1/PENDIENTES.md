@@ -1,6 +1,6 @@
 # Los dos problemas abiertos, y por dónde seguir
 
-Estado al 28-jul. Punto de retorno seguro: etiqueta de git `known-good`
+Estado al 29-jul. Punto de retorno seguro: etiqueta de git `known-good`
 (commit 86f8082) — de pie a 0.72 m, caminó 5.85 m, ciclo congelar/soltar
 funcionando.
 
@@ -25,16 +25,39 @@ autoridad, pero **no** la causa física de la deriva: el mantenimiento de pose
 sigue siendo una capa necesaria y observable, no evidencia de que la física
 esté bien.
 
-Última corrida completa, 28-jul:
+Regresión activa del 29-jul, tres repeticiones:
 
-- intervención manual: canceló navegación y no se reanudó sola;
-- espera de 60 s de pared: error final 9 cm, percentil 95 y máximo 13 cm;
-- caminata: 2,58 m, siguió 8 cm al frenar, desvío acumulado 2°;
-- navegación: llegó a 27 cm del objetivo.
+- espera con `stand_hold`: aprobó dos veces; una tuvo un pico de 17 cm;
+- caminata directa: no cayó, avanzó 2,47–2,56 m y frenó en 5–8 cm;
+- trayectoria directa: 5,1°, 7,8° y 6,2° fuera de la recta.
 
-Los 13 cm de espera alcanzan para sala abierta, no para manipular. Por eso el
+Los 17 cm de espera alcanzan para sala abierta, no para manipular. Por eso el
 problema no queda maquillado como “resuelto”: la precisión se debe medir y
-cerrar después de entender la deriva física.
+cerrar en `stand_hold`, navegación y alineación, cada una por separado.
+
+Experimento de una variable posterior: bajar solamente la corrección máxima de
+`stand_hold` de `0,45` a `0,15 m/s`. Las tres repeticiones quedaron dentro de
+`1`, `0` y `0 cm`; se conserva. La caminata posterior avanzó `2,56 m`, quedó a
+`4,8°` de la recta y frenó en `5 cm`, sin caída.
+
+El límite absoluto de `15 cm` laterales se retiró de la prueba básica: dependía
+de cuánto avanzara el simulador durante el tiempo de pared y duplicaba el
+criterio angular. La precisión absoluta se exige en navegación.
+
+Navegación general también quedó medida. Bajar solamente la llegada de `35` a
+`10 cm` funcionó una vez y luego se estancó a `14 cm`: a esa distancia pedía
+apenas `0,04 m/s`, insuficiente para mover el bípedo. El segundo A/B agregó una
+velocidad mínima de aproximación de `0,10 m/s`. Resultados: `7`, `8` y `9 cm`,
+sin caída ni órbita. Se conservan ambos valores.
+
+Primera prueba visual hacia el reloj, 29-jul: objetivo `(0,80, 1,80)` y
+orientación `138,8°`; posición observada al terminar `(0,84, 1,73)` y
+orientación `143,4°`. El error fue `7,5 cm` y `4,6°`. El recorrido visto desde
+arriba fue coherente. Esto aprueba provisionalmente traslado y orientación,
+pero no “mirar el reloj”: la escena y el detector fallaron visualmente.
+
+Esto cierra el traslado general, no la manipulación. Junto a la mesa falta un
+estado de alineación fina que mida mano, objeto y base y exija `2–3 cm`.
 
 **El diagnóstico de Codex, que corrige el nuestro**: "quedarse quieto es un
 comportamiento activo" es correcto, pero "siempre debe haber navegación
@@ -79,7 +102,27 @@ en `unitree_rl_lab/deploy/include/FSM/State_FixStand.h`.
 
 ---
 
-## Problema 2 — La deriva en Isaac es 3-4x la de MuJoCo
+## Problema 2 — deriva de la policy anterior: cerrada al reemplazar el conjunto
+
+La línea de investigación siguiente pertenece a `motion.pt`, la policy anterior
+de Unitree. No continuar ajustando esa física: WBC-AGILE de NVIDIA la reemplazó
+como base porque aporta juntos cuerpo, motores, retraso, frecuencias,
+descriptor y policy para el G1 de 29 articulaciones.
+
+La integración nueva se comparó directamente con NVIDIA:
+
+- 29 articulaciones observadas y 12 controladas: mismos nombres y orden;
+- 80 entradas, 12 salidas y 12 objetivos articulares: error máximo `0.0`;
+- MuJoCo oficial: tres corridas idénticas, `1,82°` de desvío;
+- Isaac oficial: `2,6°`, `6,3°` y `19,7°`;
+- demo Isaac: `5,1°`, `7,8°` y `6,2°`.
+
+Esto descarta la sospecha de entradas o ejes conectados en lugares equivocados.
+También muestra que una orden frontal sin corrección no garantiza una línea
+global, incluso en la escena oficial. La precisión de recorrido pertenece a
+navegación; la precisión quieto pertenece a `stand_hold`.
+
+### Historia de la policy anterior — conservar, no reabrir sin motivo
 
 Con `/cmd_vel = (0,0,0)` y verificado que nadie más publica:
 
@@ -166,8 +209,49 @@ ocho esferas de los pies contra MuJoCo.
 
 ## Otros pendientes conocidos
 
-- **El detector confunde la mesa con el reloj**: los rangos de color son
-  demasiado permisivos.
+- **Demo objetivo actualizada**: la misión vigente ya no busca personas. Debe
+  escuchar una orden, guardar `home`, encontrar y leer el reloj, elegir por la
+  hora una mesa roja o azul no registrada, encontrarla, tomar su objeto y
+  regresar al inicio. El alcance y la escalera de pruebas están fijados en
+  [`DEMO_TARGET.md`](DEMO_TARGET.md).
+- **Mapeo y localización como en el G1 real**: la demo actual usa coordenadas
+  conocidas de Isaac. Es un escalón válido para probar locomoción, pero no la
+  arquitectura final. El G1 EDU dispone de cámara de profundidad y LiDAR 3D.
+  Hay que simular ambos sensores, construir el mapa a partir de sus mediciones
+  y ubicar al robot dentro del mapa sin leer posiciones internas de Isaac.
+  Flujo previsto:
+
+  1. recorrer la habitación y guardar un mapa;
+  2. en cada encendido, cargarlo y localizar al robot;
+  3. usar el LiDAR para geometría y obstáculos;
+  4. usar la cámara para reconocer reloj, color de mesa y objetos;
+  5. guardar los objetos encontrados en un mapa con nombres.
+  El LiDAR no identifica por sí solo que una forma es un reloj. Para una primera
+  referencia compatible con Nav2, evaluar `SLAM Toolbox` y la conversión del
+  LiDAR 3D a la representación necesaria; antes de implementarlo, confirmar
+  los topics y drivers exactos entregados con la versión del G1 EDU comprada.
+  Se hará después de cerrar visualmente locomoción, cámara y llegada al reloj.
+- **Integración con Azure AI Foundry**: el recurso, endpoints, patrón `v1`,
+  Speech, manejo de credenciales y reparto previsto están registrados en
+  `AZURE_AI.local.md`, excluido localmente de Git. Antes de escribir cada
+  integración, verificar con una llamada mínima que el deployment elegido
+  existe.
+- **Teleoperación con Meta Quest 3 (después de cerrar locomoción e integración
+  de AGILE)**: probar primero el flujo oficial de NVIDIA para G1. Isaac Lab
+  2.3.x incorpora control del G1 desde dispositivos XR y conversión de los
+  movimientos humanos a brazos/manos del robot. Evaluar por separado:
+  conexión del Quest, brazos/manos con base fija, locomoción mediante los
+  joysticks y grabación de demostraciones. No conectarlo a `/cmd_vel`
+  directamente: deberá entrar como modo `MANUAL` mediante
+  `mobility_authority`.
+- **El reloj de la escena no es todavía un reloj usable**: es un panel blanco
+  sin números ni agujas y se ve casi de canto desde el punto de observación.
+  Debe tener una cara legible, contraste, orientación coherente y horas
+  controlables antes de conectar un modelo visual.
+- **La detección actual del reloj es inválida**: en la primera prueba visual
+  etiquetó como reloj el `99,24 %` de una imagen casi completamente blanca.
+  Está detectando el fondo, no el objeto. No usar esa señal como criterio de
+  éxito hasta reemplazarla por una región conectada y una validación visual.
 - **`buscar_persona` no gira**: espera pasivamente en vez de darse vuelta.
 - **El planificador es de reglas**: la estructura para el modelo de lenguaje ya
   está; falta proveedor y credenciales.
