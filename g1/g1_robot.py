@@ -739,6 +739,8 @@ def main():
         # cae. Se sale con la orden "start" en /g1/control.
         if node.frozen:
             if was_frozen is not True:
+                if arms is not None:
+                    arms.reset()
                 print("\n[robot] CONGELADO en el punto de partida. "
                       "Soltar con: run_demo.sh start", flush=True)
                 was_frozen = True
@@ -847,7 +849,7 @@ def main():
                 robot.reset()
                 controller.reset()
                 if arms is not None:
-                    arms.set_pose("reposo")
+                    arms.reset()
                 print("\n[robot] reiniciado en el punto de partida", flush=True)
 
             # Los brazos, en paralelo: su propio controlador, sus propias

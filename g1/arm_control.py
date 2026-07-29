@@ -61,6 +61,10 @@ class PoseArmController:
 
     def __init__(self, velocidad_rad_s: float = 0.6):
         self.velocidad = velocidad_rad_s
+        self.reset()
+
+    def reset(self):
+        """Vuelve a reposo sin conservar una transición de la corrida anterior."""
         self.actual = POSES["reposo"].copy()
         self.objetivo = POSES["reposo"].copy()
         self.pose_actual = "reposo"
