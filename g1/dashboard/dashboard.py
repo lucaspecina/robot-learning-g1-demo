@@ -32,19 +32,29 @@ y despues, desde tu maquina, con un tunel al puerto 8080:
 import io
 import json
 import math
+import sys
 import threading
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
+
+from scene_layout import DASHBOARD_SCENE  # noqa: E402
 
 import numpy as np
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
+from vision_msgs.msg import Detection2DArray
 
 PORT = 8080
 HISTORY_MAX = 60
@@ -60,9 +70,18 @@ OFFLINE_AFTER_S = 3.0
 state = {
     "camera_jpeg": None,
     "camera_time": 0.0,
+    "analysis_jpeg": None,
+    "analysis_time": 0.0,
+    "analysis_labels": [],
     "odom_time": 0.0,      # cuando llego el ultimo dato del robot
     "frames": 0,
     "detections": {},
+    "perception": {
+        "backend": "-",
+        "latency_ms": None,
+        "processed_frames": 0,
+        "dropped_frames": 0,
+    },
     "pose": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
     "real_speed": 0.0,
     "fallen": False,
@@ -98,11 +117,57 @@ def to_jpeg(img: np.ndarray, text: str) -> bytes:
     return buf.getvalue()
 
 
+def to_analysis_jpeg(img: np.ndarray, detections) -> tuple[bytes, list[str]]:
+    """Dibuja las cajas sobre el mismo cuadro que procesó el modelo."""
+    from PIL import Image as PILImage, ImageDraw
+
+    image = PILImage.fromarray(img)
+    draw = ImageDraw.Draw(image)
+    labels = []
+    for detection in detections:
+        if not detection.results:
+            continue
+        best = max(
+            detection.results,
+            key=lambda result: result.hypothesis.score,
+        ).hypothesis
+        center = detection.bbox.center.position
+        x1 = center.x - detection.bbox.size_x / 2
+        y1 = center.y - detection.bbox.size_y / 2
+        x2 = center.x + detection.bbox.size_x / 2
+        y2 = center.y + detection.bbox.size_y / 2
+        label = f"{best.class_id} {best.score:.2f}"
+        labels.append(label)
+        draw.rectangle((x1, y1, x2, y2), outline=(25, 235, 125), width=2)
+        text_box = draw.textbbox((x1 + 2, y1 + 2), label)
+        draw.rectangle(text_box, fill=(0, 0, 0))
+        draw.text((x1 + 2, y1 + 2), label, fill=(25, 235, 125))
+    if not labels:
+        draw.rectangle((0, 0, 112, 15), fill=(0, 0, 0))
+        draw.text((4, 2), "sin detecciones", fill=(170, 175, 185))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=82)
+    return buffer.getvalue(), labels
+
+
 class DashboardNode(Node):
     def __init__(self):
         super().__init__("dashboard")
+        self.image_cache = OrderedDict()
         self.create_subscription(Image, "/g1/head_cam/image", self.on_image, 1)
+        self.create_subscription(
+            Detection2DArray,
+            "/g1/object_detections",
+            self.on_object_detections,
+            qos_profile_sensor_data,
+        )
         self.create_subscription(String, "/g1/detections", self.on_detections, 10)
+        self.create_subscription(
+            String,
+            "/g1/perception/status",
+            self.on_perception,
+            10,
+        )
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd, 10)
         self.create_subscription(
@@ -120,10 +185,18 @@ class DashboardNode(Node):
     def on_image(self, msg: Image):
         if msg.encoding != "rgb8":
             return
+        img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height,
+            msg.width,
+            3,
+        ).copy()
+        key = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+        self.image_cache[key] = img
+        while len(self.image_cache) > 60:
+            self.image_cache.popitem(last=False)
         # No comprimimos todos los frames: el navegador pide ~4 por segundo.
         if time.time() - state["camera_time"] < 0.15:
             return
-        img = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         n = state["frames"] + 1
         text = f"cuadro {n}  {time.strftime('%H:%M:%S')}  (si avanza, es video)"
         try:
@@ -135,10 +208,31 @@ class DashboardNode(Node):
             state["camera_time"] = time.time()
             state["frames"] = n
 
+    def on_object_detections(self, msg: Detection2DArray):
+        key = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+        image = self.image_cache.get(key)
+        if image is None:
+            return
+        try:
+            jpeg, labels = to_analysis_jpeg(image, msg.detections)
+        except Exception:
+            return
+        with lock:
+            state["analysis_jpeg"] = jpeg
+            state["analysis_time"] = time.time()
+            state["analysis_labels"] = labels
+
     def on_detections(self, msg: String):
         try:
             with lock:
                 state["detections"] = json.loads(msg.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_perception(self, msg: String):
+        try:
+            with lock:
+                state["perception"] = json.loads(msg.data)
         except json.JSONDecodeError:
             pass
 
@@ -214,6 +308,9 @@ PAGINA = """<!doctype html>
  .log{max-height:260px;overflow-y:auto;font-size:13px}
  .log div{padding:3px 0;border-bottom:1px solid #232735}
  .log .t{color:#5f6675;margin-right:8px}
+ .viewer-help{margin-top:10px;padding:9px 10px;background:#141821;
+              border:1px solid #252b39;border-radius:7px}
+ .viewer-help b{display:block;margin-bottom:3px;color:#cfd4e0}
 </style></head><body>
 <header><b>G1 — en vivo</b><span id="hb">conectando...</span>
 <span id="alerta" class="state-fallen"></span></header>
@@ -225,18 +322,40 @@ PAGINA = """<!doctype html>
     por el robot: si avanzan, el video esta vivo. La escena puede estar quieta
     (robot parado mirando algo fijo) — el contador es la prueba de vida.</small>
     <div id="dets" style="margin-top:8px"></div>
-    <small>Etiquetas: lo que el detector reconoce por color en este momento.
-    "centro" 0.5 = centrado en la imagen; "tamaño" = fraccion del cuadro.</small></div>
+    <small>Etiquetas: lo que reconoce el modelo visual local en este momento.
+    "centro" 0.5 = centrado; "tamaño" = fracción del cuadro. La confianza va
+    de 0 a 1.</small></div>
+
+  <div class="card"><h2>Último cuadro analizado por el modelo</h2>
+    <img id="analysis" alt="último análisis visual">
+    <div id="analysis-labels" style="margin-top:8px"></div>
+    <small id="analysis-age">Esperando el primer análisis.</small>
+    <small>Esta imagen puede ir detrás del video vivo: corresponde exactamente
+    al cuadro que produjo las cajas, no a una posición posterior del robot.</small>
+    <small>Cámara → detector local → recorte del objeto → modelo remoto sólo
+    cuando la tarea lo necesita. Las llamadas remotas aparecen en el relato
+    de la misión antes de enviarse y después de recibir la respuesta.</small>
+  </div>
 
   <div class="card"><h2>Mapa (visto desde arriba)</h2>
     <canvas id="mapa" width="360" height="360"></canvas>
     <small>Azul: el robot (la rayita indica hacia donde mira). Estela: por
-    donde camino. Cruz verde: objetivo de navegacion vigente. Marron: la mesa.
-    Circulo claro: el reloj. El eje x apunta a la derecha, el y hacia arriba.</small></div>
+    donde camino. Cruz verde: objetivo de navegacion vigente. Rectángulos rojo
+    y azul: las dos mesas. Círculo claro: el reloj.
+    El eje x apunta a la derecha, el y hacia arriba.</small>
+    <div class="viewer-help"><b>Para acomodar la vista 3D de Isaac</b>
+      Dejá seleccionada <strong>Perspective</strong>. Ruedita: acercar o alejar.
+      Botón central y arrastrar: mover la vista. Alt + botón izquierdo:
+      girar alrededor de lo que mirás. Seleccioná el robot y apretá F para
+      centrarlo.
+      <small>No selecciones ni muevas <code>/head_cam</code>: esa sí es la
+      cámara que usa el robot para ver. El seguimiento automático debe estar
+      apagado para que el visor no vuelva solo a una vista fija.</small>
+    </div></div>
 
   <div class="card"><h2>Estado del robot</h2>
     <table>
-      <tr><td>de pie / fallen<small>altura del pelvis; parado mide ~0.72 m,
+      <tr><td>de pie / caído<small>altura del pelvis; parado mide ~0.72 m,
         por debajo de 0.45 esta en el piso</small></td><td id="vida">-</td></tr>
       <tr><td>posicion<small>coordenadas (x, y) en metros, en el mapa de la
         habitacion</small></td><td id="pos">-</td></tr>
@@ -255,11 +374,14 @@ PAGINA = """<!doctype html>
         alcanzo; guion = sin objetivo</small></td><td id="nav">-</td></tr>
       <tr><td>objetivo<small>a donde lo mando la ultima orden de navegacion,
         si hay una vigente</small></td><td id="goal">-</td></tr>
-      <tr><td>arms<small>pose actual: reposo (colgando), listo (extendidos
+      <tr><td>brazos<small>pose actual: reposo (colgando), listo (extendidos
         adelante), transporte (recogidos contra el cuerpo)</small></td>
         <td id="arm">-</td></tr>
       <tr><td>frames de camara<small>total de imagenes publicadas; si sube,
         los ojos funcionan</small></td><td id="fr">-</td></tr>
+      <tr><td>modelo visual local<small>tiempo por análisis y cuadros que
+        descartó para trabajar siempre sobre la imagen más nueva</small></td>
+        <td id="perception">-</td></tr>
     </table></div>
 
   <div class="card" style="grid-column:1/-1"><h2>La mission, paso a paso</h2>
@@ -274,11 +396,17 @@ function refreshCam(){ cam.src = '/camera.jpg?' + Date.now(); }
 cam.onload  = () => setTimeout(refreshCam, 300);
 cam.onerror = () => { cam.removeAttribute('src'); setTimeout(refreshCam, 1200); };
 refreshCam();
+const analysis = document.getElementById('analysis');
+function refreshAnalysis(){ analysis.src = '/analysis.jpg?' + Date.now(); }
+analysis.onload = () => setTimeout(refreshAnalysis, 700);
+analysis.onerror = () => {
+  analysis.removeAttribute('src'); setTimeout(refreshAnalysis, 1200);
+};
+refreshAnalysis();
 
 // --- mapa ---
-const WORLD = {xmin:-1.5, xmax:5.0, ymin:-2.5, ymax:4.0};   // metros visibles
-const TABLE  = {x:3.0, y:0.0, width:1.2, depth:0.8};
-const CLOCK = {x:0.0, y:2.5};
+const SCENE = __SCENE_LAYOUT__;
+const WORLD = SCENE.world;
 const trail = [];
 function toScreen(c, wx, wy){
   const W = c.width, H = c.height;
@@ -297,16 +425,26 @@ function drawMap(s){
     const [,py] = toScreen(c, 0, y);
     g.beginPath(); g.moveTo(0,py); g.lineTo(c.width,py); g.stroke();
   }
-  // la mesa
-  const [mx,my] = toScreen(c, TABLE.x - TABLE.width/2, TABLE.y + TABLE.depth/2);
-  const [mx2,my2] = toScreen(c, TABLE.x + TABLE.width/2, TABLE.y - TABLE.depth/2);
-  g.fillStyle = '#6b4f2a'; g.fillRect(mx, my, mx2-mx, my2-my);
-  g.fillStyle = '#8b93a7'; g.font = '11px sans-serif';
-  g.fillText('mesa', mx+4, my+14);
-  // el reloj
-  const [rx,ry] = toScreen(c, CLOCK.x, CLOCK.y);
-  g.beginPath(); g.arc(rx, ry, 8, 0, 7); g.fillStyle = '#d8d8c8'; g.fill();
-  g.fillStyle = '#8b93a7'; g.fillText('reloj', rx+11, ry+4);
+  // El dibujo llega de la misma descripción con la que Isaac creó la escena.
+  // Así no puede quedar un objeto fuera del mapa por copiar mal una medida.
+  g.font = '11px sans-serif';
+  SCENE.landmarks.forEach(item => {
+    if(item.shape === 'rectangle'){
+      const [x1,y1] = toScreen(
+        c, item.x - item.size_x/2, item.y + item.size_y/2);
+      const [x2,y2] = toScreen(
+        c, item.x + item.size_x/2, item.y - item.size_y/2);
+      g.fillStyle = item.color; g.fillRect(x1, y1, x2-x1, y2-y1);
+      g.fillStyle = '#c6cad4'; g.fillText(item.label, x1+4, y1+14);
+      return;
+    }
+    const [x,y] = toScreen(c, item.x, item.y);
+    const edge = toScreen(c, item.x + item.radius, item.y);
+    const radius = Math.max(7, Math.abs(edge[0] - x));
+    g.beginPath(); g.arc(x, y, radius, 0, 2*Math.PI);
+    g.fillStyle = item.color; g.fill();
+    g.fillStyle = '#c6cad4'; g.fillText(item.label, x+radius+4, y+4);
+  });
   // la trail
   if(trail.length > 1){
     g.strokeStyle = '#2f5f8f'; g.lineWidth = 2; g.beginPath();
@@ -337,7 +475,7 @@ let estabaOnline = false;
 function apagarPanel(s){
   // Robot apagado: ningun numero viejo en pantalla. Guiones en todo, para que
   // nunca se confunda lo que pasa ahora con lo que paso antes de matarlo.
-  ['pos','yaw','vreal','cmd','mobility','nav','goal','arm','vida'].forEach(id =>
+  ['pos','yaw','vreal','cmd','mobility','nav','goal','arm','vida','perception'].forEach(id =>
     document.getElementById(id).textContent = APAGADO);
   document.getElementById('fr').textContent = APAGADO;
   document.getElementById('dets').innerHTML =
@@ -388,9 +526,24 @@ async function tick(){
     document.getElementById('arm').textContent = s.arms;
     document.getElementById('fr').textContent =
       s.frames + (s.video_online ? '' : '  (video detenido)');
+    const localModel = (s.perception.model || '').split('/').pop();
+    document.getElementById('perception').textContent =
+      s.perception.latency_ms == null ? '-' :
+      `${localModel || 'detector local'} · ${s.perception.latency_ms} ms` +
+      ` · procesados ${s.perception.processed_frames}` +
+      ` · descartados ${s.perception.dropped_frames}`;
+    document.getElementById('analysis-labels').innerHTML =
+      s.analysis_labels.length
+      ? s.analysis_labels.map(label => `<span class="tag">${label}</span>`).join('')
+      : '<span style="color:#5f6675">sin detecciones en ese cuadro</span>';
+    document.getElementById('analysis-age').textContent =
+      s.analysis_age_s == null ? 'Esperando el primer análisis.' :
+      `Analizado hace ${s.analysis_age_s} s.`;
     document.getElementById('dets').innerHTML = Object.keys(s.detections).length
       ? Object.entries(s.detections).map(([k,v]) =>
-          `<span class="tag">${k} · centro ${v.cx} · tamaño ${v.area}</span>`).join('')
+          `<span class="tag">${k} · confianza ${v.confidence ?? '-'} · ` +
+          `centro ${v.cx} · tamaño ${v.area} · ` +
+          `origen ${(v.source || 'desconocido').toUpperCase()}</span>`).join('')
       : '<span style="color:#5f6675">no reconoce nada en este momento</span>';
     document.getElementById('log').innerHTML = s.mission.length
       ? s.mission.slice().reverse().map(m =>
@@ -409,6 +562,11 @@ async function tick(){
 }
 tick();
 </script></body></html>"""
+
+PAGINA = PAGINA.replace(
+    "__SCENE_LAYOUT__",
+    json.dumps(DASHBOARD_SCENE, ensure_ascii=False),
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -438,18 +596,37 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._headers(200, "image/jpeg")
                 self.wfile.write(jpeg)
+        elif route == "/analysis.jpg":
+            with lock:
+                old = time.time() - state["analysis_time"] > OFFLINE_AFTER_S * 2
+                jpeg = None if old else state["analysis_jpeg"]
+            if jpeg is None:
+                self._headers(404, "text/plain")
+                self.wfile.write(b"sin analisis todavia")
+            else:
+                self._headers(200, "image/jpeg")
+                self.wfile.write(jpeg)
         elif route == "/state":
             # Un tablero que muestra datos viejos como si fueran de ahora es
             # peor que uno vacio: no se puede distinguir lo que pasa de lo que
             # paso. Si hace mas de OFFLINE_AFTER_S que no llega nada del robot,
             # lo decimos y la pagina apaga todos los valores.
             with lock:
-                data = {k: v for k, v in state.items() if k != "camera_jpeg"}
+                data = {
+                    k: v
+                    for k, v in state.items()
+                    if k not in ("camera_jpeg", "analysis_jpeg")
+                }
                 ahora = time.time()
                 data["online"] = (ahora - state["odom_time"]) < OFFLINE_AFTER_S
                 data["silencio_s"] = (round(ahora - state["odom_time"])
                                       if state["odom_time"] else None)
                 data["video_online"] = (ahora - state["camera_time"]) < OFFLINE_AFTER_S
+                data["analysis_age_s"] = (
+                    round(ahora - state["analysis_time"], 1)
+                    if state["analysis_time"]
+                    else None
+                )
             self._headers(200, "application/json")
             self.wfile.write(json.dumps(data).encode())
         else:

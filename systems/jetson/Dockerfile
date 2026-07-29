@@ -16,6 +16,7 @@ FROM ros:jazzy-ros-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-vision-msgs \
     iproute2 \
     iputils-ping \
     curl \
@@ -26,10 +27,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-yaml \
     && rm -rf /var/lib/apt/lists/*
 
-# PyTorch en version CPU: la policy de locomocion es una red chica (47 -> 12);
-# la CPU la resuelve en menos de un milisegundo y evitamos arrastrar CUDA.
+# La T4 de la VM no está soportada por Isaac ROS actual. Este RT-DETR en CPU es
+# una implementación de compatibilidad: conserva la interfaz estándar que
+# usará el paquete acelerado por NVIDIA en la Jetson física.
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    torch --index-url https://download.pytorch.org/whl/cpu
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && python3 -m pip install --no-cache-dir --break-system-packages \
+    transformers==4.57.6 safetensors
+
+ENV G1_OBJECT_DETECTOR_MODEL=PekingU/rtdetr_r50vd
+ENV G1_OBJECT_DETECTOR_REVISION=df939e661d8c52e80608d1ec566561aabd25a4e7
+
+# Guardar el modelo en la imagen hace que el robot pueda arrancar sin internet
+# y evita que una actualización remota cambie silenciosamente los pesos.
+RUN python3 -c "from transformers import AutoImageProcessor, RTDetrForObjectDetection; \
+m='PekingU/rtdetr_r50vd'; r='df939e661d8c52e80608d1ec566561aabd25a4e7'; \
+AutoImageProcessor.from_pretrained(m, revision=r, use_fast=True); \
+RTDetrForObjectDetection.from_pretrained(m, revision=r)"
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 

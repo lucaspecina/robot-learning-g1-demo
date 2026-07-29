@@ -13,7 +13,8 @@ cd ../systems && bash systems_up.sh
 python3 mobility_authority.py  # único dueño de /cmd_vel
 python3 stand_hold.py          # corrige la deriva durante una espera
 python3 skills/go_to.py        # navegación
-python3 skills/detector.py     # percepción y recorte del reloj
+python3 skills/object_detector.py   # detector neuronal local
+python3 skills/detection_adapter.py # cajas, color y recorte del reloj
 python3 agent/agent.py         # ejecutor local de la misión
 
 # darle una misión
@@ -33,8 +34,9 @@ hasta volver a pasar las pruebas físicas.
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
 | Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
-| Cámara de cabeza | funciona — `/g1/head_cam/image`, 3 Hz simulados |
-| Percepción local del reloj | funciona numéricamente; falta validación visual de Lucas |
+| Cámara de cabeza | funciona — óptica oficial Unitree, 640×480 a 3 Hz |
+| Detector local RT-DETR | integrado; reloj 3/3, mesa visible pero debajo del umbral |
+| Búsqueda visual abierta | Grounding DINO reconoce la mesa; falta ubicarlo sin afectar el control |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
 | Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
@@ -55,7 +57,7 @@ versión anterior quedaron fuera del alcance actual.
               ^                                  |
               | recorte JPEG              /g1/goal /g1/arm_pose
               |                                  |
-              +---------------------- [ detector.py ] [ go_to.py ]
+              +------------ [ object_detector.py + adapter ] [ go_to.py ]
                                                    |
                                     /g1/cmd_vel/navigation
                                                    |
@@ -76,8 +78,9 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/mission` | String | vos (o el reconocimiento de voz, más adelante) |
 | `/g1/goal` | PoseStamped | el agente |
 | `/g1/nav_status` | String | la navegación |
-| `/g1/detections` | String (JSON) | el detector |
-| `/g1/clock_crop/compressed` | CompressedImage | el detector local |
+| `/g1/object_detections` | Detection2DArray | el detector neuronal |
+| `/g1/detections` | String (JSON) | el adaptador de la demo |
+| `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
 | `/g1/arm_pose` | String | el agente |
 | `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
@@ -87,7 +90,8 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/head_cam/image` | Image | el robot |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
-la navegación por Nav2, el detector por uno neuronal, el planificador de reglas
+la navegación por Nav2, RT-DETR por otro detector que publique las mismas
+cajas, el planificador de reglas
 por un modelo de lenguaje, el robot simulado por el real.
 
 ## Los archivos
@@ -103,7 +107,8 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `skills/go_to.py` | navegación a un punto |
 | `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
-| `skills/detector.py` | percepción por color |
+| `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
+| `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
 | `agent/agent.py` | ejecutor local de la misión y cliente del servidor |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
@@ -150,7 +155,11 @@ equilibrio, espera y autoridad de movilidad siguen funcionando localmente.
 
 ## Lo siguiente
 
-1. **Validar visualmente el reloj nuevo** en Isaac y en el tablero.
+La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
+en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
+
+1. **Integrar la búsqueda puntual con Grounding DINO** fuera de los lazos de
+   control y probar el efecto de red y cómputo.
 2. **Guardar `home` y regresar** sin carga.
 3. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
 4. **Rediseñar `transporte`**: quieto es estable, pero caminando sesga el rumbo;

@@ -1,9 +1,9 @@
 # robot-learning-g1-demo
 
-Laboratorio sim → real para robots Unitree. **Objetivo: una demo end-to-end con
-el G1 EDU (humanoide)** — una persona le habla al robot; según la hora que lee
-en un reloj, va a buscar un objeto a una mesa y se lo entrega a la persona
-correcta (remera roja antes de las 6, azul después), buscándola por la sala.
+Laboratorio sim → real para robots Unitree. **Objetivo: una demo completa con
+el G1 EDU (humanoide)**. Una persona le habla al robot; el robot guarda dónde
+empezó, encuentra y lee un reloj, busca la mesa roja o azul que corresponde a
+la hora, toma el objeto que haya sobre ella y vuelve al punto de partida.
 
 Principio del proyecto: **todo simulado, pero realista** — no solo la física
 del robot, sino también las computadoras donde corre cada cosa (la de a bordo,

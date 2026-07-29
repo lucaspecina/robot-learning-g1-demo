@@ -1,37 +1,29 @@
 #!/usr/bin/env python3
-"""La habitación de la demo: mesa, objeto, reloj y dos personas provisionales.
+"""La habitación de la demo: reloj y dos mesas de colores con objetos.
 
-La misión vigente ya no usa personas; se conservan temporalmente para no
-mezclar el cambio de escenario de las mesas con la validación visual del reloj.
-Cada reemplazo se hace y se mide por separado.
-
-Las personas son cilindros de colores. No hace falta que parezcan personas: lo
-que importa es que la camara vea una forma vertical de color distinguible, que
-es exactamente lo que un detector va a usar para decidir "roja" o "azul".
-Cuando la demo este cerca, se reemplazan por los modelos animados de NVIDIA
-sin cambiar nada de la logica.
-
-Las posiciones fijas (mesa, reloj) son el "mapa semantico" de la demo: lo que
-el robot ya sabe donde esta. El objeto y las personas se detectan con la
-camara, porque en la vida real se mueven.
+El reloj es una referencia conocida durante la primera etapa de validación.
+Las mesas existen en posiciones fijas dentro del mundo, pero esas posiciones
+no se entregan al agente: debe encontrarlas con sus sensores como en el robot
+real.
 """
 import math
 import os
 
 import isaaclab.sim as sim_utils
 
-# --- el mapa semantico: lo que el robot ya sabe donde esta ---
-SEMANTIC_MAP = {
-    "mesa": (3.0, 0.0),
-    "reloj": (0.0, 2.5),
-}
+from scene_layout import (
+    COLORED_TABLES,
+    NAVIGATION_TARGETS,
+    SCENE_POSITIONS,
+    TABLE_SIZE,
+)
 
 TABLE_HEIGHT = 0.75
 CLOCK_HEIGHT = 1.55
-CLOCK_APPROACH = (0.8, 1.8)
+CLOCK_APPROACH = NAVIGATION_TARGETS["reloj"][:2]
 CLOCK_FACE_YAW = math.atan2(
-    CLOCK_APPROACH[1] - SEMANTIC_MAP["reloj"][1],
-    CLOCK_APPROACH[0] - SEMANTIC_MAP["reloj"][0],
+    CLOCK_APPROACH[1] - SCENE_POSITIONS["clock"][1],
+    CLOCK_APPROACH[0] - SCENE_POSITIONS["clock"][0],
 )
 
 DIGIT_SEGMENTS = {
@@ -92,7 +84,7 @@ def _clock_world_position(
 
 def _spawn_digital_clock():
     """Crea un reloj real, legible y orientado hacia su punto de observación."""
-    clock_x, clock_y = SEMANTIC_MAP["reloj"]
+    clock_x, clock_y = SCENE_POSITIONS["clock"]
     orientation = _yaw_quaternion(CLOCK_FACE_YAW)
 
     panel_depth = 0.05
@@ -192,56 +184,70 @@ def _spawn_digital_clock():
 def build_demo_scene():
     """Crea la habitacion. Llamar despues del piso y antes de sim.reset()."""
 
-    # --- la mesa: un tablero sobre cuatro patas simplificadas a un bloque ---
-    mesa_x, mesa_y = SEMANTIC_MAP["mesa"]
-    tablero = sim_utils.CuboidCfg(
-        size=(0.8, 1.2, 0.05),
-        visual_material=_color((0.45, 0.30, 0.18)),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-    )
-    tablero.func("/World/mesa/tablero", tablero,
-                 translation=(mesa_x, mesa_y, TABLE_HEIGHT))
-
-    base = sim_utils.CuboidCfg(
-        size=(0.6, 1.0, TABLE_HEIGHT),
-        visual_material=_color((0.35, 0.24, 0.14)),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-    )
-    base.func("/World/mesa/base", base,
-              translation=(mesa_x, mesa_y, TABLE_HEIGHT / 2))
-
-    # --- el objeto a buscar: una botella (cilindro), SI dinamica: hay que
-    #     poder agarrarla y que se caiga si la sueltan ---
-    botella = sim_utils.CylinderCfg(
-        radius=0.035,
-        height=0.22,
-        visual_material=_color((0.15, 0.55, 0.25)),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-    )
-    botella.func("/World/botella", botella,
-                 translation=(mesa_x, mesa_y, TABLE_HEIGHT + 0.14))
-
     # --- el reloj: display digital visible desde el punto de observación ---
     _spawn_digital_clock()
 
-    # --- las personas: cilindros de color, altura de persona ---
-    personas = {
-        "persona_roja": ((5.0, 3.0), (0.75, 0.12, 0.12)),
-        "persona_azul": ((5.0, -3.0), (0.12, 0.20, 0.75)),
-    }
-    for nombre, ((px, py), rgb) in personas.items():
-        cuerpo = sim_utils.CylinderCfg(
-            radius=0.20,
-            height=1.7,
-            visual_material=_color(rgb),
+    # Cada mesa tiene un objeto dinámico independiente. No alcanza con dibujar
+    # una botella: debe poder caerse y, más adelante, responder al agarre.
+    for table in COLORED_TABLES:
+        table_x, table_y = SCENE_POSITIONS[table["id"]]
+        top = sim_utils.CuboidCfg(
+            size=(*TABLE_SIZE, 0.05),
+            visual_material=_color(table["rgb"]),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
         )
-        cuerpo.func(f"/World/{nombre}", cuerpo, translation=(px, py, 0.85))
+        top.func(
+            f"/World/{table['id']}/top",
+            top,
+            translation=(table_x, table_y, TABLE_HEIGHT),
+        )
+        leg_color = tuple(channel * 0.72 for channel in table["rgb"])
+        leg_height = TABLE_HEIGHT - 0.025
+        leg = sim_utils.CuboidCfg(
+            size=(0.08, 0.08, leg_height),
+            visual_material=_color(leg_color),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+        )
+        # Una base maciza producía la silueta de un cajón y el detector
+        # preentrenado no la reconocía como mesa. Las cuatro patas dejan la
+        # estructura visual que también tendrá el mueble real.
+        for leg_index, (offset_x, offset_y) in enumerate(
+            (
+                (-0.31, -0.51),
+                (-0.31, 0.51),
+                (0.31, -0.51),
+                (0.31, 0.51),
+            )
+        ):
+            leg.func(
+                f"/World/{table['id']}/leg_{leg_index}",
+                leg,
+                translation=(
+                    table_x + offset_x,
+                    table_y + offset_y,
+                    leg_height / 2,
+                ),
+            )
+        bottle = sim_utils.CylinderCfg(
+            radius=0.035,
+            height=0.22,
+            visual_material=_color((0.15, 0.55, 0.25)),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+        )
+        bottle.func(
+            f"/World/{table['id']}_object",
+            bottle,
+            translation=(table_x, table_y, TABLE_HEIGHT + 0.14),
+        )
 
-    print(f"[escena] mesa en {SEMANTIC_MAP['mesa']}, reloj en {SEMANTIC_MAP['reloj']}, "
-          f"botella sobre la mesa, personas roja y azul", flush=True)
+    print(
+        f"[escena] reloj en {SCENE_POSITIONS['clock']}; "
+        f"mesa roja en {SCENE_POSITIONS['red_table']}; "
+        f"mesa azul en {SCENE_POSITIONS['blue_table']}; "
+        "un objeto dinámico sobre cada mesa",
+        flush=True,
+    )

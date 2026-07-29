@@ -25,8 +25,13 @@ Cuando haya credenciales, se cambia el planificador y el resto sigue igual.
 import json
 import math
 import os
+import sys
 import threading
 import time
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
 from rclpy.node import Node
@@ -34,6 +39,7 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
+from scene_layout import NAVIGATION_TARGETS
 from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
@@ -46,12 +52,7 @@ from intelligence_client import (
 # cual el robot puede usarlo. Si el destino fuera el centro de la mesa, el robot
 # caminaria contra el mueble, quedaria trabado a medio metro y la navegacion
 # nunca daria por cumplido el objetivo (nos paso).
-SEMANTIC_MAP = {
-    # Cada entrada es (x, y, yaw): no alcanza con llegar al lugar; la postura
-    # final debe dejar el sensor mirando al elemento que se quiere usar.
-    "mesa": (1.8, 0.0, 0.0),
-    "reloj": (0.8, 1.8, 2.4228),
-}
+SEMANTIC_MAP = NAVIGATION_TARGETS
 
 # El catalogo de skills: lo que el robot sabe hacer. Esto es, literalmente, lo
 # que se le describiria a un modelo de lenguaje para que arme un plan.
@@ -257,6 +258,9 @@ class Agent(Node):
             self.reportar("no hay una imagen reciente del reloj")
             return None
         try:
+            self.reportar(
+                "reloj detectado: envío sólo su recorte al modelo visual remoto"
+            )
             reading = self.intelligence.read_clock(self.clock_crop)
         except RemoteIntelligenceError as error:
             self.reportar(f"servidor de visión no disponible: {error}")

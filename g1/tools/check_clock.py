@@ -5,7 +5,7 @@ La prueba contiene un caso negativo y uno positivo:
 
 1. En el origen, donde el reloj no está en cuadro, no debe detectarlo.
 2. Después de navegar, debe quedar cerca, orientado y detectar el display de
-   forma estable durante varias imágenes.
+   forma estable durante varias respuestas nuevas del detector.
 
 Uso (dentro del contenedor jetson):
     python3 /workspace/g1/tools/check_clock.py
@@ -28,8 +28,9 @@ MAX_POSITION_ERROR_M = 0.11
 MAX_YAW_ERROR_DEG = 6.0
 MIN_DETECTION_RATIO = 0.80
 MAX_CENTER_ERROR = 0.15
-NEGATIVE_OBSERVATION_S = 3.0
-POSITIVE_OBSERVATION_S = 5.0
+MIN_DETECTION_SAMPLES = 3
+NEGATIVE_TIMEOUT_S = 12.0
+POSITIVE_TIMEOUT_S = 12.0
 NAVIGATION_TIMEOUT_S = 180.0
 
 
@@ -106,6 +107,17 @@ class ClockChecker(Node):
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=0.1)
 
+    def collect_detections(self, minimum_samples: int, timeout_s: float):
+        """Espera resultados nuevos sin suponer cuántos cuadros procesa el modelo."""
+        self.detection_history.clear()
+        end = time.monotonic() + timeout_s
+        while (
+            len(self.detection_history) < minimum_samples
+            and time.monotonic() < end
+        ):
+            rclpy.spin_once(self, timeout_sec=0.1)
+        return list(self.detection_history)
+
     def wait_for_mode(
         self,
         expected: str,
@@ -153,15 +165,20 @@ def main() -> int:
         if not checker.wait_for_mode("frozen", 10.0, "freeze"):
             return fail("el robot no confirmó el estado congelado")
 
-        checker.detection_history.clear()
-        checker.spin_for(NEGATIVE_OBSERVATION_S)
-        negative_frames = len(checker.detection_history)
+        negative_samples = checker.collect_detections(
+            MIN_DETECTION_SAMPLES,
+            NEGATIVE_TIMEOUT_S,
+        )
+        negative_frames = len(negative_samples)
         false_clock_frames = sum(
             "reloj" in detections
-            for detections in checker.detection_history
+            for detections in negative_samples
         )
-        if negative_frames < 3:
-            return fail("llegaron muy pocas imágenes en el origen")
+        if negative_frames < MIN_DETECTION_SAMPLES:
+            return fail(
+                f"el detector respondió sólo {negative_frames} veces "
+                f"en {NEGATIVE_TIMEOUT_S:.0f} s"
+            )
         if false_clock_frames:
             return fail(
                 f"detectó reloj en {false_clock_frames}/{negative_frames} "
@@ -208,17 +225,19 @@ def main() -> int:
                 f"(máximo {MAX_YAW_ERROR_DEG:.1f}°)"
             )
 
-        checker.detection_history.clear()
-        checker.spin_for(POSITIVE_OBSERVATION_S)
-        total_frames = len(checker.detection_history)
+        positive_samples = checker.collect_detections(
+            MIN_DETECTION_SAMPLES,
+            POSITIVE_TIMEOUT_S,
+        )
+        total_frames = len(positive_samples)
         clock_detections = [
             detections["reloj"]
-            for detections in checker.detection_history
+            for detections in positive_samples
             if "reloj" in detections
         ]
         bottle_false_frames = sum(
             "botella" in detections
-            for detections in checker.detection_history
+            for detections in positive_samples
         )
         detection_ratio = (
             len(clock_detections) / total_frames

@@ -11,8 +11,6 @@ Dibujar cuesta caro y ningun consumidor necesita 500 imagenes por segundo —
 un detector de objetos trabaja a 10-30 por segundo y un modelo de lenguaje con
 vision, a una cada varios segundos. Publicar mas es tirar computo.
 """
-import math
-
 import numpy as np
 
 import isaaclab.sim as sim_utils
@@ -20,36 +18,27 @@ from isaaclab.sensors import Camera, CameraCfg
 
 from sensor_msgs.msg import Image as ImageMsg
 
+from camera_geometry import camera_rotation
+
 # El cuerpo oficial de NVIDIA anida la cabeza debajo del torso. La cámara debe
 # ser hija de esa pieza para heredar su movimiento; colgarla de una ruta que
 # no existe hace que Isaac cree silenciosamente una cámara fija en el mundo.
 CAMERA_PARENT_PRIM = "/World/G1/torso_link/head_link"
 CAMERA_PRIM = f"{CAMERA_PARENT_PRIM}/head_cam"
 CAMERA_OFFSET = (0.08, 0.0, 0.05)      # metros, respecto de head_link
-RESOLUTION = (320, 240)                 # suficiente para deteccion; barato de renderizar
+# La configuración oficial publica 640×480. La prueba a 320×240 dejó las
+# patas de la mesa reducidas a pocos píxeles y volvió inestable el reloj.
+RESOLUTION = (640, 480)
 
-# Inclinacion de la camara hacia abajo, en grados. Con la camara mirando al
-# frente (0 grados) el robot nunca ve lo que tiene sobre la mesa: los objetos a
-# ~0.8 m de altura quedan fuera del cuadro cuando esta cerca. El G1 real monta
-# su camara tambien inclinada hacia abajo por el mismo motivo.
-CAMERA_PITCH_DEG = 20.0
+# La configuración oficial de Unitree para el G1 simulado usa 7.6 mm y una
+# apertura de 20 mm. Conservamos por ahora nuestra apertura de 20.955 mm para
+# medir sólo el cambio de lente; la diferencia restante es menor al 5 %.
+FOCAL_LENGTH_MM = 7.6
+HORIZONTAL_APERTURE_MM = 20.955
 
-
-def _camera_rotation(pitch_deg: float):
-    """Cuaternion (w,x,y,z) de la camara: mirar al frente + inclinar abajo.
-
-    Parte de la rotacion base (0.5, -0.5, 0.5, -0.5), que lleva la camara a
-    mirar hacia el +X del robot, y le compone una rotacion sobre el eje
-    horizontal de la propia camara (su +X, que apunta a la derecha en la
-    convencion "ros": z adelante, x derecha, y abajo).
-    """
-    half = math.radians(pitch_deg) / 2.0
-    c, s = math.cos(half), math.sin(half)
-    w1, x1, y1, z1 = 0.5, -0.5, 0.5, -0.5
-    return (w1 * c - x1 * s,
-            w1 * s + x1 * c,
-            y1 * c + z1 * s,
-            z1 * c - y1 * s)
+# Unitree monta su cámara frontal sin una rotación adicional. La prueba
+# separada confirmó que el valor anterior apuntaba 20° hacia arriba.
+CAMERA_DOWNWARD_PITCH_DEG = 0.0
 
 
 def make_camera_cfg(update_period: float = 0.1) -> CameraCfg:
@@ -64,14 +53,14 @@ def make_camera_cfg(update_period: float = 0.1) -> CameraCfg:
         width=RESOLUTION[0],
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.0,
+            focal_length=FOCAL_LENGTH_MM,
             focus_distance=400.0,
-            horizontal_aperture=20.955,
+            horizontal_aperture=HORIZONTAL_APERTURE_MM,
             clipping_range=(0.05, 50.0),
         ),
         offset=CameraCfg.OffsetCfg(
             pos=CAMERA_OFFSET,
-            rot=_camera_rotation(CAMERA_PITCH_DEG),
+            rot=camera_rotation(CAMERA_DOWNWARD_PITCH_DEG),
             convention="ros",
         ),
     )

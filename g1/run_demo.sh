@@ -6,8 +6,10 @@
 #   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | home
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
+#   bash run_demo.sh table red  mira una mesa desde una pose sólo de prueba
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
 #   bash run_demo.sh mission     le da la mision completa de 10 pasos
+#   bash run_demo.sh layers      reinicia sólo las capas de la Jetson
 #   bash run_demo.sh status      como viene todo
 #   bash run_demo.sh down        apaga las capas de arriba (no el robot)
 #
@@ -21,6 +23,11 @@
 # Para mirarlo desde tu maquina, dos ventanas:
 #   - el tablero:  ssh -L 8080:localhost:8080 lucas@<IP>  -> http://localhost:8080
 #   - el robot:    cliente de Isaac apuntando a la IP de la VM
+#
+# En Isaac, mantener la vista en Perspective: rueda para zoom, boton central
+# para desplazar, Alt + boton izquierdo para girar y F para centrar el objeto
+# seleccionado. El seguimiento automático queda apagado para no deshacer los
+# movimientos del operador. No mover /head_cam: es la cámara física del robot.
 set -uo pipefail
 
 D=/workspace/g1          # ruta dentro del contenedor jetson
@@ -34,6 +41,23 @@ launch() {   # nombre archivo_log script
     echo "   $1"
 }
 
+stop_layers() {
+    sudo docker exec jetson pkill -f \
+        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py" \
+        2>/dev/null
+}
+
+start_layers() {
+    # El árbitro nace antes que cualquier fuente. Así nunca existe una ventana
+    # donde navegación o pruebas puedan hablar directo con el robot.
+    launch "autoridad"            mobility.log          mobility_authority.py
+    launch "quieto"               stand.log             stand_hold.py
+    launch "navegacion"           goto.log              skills/go_to.py
+    launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
+    launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
+    launch "agente"               agent.log             agent/agent.py
+}
+
 preflight() {
     # Verificar y limpiar ANTES de arrancar, no despues de que falle.
     echo ">> Revisando que no haya restos de corridas anteriores..."
@@ -43,9 +67,7 @@ preflight() {
         echo "   habia $zombis instancia(s) del robot dando vueltas: matando"
         bash ~/go2-lab/g1/run_g1.sh stop >/dev/null
     fi
-    sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
-        2>/dev/null
+    stop_layers
     sleep 2
 
     local gpu
@@ -78,22 +100,16 @@ up)
     echo "   listo"
 
     echo ">> Las capas de arriba, en la jetson:"
-    sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
-        2>/dev/null
+    stop_layers
     sleep 2
-    # El árbitro nace antes que cualquier fuente. Así nunca existe una ventana
-    # donde navegación o pruebas puedan hablar directo con el robot.
-    launch "autoridad"    mobility.log  mobility_authority.py
-    launch "quieto"       stand.log     stand_hold.py
-    launch "navegacion"  goto.log      skills/go_to.py
-    launch "percepcion"  detector.log  skills/detector.py
-    launch "agente"      agent.log     agent/agent.py
+    start_layers
     sleep 6
 
     echo ""
     echo "TODO CARGADO Y EL ROBOT CONGELADO, quieto en el punto de partida."
     echo "Acomoda el cliente de Isaac y el tablero, y cuando quieras:"
+    echo "En Isaac: Perspective; rueda=zoom, boton central=mover, Alt+izq=girar,"
+    echo "           seleccionar robot + F=centrarlo. No mover /head_cam."
     echo ""
     echo "  bash run_demo.sh start      suelta el robot (la policy toma el control)"
     echo "  bash run_demo.sh freeze     lo vuelve a congelar en el origen (instantaneo)"
@@ -103,6 +119,21 @@ up)
     echo "  2. bash run_demo.sh check walk     camina y frena? (1 min)"
     echo "  3. bash run_demo.sh check goto     llega a un punto? (3 min)"
     echo "  4. bash run_demo.sh mission        recien ahi, la mision completa"
+    ;;
+
+layers)
+    # Permite reconstruir la computadora de a bordo sin pagar otro arranque de
+    # Isaac. El robot debe seguir corriendo en el host.
+    pgrep -f "g1_robot.p[y]" >/dev/null \
+        || { echo "el robot no está corriendo; usar: bash run_demo.sh up"; exit 1; }
+    stop_layers
+    sleep 2
+    if ! sudo docker exec jetson pgrep -f dashboard.py >/dev/null 2>&1; then
+        launch "tablero" dashboard.log dashboard/dashboard.py
+    fi
+    start_layers
+    sleep 6
+    echo "capas de la Jetson reiniciadas sin recargar Isaac"
     ;;
 
 start)
@@ -185,6 +216,12 @@ read-clock)
         --expected '$EXPECTED' --repetitions 3"
     ;;
 
+table)
+    COLOR="${2:-red}"
+    sudo docker exec jetson bash -c \
+        "$ROS && python3 $D/tools/check_table_detection.py '$COLOR'"
+    ;;
+
 mission)
     MISSION="${2:-fijate la hora en el reloj y llevale la botella a quien corresponda}"
     sudo docker exec jetson bash -c \
@@ -198,11 +235,14 @@ reset)
     # Devuelve el robot al punto de partida y reinicia las capas de arriba,
     # para poder repetir la mision desde cero sin relanzar el simulador.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
-    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py" 2>/dev/null
+    sudo docker exec jetson pkill -f \
+        "go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py" \
+        2>/dev/null
     sleep 2
-    launch "navegacion"  goto.log      skills/go_to.py
-    launch "percepcion"  detector.log  skills/detector.py
-    launch "agente"      agent.log     agent/agent.py
+    launch "navegacion"           goto.log              skills/go_to.py
+    launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
+    launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
+    launch "agente"               agent.log             agent/agent.py
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
     ;;
 
@@ -211,13 +251,23 @@ status)
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
-    for p in mobility_authority stand_hold go_to detector agent dashboard; do
+    for p in mobility_authority stand_hold go_to object_detector detection_adapter agent dashboard; do
         if sudo docker exec jetson pgrep -f "$p.py" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
             echo "  $p: DETENIDO"
         fi
     done
+    perception_status=$(
+        sudo docker exec jetson bash -lc \
+            "$ROS && timeout 5 ros2 topic echo --once --field data /g1/perception/status" \
+            2>/dev/null | head -1
+    )
+    if [ -n "$perception_status" ]; then
+        echo "  detector vivo: $perception_status"
+    else
+        echo "  detector SIN DATOS: el proceso existe pero no respondió en 5 s"
+    fi
     echo "== la mision =="
     # El cierre normal de ROS deja una traza técnica en el archivo. Mostrar
     # sólo los mensajes del agente evita presentar ese residuo como una falla.
@@ -230,9 +280,7 @@ kill)
     # MATAR TODO: robot + capas de arriba. El tablero sigue prendido para poder
     # ver como el sistema vuelve a levantarse (se apaga con: tablero off).
     bash ~/go2-lab/g1/run_g1.sh stop
-    sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|agent.py" \
-        2>/dev/null
+    stop_layers
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
     echo "GPU:   $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
@@ -242,9 +290,10 @@ kill)
 down)
     # La autoridad y stand_hold pertenecen al robot a bordo: siguen activos
     # mientras el robot esté de pie. Sólo se detienen tareas y percepción.
-    sudo docker exec jetson pkill -f "go_to.py|detector.py|agent.py"
+    sudo docker exec jetson pkill -f \
+        "go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py"
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

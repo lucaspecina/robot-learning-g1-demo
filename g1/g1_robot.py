@@ -80,6 +80,11 @@ parser.add_argument("--camera_hz", type=float, default=3.0,
                          "percepcion le alcanza de sobra")
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
+parser.add_argument(
+    "--follow-viewer",
+    action="store_true",
+    help="hace que la vista 3D siga al robot; apagado permite moverla a mano",
+)
 parser.add_argument("--free", action="store_true",
                     help="arrancar con la policy andando directamente, sin pasar "
                          "por el estado congelado (para pruebas automaticas)")
@@ -986,10 +991,9 @@ def main():
                 cam_pub.publish()
             rclpy.spin_once(node, timeout_sec=0.0)
 
-        # --- la camara del visor sigue al robot ---
-        # Sin esto se va de cuadro apenas camina unos metros. Se recoloca
-        # pocas veces por segundo: mover la camara es barato pero no gratis.
-        if step % (steps_per_control * 5) == 0:
+        # El seguimiento es opcional porque imponer esta vista varias veces por
+        # segundo impide que el operador de WebRTC haga zoom o mire otra zona.
+        if args_cli.follow_viewer and step % (steps_per_control * 5) == 0:
             p = robot.data.root_pos_w[0].cpu().numpy()
             sim.set_camera_view(
                 eye=(float(p[0]) - 3.0, float(p[1]) - 3.0, float(p[2]) + 1.5),
