@@ -34,6 +34,14 @@ STAND_MAX_ERROR_M = 0.15     # sobre de espera libre; manipular exige mucho meno
 WALK_SPEED = 0.3             # m/s que le pedimos al caminar
 GOTO_DISTANCE = 1.0          # metros hacia adelante para el peldaño 2
 
+# Avanzar no alcanza: una trayectoria oblicua deja de ser útil al acercarse a
+# una mesa. El ángulo hace comparable la prueba aunque cambie el RTF y, por lo
+# tanto, la distancia recorrida durante los mismos segundos de reloj.
+WALK_MAX_PATH_ANGLE_DEG = 5.0
+WALK_MAX_LATERAL_M = 0.15
+WALK_MAX_YAW_ERROR_DEG = 10.0
+WALK_MAX_BRAKE_M = 0.20
+
 
 class Checker(Node):
     def __init__(self):
@@ -276,15 +284,31 @@ def check_walk(c: Checker) -> bool:
 
     try:
         c.drive(40.0, vx=WALK_SPEED)
-        x1, y1, z1, _ = c.pose
+        x1, y1, z1, yaw1 = c.pose
+        dx, dy = x1 - x0, y1 - y0
+        forward = dx * math.cos(yaw0) + dy * math.sin(yaw0)
+        lateral = -dx * math.sin(yaw0) + dy * math.cos(yaw0)
         recorrido = math.hypot(x1 - x0, y1 - y0)
-        print(f"  camino:  altura {z1:.3f} m, recorrio {recorrido:.2f} m")
+        path_angle = abs(math.degrees(math.atan2(lateral, max(forward, 1e-9))))
+        walk_yaw_error = abs(math.degrees(math.atan2(
+            math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0)
+        )))
+        print(
+            f"  camino:  altura {z1:.3f} m, adelante {forward:.2f} m, "
+            f"costado {lateral:+.2f} m"
+        )
+        print(
+            f"            trayectoria {path_angle:.1f} grados fuera de la recta, "
+            f"cuerpo girado {walk_yaw_error:.1f} grados"
+        )
 
         print("  ahora comando cero: tiene que frenar y quedarse...")
         c.spin_for(20.0)
         x2, y2, z2, yaw2 = c.pose
         despues_de_frenar = math.hypot(x2 - x1, y2 - y1)
-        giro = abs(math.degrees(yaw2 - yaw0))
+        giro = abs(math.degrees(math.atan2(
+            math.sin(yaw2 - yaw0), math.cos(yaw2 - yaw0)
+        )))
         print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
               f"giro {giro:.0f} grados en total")
     finally:
@@ -295,9 +319,35 @@ def check_walk(c: Checker) -> bool:
     if recorrido < 0.3:
         return veredicto(False, f"casi no avanzo ({recorrido:.2f} m): "
                                 f"la orden no esta llegando a las piernas")
-    return veredicto(True, f"camino {recorrido:.2f} m de pie y al frenar solo "
-                           f"siguio {despues_de_frenar:.2f} m. Desvio de rumbo "
-                           f"acumulado: {giro:.0f} grados.")
+    if path_angle > WALK_MAX_PATH_ANGLE_DEG:
+        return veredicto(
+            False,
+            f"camino en diagonal: {path_angle:.1f} grados fuera de la recta "
+            f"(máximo {WALK_MAX_PATH_ANGLE_DEG:.1f})",
+        )
+    if abs(lateral) > WALK_MAX_LATERAL_M:
+        return veredicto(
+            False,
+            f"se desplazó {abs(lateral):.2f} m de costado "
+            f"(máximo {WALK_MAX_LATERAL_M:.2f} m)",
+        )
+    if walk_yaw_error > WALK_MAX_YAW_ERROR_DEG:
+        return veredicto(
+            False,
+            f"giró el cuerpo {walk_yaw_error:.1f} grados mientras caminaba "
+            f"(máximo {WALK_MAX_YAW_ERROR_DEG:.1f})",
+        )
+    if despues_de_frenar > WALK_MAX_BRAKE_M:
+        return veredicto(
+            False,
+            f"siguió {despues_de_frenar:.2f} m después de frenar "
+            f"(máximo {WALK_MAX_BRAKE_M:.2f} m)",
+        )
+    return veredicto(
+        True,
+        f"avanzó {forward:.2f} m, se desvió {lateral:+.2f} m y frenó en "
+        f"{despues_de_frenar:.2f} m",
+    )
 
 
 def check_goto(c: Checker) -> bool:
