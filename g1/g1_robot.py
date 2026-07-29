@@ -182,7 +182,11 @@ sys.path.insert(0, _here)
 from arm_control import ARM_JOINTS, POSES, PoseArmController  # noqa: E402
 from demo_scene import build_demo_scene  # noqa: E402
 from g1_asset import make_g1_cfg, make_wbc_agile_g1_cfg  # noqa: E402
-from perception import CameraPublisher, make_camera_cfg  # noqa: E402
+from perception import (  # noqa: E402
+    CAMERA_PARENT_PRIM,
+    CameraPublisher,
+    make_camera_cfg,
+)
 from locomotion import (  # noqa: E402
     LocomotionState,
     RLPolicyLocomotion,
@@ -553,7 +557,15 @@ def main():
     # Los ojos: se crean con la escena, antes del reset.
     camera = None
     if args_cli.camera:
+        import omni.usd
         from isaaclab.sensors import Camera
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage.GetPrimAtPath(CAMERA_PARENT_PRIM).IsValid():
+            raise RuntimeError(
+                "no existe la pieza de la cabeza donde debe montarse la "
+                f"cámara: {CAMERA_PARENT_PRIM}"
+            )
         camera = Camera(make_camera_cfg(update_period=1.0 / args_cli.camera_hz))
 
     sim.reset()

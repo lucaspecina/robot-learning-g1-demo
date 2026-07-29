@@ -20,8 +20,11 @@ from isaaclab.sensors import Camera, CameraCfg
 
 from sensor_msgs.msg import Image as ImageMsg
 
-# Montaje: sobre la cabeza, un poco adelante y arriba del centro del link.
-CAMERA_PRIM = "/World/G1/head_link/head_cam"
+# El cuerpo oficial de NVIDIA anida la cabeza debajo del torso. La cámara debe
+# ser hija de esa pieza para heredar su movimiento; colgarla de una ruta que
+# no existe hace que Isaac cree silenciosamente una cámara fija en el mundo.
+CAMERA_PARENT_PRIM = "/World/G1/torso_link/head_link"
+CAMERA_PRIM = f"{CAMERA_PARENT_PRIM}/head_cam"
 CAMERA_OFFSET = (0.08, 0.0, 0.05)      # metros, respecto de head_link
 RESOLUTION = (320, 240)                 # suficiente para deteccion; barato de renderizar
 
