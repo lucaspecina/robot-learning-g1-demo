@@ -248,6 +248,15 @@ ocho esferas de los pies contra MuJoCo.
   confirmación real de `frozen` y `active` pasó con `10,4 cm`, `1,3°` y 4/4
   detecciones. El comando visual ahora usa ese mismo verificador. El árbitro
   también registra cualquier vencimiento que ocurra dentro de su reloj.
+- **Regreso a `home` sin carga, validado numéricamente**: la prueba guarda la
+  pose recibida por ROS al iniciar —no supone que el origen es `(0,0)`—, navega
+  hasta el reloj y vuelve a esa pose. Tres repeticiones regresaron con errores
+  de `9,1`, `9,5` y `7,9 cm`, y errores de orientación de `2,7°`, `1,3°` y
+  `4,2°`, sin caída. Las idas quedaron a `11,2`, `9,6` y `8,5 cm` del destino.
+  La primera captura tuvo un giro transitorio de `13,6°`; las otras dos fueron
+  `-0,1°` y `-0,5°`, por lo que queda registrado pero no se declara tendencia.
+  Falta la inspección visual de Lucas y usar esta pose dentro del ejecutor de
+  la misión.
 - **Teleoperación con Meta Quest 3 (después de cerrar locomoción e integración
   de AGILE)**: probar primero el flujo oficial de NVIDIA para G1. Isaac Lab
   2.3.x incorpora control del G1 desde dispositivos XR y conversión de los

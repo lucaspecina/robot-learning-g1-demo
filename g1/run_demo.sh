@@ -3,7 +3,7 @@
 #
 # Uso (en la VM):
 #   bash run_demo.sh up          arranca robot + skills + agente
-#   bash run_demo.sh check [cual] LA ESCALERA DE PRUEBAS: stand | walk | goto | all
+#   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | home
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
@@ -157,6 +157,11 @@ check)
             "$ROS && python3 $D/tools/check_clock.py"
         exit $?
     fi
+    if [ "${2:-}" = "home" ]; then
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/check_home_return.py"
+        exit $?
+    fi
     # Soltar antes evita que un robot clavado artificialmente apruebe quietud.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
     # La confirmación se publica desde el lazo de física; el proceso de prueba
@@ -241,5 +246,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac
