@@ -244,14 +244,17 @@ ocho esferas de los pies contra MuJoCo.
   joysticks y grabación de demostraciones. No conectarlo a `/cmd_vel`
   directamente: deberá entrar como modo `MANUAL` mediante
   `mobility_authority`.
-- **El reloj de la escena no es todavía un reloj usable**: es un panel blanco
-  sin números ni agujas y se ve casi de canto desde el punto de observación.
-  Debe tener una cara legible, contraste, orientación coherente y horas
-  controlables antes de conectar un modelo visual.
-- **La detección actual del reloj es inválida**: en la primera prueba visual
-  etiquetó como reloj el `99,24 %` de una imagen casi completamente blanca.
-  Está detectando el fondo, no el objeto. No usar esa señal como criterio de
-  éxito hasta reemplazarla por una región conectada y una validación visual.
+- **Reloj visual, pendiente de confirmación de Lucas**: el panel blanco de la
+  primera prueba fue reemplazado por un display digital `09:00`, orientado
+  hacia la pose de observación. La captura automática muestra las cuatro cifras
+  completas y legibles. Falta que Lucas confirme la apariencia en Isaac y el
+  tablero antes de cerrar el peldaño visual.
+- **Detección temporal del reloj, numéricamente corregida**: la versión inicial
+  etiquetó como reloj el `99,24 %` de una imagen blanca. Ahora combina color,
+  área y forma. La prueba repetible obtuvo `0/3` falsos en el origen, `4/4`
+  detecciones frente al display, centro `0,528` y cero confusiones con botella.
+  Es válida para la escena controlada; en el robot real se reemplazará por un
+  detector visual y profundidad, no por rangos de color.
 - **`buscar_persona` no gira**: espera pasivamente en vez de darse vuelta.
 - **El planificador es de reglas**: la estructura para el modelo de lenguaje ya
   está; falta proveedor y credenciales.

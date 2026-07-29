@@ -151,6 +151,11 @@ tablero)
 
 check)
     # La escalera de pruebas, de lo mas simple a lo mas complejo.
+    if [ "${2:-}" = "clock" ]; then
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/check_clock.py"
+        exit $?
+    fi
     # Soltar antes evita que un robot clavado artificialmente apruebe quietud.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
     # La confirmación se publica desde el lazo de física; el proceso de prueba
@@ -241,5 +246,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|clock|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|start|freeze|clock|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

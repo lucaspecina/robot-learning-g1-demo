@@ -31,16 +31,44 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
-# Que buscamos: nombre -> (color de referencia RGB, tolerancia)
-# La tolerancia es cuanta distancia de color aceptamos; mas alta = mas permisivo.
+# Qué buscamos. El color solo propone candidatos; área y forma evitan que un
+# fondo entero se convierta en una detección válida, como ocurrió con el panel
+# blanco del primer reloj.
 TARGETS = {
-    "persona_roja": (np.array([190, 30, 30]), 70),
-    "persona_azul": (np.array([30, 50, 190]), 70),
-    "botella": (np.array([40, 140, 65]), 60),
-    "reloj": (np.array([242, 242, 230]), 35),
+    "persona_roja": {
+        "color": np.array([190, 30, 30]),
+        "tolerance": 70,
+        "min_aspect": 0.10,
+        "max_aspect": 0.85,
+        "max_area": 0.40,
+    },
+    "persona_azul": {
+        "color": np.array([30, 50, 190]),
+        "tolerance": 70,
+        "min_aspect": 0.10,
+        "max_aspect": 0.85,
+        "max_area": 0.40,
+    },
+    "botella": {
+        "color": np.array([40, 140, 65]),
+        "tolerance": 60,
+        "min_aspect": 0.10,
+        "max_aspect": 0.85,
+        "max_area": 0.12,
+    },
+    # El display y la botella comparten tonos verdes. La forma ancha del reloj
+    # y la forma alta de la botella los separan en esta escena controlada. En
+    # el robot real este nodo se reemplaza por un detector visual entrenado.
+    "reloj": {
+        "color": np.array([40, 145, 80]),
+        "tolerance": 70,
+        "min_aspect": 1.50,
+        "max_aspect": 5.00,
+        "max_area": 0.15,
+    },
 }
 
-AREA_MINIMA = 0.002   # menos que esto es ruido, no un objeto
+MIN_AREA = 0.001
 
 
 class ColorDetector(Node):
@@ -56,24 +84,36 @@ class ColorDetector(Node):
         img = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         img = img.astype(np.int16)
 
-        detecciones = {}
+        detections = {}
         total_px = msg.height * msg.width
 
-        for nombre, (color, tolerancia) in TARGETS.items():
+        for name, target in TARGETS.items():
             # Distancia de cada pixel al color buscado.
-            distancia = np.sqrt(((img - color) ** 2).sum(axis=2))
-            mascara = distancia < tolerancia
-            cuenta = int(mascara.sum())
-            area = cuenta / total_px
-            if area < AREA_MINIMA:
+            distance = np.sqrt(((img - target["color"]) ** 2).sum(axis=2))
+            mask = distance < target["tolerance"]
+            pixel_count = int(mask.sum())
+            area = pixel_count / total_px
+            if area < MIN_AREA or area > target["max_area"]:
                 continue
 
-            # Centro horizontal de los pixeles encontrados, normalizado.
-            columnas = np.where(mascara.any(axis=0))[0]
-            cx = float(columnas.mean() / msg.width)
-            detecciones[nombre] = {"cx": round(cx, 3), "area": round(area, 4)}
+            rows = np.where(mask.any(axis=1))[0]
+            columns = np.where(mask.any(axis=0))[0]
+            box_width = int(columns[-1] - columns[0] + 1)
+            box_height = int(rows[-1] - rows[0] + 1)
+            aspect = box_width / box_height
+            if not target["min_aspect"] <= aspect <= target["max_aspect"]:
+                continue
 
-        self.pub.publish(String(data=json.dumps(detecciones)))
+            # El centro de la caja es estable aunque una cifra tenga más
+            # segmentos encendidos que otra.
+            center_x = float((columns[0] + columns[-1]) / 2.0 / msg.width)
+            detections[name] = {
+                "cx": round(center_x, 3),
+                "area": round(area, 4),
+                "aspect": round(aspect, 2),
+            }
+
+        self.pub.publish(String(data=json.dumps(detections)))
 
 
 def main():
