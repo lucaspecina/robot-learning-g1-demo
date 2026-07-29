@@ -1,6 +1,6 @@
 # Arquitectura de control para la demo completa del G1
 
-Estado: decisión de diseño, 28-jul-2026.
+Estado: decisión de diseño, actualizada el 29-jul-2026.
 
 Este documento fija qué sistema estamos construyendo y qué condiciones deben
 mantenerse verdaderas durante el desarrollo. La simulación es el banco de
@@ -11,18 +11,17 @@ procesos vivan en la misma computadora o de que la red nunca falle no sirve.
 
 La misión completa es:
 
-1. Una persona da una orden hablada.
-2. El agente entiende la intención y arma un plan con capacidades conocidas.
-3. El robot navega hasta una pose desde la cual pueda ver el reloj.
-4. La percepción lee la hora desde la imagen.
-5. El robot navega hasta una pose de aproximación a la mesa.
-6. Una alineación fina coloca cuerpo, manos y objeto dentro del margen de
+1. El robot guarda como `home` el lugar seguro donde comienza.
+2. Una persona da una orden hablada.
+3. El ejecutor entiende la intención y arma un plan con capacidades conocidas.
+4. El robot navega hasta una pose desde la cual pueda ver el reloj.
+5. La percepción local recorta el reloj y el servidor externo lee la hora.
+6. El robot busca la mesa roja o azul elegida, sin recibir su posición.
+7. Una alineación fina coloca cuerpo, manos y objeto dentro del margen de
    captura del controlador de agarre.
-7. El controlador de agarre toma el objeto y confirma que sigue sujeto.
-8. El robot transporta el objeto mientras camina.
-9. Busca activamente a la persona correcta, mantiene una distancia segura y
-   se orienta hacia ella.
-10. Entrega el objeto y confirma el resultado.
+8. El controlador de agarre toma el objeto y confirma que sigue sujeto.
+9. El robot transporta el objeto hasta `home`.
+10. Confirma el regreso y que conserva el objeto.
 
 La misión no termina cuando el agente publica el último paso. Termina cuando
 cada capacidad reportó un resultado medido y el objeto fue entregado sin
@@ -34,7 +33,7 @@ caídas, colisiones ni pérdida silenciosa de control.
 |---|---|---|
 | Computadora de control | equilibrio, locomoción, límites y parada segura | mantiene o detiene el cuerpo sin depender de la red |
 | Jetson a bordo | autoridad de movilidad, navegación, percepción y control de brazos | conserva una conducta segura local |
-| Servidor externo | planificación semántica y modelos grandes | la misión se pausa; el robot no pierde equilibrio ni sigue caminando |
+| Servidor externo | planificación semántica y modelos grandes, incluida lectura visual | la misión se pausa; el robot no pierde equilibrio ni sigue caminando |
 
 El servidor nunca debe ser parte de un lazo que necesite respuesta rápida. La
 latencia y los cortes simulados son una prueba funcional, no una decoración.
@@ -150,7 +149,7 @@ sujeto, se reposiciona explícitamente y se reintenta.
 | Aproximación a mesa | 8–10 cm | 5° | terminar navegación |
 | Alineación para agarrar | 3–5 cm | 2–3° | habilitar el agarre |
 | Durante el agarre | máximo 5 cm | máximo 5° | abortar y reposicionar |
-| Cerca de una persona | distancia 0,8–1,0 m | 10° | no perseguir un ancla del mapa |
+| Regreso a `home` | 8–10 cm | 5° | confirmar llegada sin carga antes de transportar |
 
 Son requisitos iniciales, no números sagrados. Cada uno se reemplaza por un
 valor medido cuando conozcamos el margen real de percepción y agarre.
@@ -184,8 +183,8 @@ Para considerar estable una espera:
 3. Separación de `STAND` y `VELOCITY` en el supervisor de locomoción.
 4. Navegación como acción cancelable.
 5. Alineación fina y contrato de manipulación.
-6. Búsqueda activa de persona y protección de distancia.
-7. Sustitución de reloj fijo, detector de color y agarre simulado por los
+6. Búsqueda activa de la mesa elegida y regreso a `home`.
+7. Sustitución del detector de color y el agarre simulado por los
    componentes finales.
 
 ## Referencias primarias
@@ -206,3 +205,9 @@ Para considerar estable una espera:
   https://github.com/unitreerobotics/unitree_sdk2_python
 - Selector de velocidades `twist_mux`:
   https://github.com/ros-teleop/twist_mux
+- Azure OpenAI, API `v1` con el cliente estándar:
+  https://learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle
+- Azure OpenAI, salidas con esquema estricto:
+  https://learn.microsoft.com/azure/foundry/openai/how-to/structured-outputs
+- Azure Architecture Center, corte automático ante fallas repetidas:
+  https://learn.microsoft.com/azure/architecture/patterns/circuit-breaker

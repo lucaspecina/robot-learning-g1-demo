@@ -5,6 +5,7 @@
 #   bash run_demo.sh up          arranca robot + skills + agente
 #   bash run_demo.sh check [cual] LA ESCALERA DE PRUEBAS: stand | walk | goto | all
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
+#   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
 #   bash run_demo.sh mission     le da la mision completa de 10 pasos
 #   bash run_demo.sh status      como viene todo
@@ -165,24 +166,18 @@ check)
     ;;
 
 clock)
-    # Esta prueba aísla navegación, orientación y cámara. No usa todavía el
-    # agente ni la lectura de hora, porque mezclar esas capas ocultaría cuál
-    # falló si el reloj no termina dentro de la imagen.
+    # El verificador espera la confirmación real de freeze/start antes de
+    # mandar el objetivo. Un plazo fijo produjo una carrera: navegación llegó
+    # a tomar la autoridad mientras el robot todavía cambiaba de estado.
     sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: freeze}\"" \
-        >/dev/null 2>&1
-    sleep 1
+        "$ROS && python3 $D/tools/check_clock.py"
+    ;;
+
+read-clock)
+    EXPECTED="${2:-09:00}"
     sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\"" \
-        >/dev/null 2>&1
-    sleep 2
-    sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/goal geometry_msgs/msg/PoseStamped \
-        \"{header: {frame_id: odom}, pose: {position: {x: 0.8, y: 1.8, z: 0.0}, \
-        orientation: {x: 0.0, y: 0.0, z: 0.936109, w: 0.351709}}}\"" \
-        >/dev/null 2>&1
-    echo "prueba del reloj iniciada: llegada, orientación final y cámara"
-    echo "seguí el movimiento en Isaac y la imagen en el tablero"
+        "$ROS && python3 $D/tools/check_clock_reading.py \
+        --expected '$EXPECTED' --repetitions 3"
     ;;
 
 mission)
@@ -246,5 +241,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|clock|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

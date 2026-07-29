@@ -7,14 +7,15 @@ encarga de su parte y le reporta si salio bien.
 
   recibe:  /g1/mission         (std_msgs/String — la mision, en castellano)
            /g1/detections      (lo que la camara reconoce)
+           /g1/clock_crop/compressed (recorte del reloj)
            /g1/nav_status      (si la navegacion llego)
   publica: /g1/goal            (a donde ir)
            /g1/arm_pose        (que hacer con los brazos)
            /g1/mission_status  (como viene la mision)
 
-Corre en el SERVIDOR, no en el robot: piensa por evento, tolera la latencia del
-wifi, y puede necesitar un modelo grande. Es exactamente el reparto que
-estudiamos — lo que decide despacio va lejos, lo que ejecuta rapido va cerca.
+Corre en la Jetson como ejecutor local de la misión. Las decisiones que
+necesitan modelos grandes se piden por HTTP al servidor externo. Si ese enlace
+falla, aborta el paso y el control local deja al robot estable.
 
 Sobre el planificador: hoy resuelve la mision con reglas. La estructura ya esta
 lista para que un modelo de lenguaje arme el plan (ver `plan_con_llm`): el
@@ -30,7 +31,13 @@ import time
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
+
+from intelligence_client import (
+    IntelligenceClient,
+    RemoteIntelligenceError,
+)
 
 # El mapa semantico: donde PARARSE para usar cada cosa.
 #
@@ -63,12 +70,21 @@ class Agent(Node):
         self.detections = {}
         self.nav_status = None
         self.mission_thread = None
+        self.clock_crop = None
+        self.clock_crop_received_at = None
+        self.intelligence = IntelligenceClient()
 
         self.pub_goal = self.create_publisher(PoseStamped, "/g1/goal", 10)
         self.pub_arms = self.create_publisher(String, "/g1/arm_pose", 10)
         self.pub_status = self.create_publisher(String, "/g1/mission_status", 10)
         self.create_subscription(String, "/g1/mission", self.on_mission, 10)
         self.create_subscription(String, "/g1/detections", self.on_detections, 10)
+        self.create_subscription(
+            CompressedImage,
+            "/g1/clock_crop/compressed",
+            self.on_clock_crop,
+            2,
+        )
         self.create_subscription(String, "/g1/nav_status", self.on_nav_status, 10)
 
         self.get_logger().info("agente listo. Esperando misiones en /g1/mission")
@@ -83,6 +99,10 @@ class Agent(Node):
 
     def on_nav_status(self, msg: String):
         self.nav_status = msg.data
+
+    def on_clock_crop(self, msg: CompressedImage):
+        self.clock_crop = bytes(msg.data)
+        self.clock_crop_received_at = time.monotonic()
 
     def on_mission(self, msg: String):
         """Arranca la mision en un hilo aparte.
@@ -158,6 +178,11 @@ class Agent(Node):
         for skill, arg in plan:
             if skill == "decidir_color":
                 hora = self.leer_reloj()
+                if hora is None:
+                    self.reportar(
+                        "FALLO al leer el reloj — misión abortada"
+                    )
+                    return
                 color_objetivo = "persona_roja" if hora < 6 else "persona_azul"
                 self.reportar(f"el reloj marca {hora}:00 -> {color_objetivo}")
                 continue
@@ -217,14 +242,33 @@ class Agent(Node):
 
     # ---------- utilidades ----------
 
-    def leer_reloj(self) -> int:
+    def leer_reloj(self):
         """La hora que marca el reloj.
 
-        Todavia no lee la imagen: devuelve una hora fija para que la rama de
-        decision funcione de punta a punta. Cuando este el modelo con vision,
-        aca se le manda el recorte del reloj y se le pregunta la hora.
+        El detector local publica un recorte pequeño. El modelo vive detrás del
+        servidor externo para que una demora o caída de Azure no afecte el
+        equilibrio ni el control de movimiento.
         """
-        return int(os.environ.get("DEMO_HORA", "5"))
+        if (
+            self.clock_crop is None
+            or self.clock_crop_received_at is None
+            or time.monotonic() - self.clock_crop_received_at > 10.0
+        ):
+            self.reportar("no hay una imagen reciente del reloj")
+            return None
+        try:
+            reading = self.intelligence.read_clock(self.clock_crop)
+        except RemoteIntelligenceError as error:
+            self.reportar(f"servidor de visión no disponible: {error}")
+            return None
+        if not reading["readable"]:
+            self.reportar("el modelo informa que el reloj no es legible")
+            return None
+        self.reportar(
+            f"lectura visual: {reading['text']} "
+            f"({reading.get('elapsed_s', '?')} s en el servidor)"
+        )
+        return int(reading["hour"])
 
     def esperar_llegada(self, timeout_s: float = None) -> bool:
         """Espera a que la navegacion reporte que llego.

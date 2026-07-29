@@ -231,11 +231,23 @@ ocho esferas de los pies contra MuJoCo.
   LiDAR 3D a la representación necesaria; antes de implementarlo, confirmar
   los topics y drivers exactos entregados con la versión del G1 EDU comprada.
   Se hará después de cerrar visualmente locomoción, cámara y llegada al reloj.
-- **Integración con Azure AI Foundry**: el recurso, endpoints, patrón `v1`,
-  Speech, manejo de credenciales y reparto previsto están registrados en
-  `AZURE_AI.local.md`, excluido localmente de Git. Antes de escribir cada
-  integración, verificar con una llamada mínima que el deployment elegido
-  existe.
+- **Lectura visual en Azure AI Foundry, integrada**: el detector de la Jetson
+  manda sólo el recorte JPEG al servidor externo; éste usa la API `v1` y una
+  salida con formato estricto. `gpt-4.1-mini` leyó `09:00` 3/3 veces con red
+  limpia (`1,19–2,72 s`) y 3/3 con `wifi-bad` (`1,83–2,89 s`). Con corte total,
+  tres pedidos vencieron en `2 s` y el cuarto se rechazó localmente en `0 ms`.
+  Con el robot recién navegado frente al reloj, el camino vivo
+  cámara→detector→recorte→servidor→Azure leyó `09:00` 3/3 veces
+  (`1,77–2,29 s` punta a punta).
+  Las credenciales y el endpoint viven sólo en `.env` de la VM con permisos
+  `600`; no están en Git. Falta validar visualmente el recorte nuevo e invocar
+  este paso desde la misión ROS completa.
+- **Carrera del lanzador visual, corregida**: `run_demo.sh clock` soltaba el
+  robot, esperaba dos segundos y mandaba el objetivo. Una corrida tomó
+  navegación y perdió la concesión 12 s después; la prueba que espera la
+  confirmación real de `frozen` y `active` pasó con `10,4 cm`, `1,3°` y 4/4
+  detecciones. El comando visual ahora usa ese mismo verificador. El árbitro
+  también registra cualquier vencimiento que ocurra dentro de su reloj.
 - **Teleoperación con Meta Quest 3 (después de cerrar locomoción e integración
   de AGILE)**: probar primero el flujo oficial de NVIDIA para G1. Isaac Lab
   2.3.x incorpora control del G1 desde dispositivos XR y conversión de los
@@ -255,7 +267,9 @@ ocho esferas de los pies contra MuJoCo.
   detecciones frente al display, centro `0,528` y cero confusiones con botella.
   Es válida para la escena controlada; en el robot real se reemplazará por un
   detector visual y profundidad, no por rangos de color.
-- **`buscar_persona` no gira**: espera pasivamente en vez de darse vuelta.
+- **Código viejo de personas**: `agent.py` todavía contiene la rama anterior.
+  Hay que reemplazarla por selección de mesa roja/azul, búsqueda y regreso a
+  `home`; no extender `buscar_persona`.
 - **El planificador es de reglas**: la estructura para el modelo de lenguaje ya
   está; falta proveedor y credenciales.
 - **Reloj simulado** (`/clock` + `use_sim_time`): sin él, los plazos medidos en
@@ -263,7 +277,6 @@ ocho esferas de los pies contra MuJoCo.
   timeout de navegación.
 - **El tablero muere solo** con `ExternalShutdownException` y hay que revivirlo.
   Corre bajo supervisor, pero el supervisor también se cae. Sin diagnosticar.
-- **Leer el reloj de verdad** con un modelo con visión, en vez de la hora fija.
 - **Renombres pendientes**: la carpeta local y las rutas en la VM todavía dicen
   `go2`.
 

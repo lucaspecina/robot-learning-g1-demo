@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-requests \
     python3-numpy \
+    python3-pil \
     python3-yaml \
     && rm -rf /var/lib/apt/lists/*
 

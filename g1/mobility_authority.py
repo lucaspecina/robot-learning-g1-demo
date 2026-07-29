@@ -123,7 +123,13 @@ class MobilityAuthorityNode(Node):
 
     def tick(self):
         now = time.monotonic()
+        transition_before_tick = self.authority.transition_count
         selected = self.authority.tick(now)
+        if self.authority.transition_count != transition_before_tick:
+            # Los vencimientos ocurren en el reloj del árbitro, no dentro de
+            # un pedido ROS. Sin este log, una pérdida de autoridad parecía
+            # venir de la navegación aunque el motivo real quedara oculto.
+            self.get_logger().warn(self.authority.transition_reason)
         self.pub_cmd.publish(twist_from_velocity(selected))
 
         transition_changed = (
