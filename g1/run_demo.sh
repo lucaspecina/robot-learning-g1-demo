@@ -186,7 +186,10 @@ status)
         fi
     done
     echo "== la mision =="
-    sudo docker exec jetson tail -6 /tmp/agent.log 2>/dev/null \
+    # El cierre normal de ROS deja una traza técnica en el archivo. Mostrar
+    # sólo los mensajes del agente evita presentar ese residuo como una falla.
+    sudo docker exec jetson sh -c \
+        "grep -F '[agent]:' /tmp/agent.log 2>/dev/null | tail -6" \
         | sed 's/\[INFO\] \[[0-9.]*\] \[agent\]: /  /'
     ;;
 
