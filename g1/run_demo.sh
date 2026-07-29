@@ -4,6 +4,7 @@
 # Uso (en la VM):
 #   bash run_demo.sh up          arranca robot + skills + agente
 #   bash run_demo.sh check [cual] LA ESCALERA DE PRUEBAS: stand | walk | goto | all
+#   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
 #   bash run_demo.sh mission     le da la mision completa de 10 pasos
 #   bash run_demo.sh status      como viene todo
 #   bash run_demo.sh down        apaga las capas de arriba (no el robot)
@@ -114,6 +115,21 @@ freeze)
     echo "robot CONGELADO en el origen. Soltarlo: bash run_demo.sh start"
     ;;
 
+pose)
+    POSE="${2:-}"
+    case "$POSE" in
+    reposo|listo|transporte) ;;
+    *)
+        echo "uso: bash run_demo.sh pose {reposo|listo|transporte}"
+        exit 1
+        ;;
+    esac
+    sudo docker exec jetson bash -c \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/arm_pose std_msgs/msg/String \"{data: $POSE}\"" \
+        >/dev/null 2>&1
+    echo "brazos -> $POSE"
+    ;;
+
 tablero)
     # El tablero vive aparte del robot: se prende una vez y se queda.
     case "${2:-on}" in
@@ -194,5 +210,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|start|freeze|check [stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|start|freeze|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac
