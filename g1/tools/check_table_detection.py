@@ -24,7 +24,12 @@ from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
@@ -52,6 +57,14 @@ DETECTION_TIMEOUT_S = 12.0
 SEARCH_TIMEOUT_S = 50.0
 MIN_SAMPLES = 3
 MAX_CAMERA_FRAMES = 120
+# El verificador debe escuchar con el mismo contrato que la cámara. Usar el
+# perfil tolerante a pérdidas haría fallar al instrumento aunque el nodo real
+# haya conservado correctamente color, profundidad y calibración.
+EXACT_CAMERA_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.VOLATILE,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 class TableChecker(Node):
@@ -104,19 +117,19 @@ class TableChecker(Node):
             Image,
             "/g1/head_cam/image",
             self.on_color,
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             Image,
             "/g1/head_cam/depth",
             self.on_depth,
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             CameraInfo,
             "/g1/head_cam/camera_info",
             self.on_camera_info,
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             Detection2DArray,

@@ -20,7 +20,12 @@ from geometry_msgs.msg import PointStamped  # noqa: E402
 from rclpy.duration import Duration  # noqa: E402
 from rclpy.executors import ExternalShutdownException  # noqa: E402
 from rclpy.node import Node  # noqa: E402
-from rclpy.qos import qos_profile_sensor_data  # noqa: E402
+from rclpy.qos import (  # noqa: E402
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from tf2_ros import Buffer, TransformException, TransformListener  # noqa: E402
@@ -41,6 +46,14 @@ from perception_core import bounded_box  # noqa: E402
 
 MAX_CAMERA_FRAMES = 120
 TF_HISTORY_S = 120.0
+# La cámara publica los tres canales con entrega garantizada. Para unirlos por
+# fecha hay que conservar esa misma garantía: el perfil típico de video tolera
+# pérdidas, pero una sola pieza faltante invalida la medición 3D completa.
+EXACT_CAMERA_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.VOLATILE,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 class TableLocalizer(Node):
@@ -72,19 +85,19 @@ class TableLocalizer(Node):
             Image,
             "/g1/head_cam/image",
             lambda message: self.frames.add("color", message),
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             Image,
             "/g1/head_cam/depth",
             lambda message: self.frames.add("depth", message),
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             CameraInfo,
             "/g1/head_cam/camera_info",
             lambda message: self.frames.add("info", message),
-            qos_profile_sensor_data,
+            EXACT_CAMERA_QOS,
         )
         self.create_subscription(
             Detection2DArray,

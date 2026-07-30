@@ -69,6 +69,10 @@ No se graba video infinito:
 - El localizador conserva hasta 120 juegos de color, profundidad y calibración,
   y 120 segundos de posiciones de cámara. No aproxima horarios: si falta el
   instante exacto, rechaza la medición.
+- El video general tolera perder cuadros, pero el localizador 3D escucha
+  color, profundidad y calibración con la misma entrega garantizada que usa
+  la cámara. Antes de igualar ese contrato sólo pudo reconstruir 3 de 7
+  llamadas exitosas; después conservó 3 de 3 repeticiones consecutivas.
 - El agente conserva sólo el último recorte del reloj y lo considera vencido
   después de 10 segundos.
 - El agente conserva hasta 24 cuadros de evidencia en RAM. Cuando una
@@ -210,6 +214,8 @@ Referencias oficiales:
   https://isaac-sim.github.io/IsaacLab/develop/source/how-to/save_camera_output.html
 - Transformaciones temporales de ROS 2:
   https://docs.ros.org/en/jazzy/p/tf2/generated/doxygen/html/index.html
+- Sincronización por fecha y QoS de ROS 2:
+  https://docs.ros.org/en/jazzy/p/message_filters/doc/Tutorials/Approximate-Synchronizer-Cpp.html
 - Mensaje 3D estándar de ROS 2:
   https://docs.ros.org/en/jazzy/p/vision_msgs/msg/Detection3D.html
 - Detección de objetos de Isaac ROS:
