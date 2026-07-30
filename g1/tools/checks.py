@@ -463,7 +463,10 @@ def main():
         if not c.wait_for_pose():
             print("\n  NO LLEGA /g1/odom: el robot no esta corriendo.\n")
             return 1
-        c.spin_for(0.5)
+        # Con el simulador a RTF ~0,23 puede pasar más de medio segundo de
+        # pared hasta el siguiente estado. Esperar evita rechazar una prueba
+        # por el último mensaje "frozen" que quedó en tránsito.
+        c.spin_for(2.0)
         if c.robot_mode != "active":
             print(
                 "\n  ROBOT NO ACTIVO: la prueba no vale si está congelado. "

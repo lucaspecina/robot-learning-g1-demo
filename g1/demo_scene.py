@@ -16,10 +16,13 @@ from scene_layout import (
     NAVIGATION_TARGETS,
     SCENE_POSITIONS,
     TABLE_SIZE,
+    WORLD_BOUNDS,
 )
 
 TABLE_HEIGHT = 0.75
 CLOCK_HEIGHT = 1.55
+ROOM_HEIGHT = 2.7
+WALL_THICKNESS = 0.12
 CLOCK_APPROACH = NAVIGATION_TARGETS["reloj"][:2]
 CLOCK_FACE_YAW = math.atan2(
     CLOCK_APPROACH[1] - SCENE_POSITIONS["clock"][1],
@@ -181,8 +184,55 @@ def _spawn_digital_clock():
     )
 
 
+def _spawn_room_walls():
+    """Convierte el piso abierto en una habitación física medible."""
+    xmin, xmax = WORLD_BOUNDS["xmin"], WORLD_BOUNDS["xmax"]
+    ymin, ymax = WORLD_BOUNDS["ymin"], WORLD_BOUNDS["ymax"]
+    width, depth = xmax - xmin, ymax - ymin
+    walls = (
+        (
+            "west",
+            (WALL_THICKNESS, depth + 2 * WALL_THICKNESS, ROOM_HEIGHT),
+            (xmin, (ymin + ymax) / 2.0, ROOM_HEIGHT / 2.0),
+        ),
+        (
+            "east",
+            (WALL_THICKNESS, depth + 2 * WALL_THICKNESS, ROOM_HEIGHT),
+            (xmax, (ymin + ymax) / 2.0, ROOM_HEIGHT / 2.0),
+        ),
+        (
+            "south",
+            (width, WALL_THICKNESS, ROOM_HEIGHT),
+            ((xmin + xmax) / 2.0, ymin, ROOM_HEIGHT / 2.0),
+        ),
+        (
+            "north",
+            (width, WALL_THICKNESS, ROOM_HEIGHT),
+            ((xmin + xmax) / 2.0, ymax, ROOM_HEIGHT / 2.0),
+        ),
+    )
+    for name, size, position in walls:
+        wall = sim_utils.CuboidCfg(
+            size=size,
+            visual_material=_color((0.72, 0.74, 0.77)),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        )
+        wall.func(
+            f"/World/room/{name}_wall",
+            wall,
+            translation=position,
+        )
+    print(
+        f"[escena] habitación física de {width:.1f} x {depth:.1f} m, "
+        f"paredes de {ROOM_HEIGHT:.1f} m",
+        flush=True,
+    )
+
+
 def build_demo_scene():
     """Crea la habitacion. Llamar despues del piso y antes de sim.reset()."""
+
+    _spawn_room_walls()
 
     # --- el reloj: display digital visible desde el punto de observación ---
     _spawn_digital_clock()

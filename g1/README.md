@@ -36,7 +36,9 @@ hasta volver a pasar las pruebas físicas.
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
 | Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
+| Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
+| LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
 | Detector local RT-DETR | integrado; reloj 3/3, mesa visible pero debajo del umbral |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
@@ -100,6 +102,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/head_cam/depth` | Image 32FC1 | el robot |
 | `/g1/head_cam/camera_info` | CameraInfo | el robot |
 | `/tf`: `map` → `head_cam_optical` | TransformStamped | el robot simulado |
+| `/g1/lidar/points` | PointCloud2 | experimental; no usar hasta pasar `check_lidar.py` |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
@@ -114,6 +117,7 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `locomotion.py` | controladores intercambiables (NVIDIA AGILE / anterior / diagnóstico) |
 | `arm_control.py` | control de brazos por poses con nombre |
 | `perception.py` | la cámara de la cabeza y su publicación |
+| `lidar.py` | integración RTX experimental, apagada por defecto |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
 | `skills/go_to.py` | navegación a un punto |
@@ -179,6 +183,18 @@ las esquinas superiores. `listo` y `transporte` dejan libre todo el cuadro.
 Las tres poses fueron verificadas con ángulos reales y con altura,
 desplazamiento e inclinación del cuerpo; la búsqueda visual debe usar `listo`.
 
+**Un dibujo de límites no es una habitación.** La escena anterior era un piso
+abierto aunque el tablero mostrara un rectángulo. Ahora los mismos límites
+crean cuatro paredes con colisión. Quietud (error p95 de 1 cm), caminata
+(2,46 m) y frenado (2 cm) siguieron pasando con RTF 0,23.
+
+**El LiDAR no está validado dentro del G1.** El ejemplo oficial aislado produjo
+37.048 puntos, pero la integración en IsaacLab 5.1 siguió en cero incluso
+frente a una pared. Montaje, cámara, frecuencia de render, visor, Fabric y el
+puente ROS quedaron separados por experimentos. El detalle está en
+[`LIDAR_STATUS.md`](LIDAR_STATUS.md); el flag `--lidar` no forma parte del
+lanzamiento normal.
+
 ## Lo siguiente
 
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
@@ -189,7 +205,10 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 3. **Guardar `home` y regresar** sin carga.
 4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
-5. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
+   verificador; hasta entonces la profundidad de cámara mide objetos, no crea
+   una falsa localización perfecta.
+6. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-6. **El agarre** con un VLA entrenado por nosotros.
-7. **Voz y planificador semántico** después de cerrar las capacidades físicas.
+7. **El agarre** con un VLA entrenado por nosotros.
+8. **Voz y planificador semántico** después de cerrar las capacidades físicas.

@@ -78,6 +78,16 @@ parser.add_argument("--camera_hz", type=float, default=3.0,
                          "cuesta un render completo: bajarla de 10 a 3 recupera "
                          "casi un tercio de la velocidad de simulacion, y a la "
                          "percepcion le alcanza de sobra")
+parser.add_argument(
+    "--lidar",
+    action="store_true",
+    help="EXPERIMENTAL: montar LiDAR RTX; hoy no pasa la prueba integrada",
+)
+parser.add_argument(
+    "--lidar-profile",
+    default="Example_Rotary",
+    help="perfil RTX; el inicial es provisional hasta confirmar el hardware",
+)
 parser.add_argument("--render_hz", type=float, default=20.0,
                     help="cuadros por segundo a dibujar (mas bajo = simulacion mas rapida)")
 parser.add_argument(
@@ -586,7 +596,9 @@ def main():
     render_every = max(1, round((1.0 / args_cli.render_hz) / physics_dt)) if args_cli.render_hz > 0 else 10**9
 
     # --- escena ---
-    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=physics_dt, device=args_cli.device))
+    sim = sim_utils.SimulationContext(
+        sim_utils.SimulationCfg(dt=physics_dt, device=args_cli.device)
+    )
     sim.set_camera_view(eye=(2.5, 2.5, 1.8), target=(0.0, 0.0, 0.8))
     # Piso con la MISMA friccion que el simulador donde Unitree valida la
     # policy. IsaacLab trae 0.5 por defecto; MuJoCo usa 1.0. Con la mitad de
@@ -622,7 +634,22 @@ def main():
             )
         camera = Camera(make_camera_cfg(update_period=1.0 / args_cli.camera_hz))
 
+    lidar_bridge = None
+    if args_cli.lidar:
+        import omni.usd
+        from lidar import LIDAR_PARENT_PRIM, LidarBridge
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage.GetPrimAtPath(LIDAR_PARENT_PRIM).IsValid():
+            raise RuntimeError(
+                "no existe la pieza de la cabeza donde debe montarse el "
+                f"LiDAR: {LIDAR_PARENT_PRIM}"
+            )
+        lidar_bridge = LidarBridge(profile=args_cli.lidar_profile)
+
     sim.reset()
+    if lidar_bridge is not None:
+        lidar_bridge.initialize()
     print(f"[robot] articulaciones del modelo: {robot.num_joints} "
           f"({', '.join(robot.joint_names[:3])}...)", flush=True)
 
@@ -774,6 +801,13 @@ def main():
     cam_pub = CameraPublisher(node, camera) if camera is not None else None
     if cam_pub is not None:
         print("[robot] camara de cabeza publicando en /g1/head_cam/image", flush=True)
+    if lidar_bridge is not None:
+        print(
+            "[robot] AVISO: LiDAR experimental conectado a "
+            "/g1/lidar/points; validar con check_lidar.py antes de usar "
+            f"(perfil {lidar_bridge.profile})",
+            flush=True,
+        )
 
     # El robot arranca sosteniendo la pose nominal: la policy necesita partir
     # de una postura que conozca, no de una arbitraria.

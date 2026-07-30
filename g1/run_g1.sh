@@ -80,7 +80,7 @@ esac
 
 # Isaac exige este flag para renderizar camaras; sin el, crear una es un error.
 case "$EXTRA" in
-    *--camera*) ARGS="$ARGS --enable_cameras" ;;
+    *--camera*|*--lidar*) ARGS="$ARGS --enable_cameras" ;;
 esac
 
 # Modo de video: con "--visible" transmite la escena al cliente de Isaac; por
