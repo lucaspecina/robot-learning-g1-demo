@@ -14,6 +14,12 @@ cámara frontal
       |                                                               |
       +--> pedido puntual --> servidor Grounding DINO                 |
                               --> `/g1/open_vocabulary_detections` ----+
+                                          |
+ color + profundidad + calibración + pose histórica de cámara
+                                          |
+                                          v
+                                localizador de mesas
+                                `/g1/table_detections_3d`
                                                                       v
                                                           adaptador de la demo
       |
@@ -46,6 +52,9 @@ No se graba video infinito:
 - El adaptador conserva en RAM hasta 180 cuadros identificados por su hora,
   aproximadamente un minuto a 3 cuadros por segundo. Esto permite unir una
   respuesta lenta con la imagen exacta que la produjo.
+- El localizador conserva hasta 120 juegos de color, profundidad y calibración,
+  y 120 segundos de posiciones de cámara. No aproxima horarios: si falta el
+  instante exacto, rechaza la medición.
 - El agente conserva sólo el último recorte del reloj y lo considera vencido
   después de 10 segundos.
 - El tablero usa otro historial acotado de 180 cuadros para dibujar las cajas
@@ -81,6 +90,7 @@ no reaccionó, o falló el modelo remoto.
 | Búsqueda de categorías nuevas | NVIDIA ofrece Grounding DINO con una descripción escrita y recomienda usarlo de forma intercalada por su costo | integrado a pedido en el servidor; no corre dentro del control |
 | Ejecución en la VM | Isaac ROS actual requiere una GPU más nueva que la T4 | backend compatible en CPU dentro de la Jetson simulada |
 | Uso de modelo grande | procesar sólo cuando una tarea lo necesita | recorte para el reloj; un cuadro para buscar una mesa |
+| Ubicación 3D | `vision_msgs/Detection3DArray` y relaciones temporales `tf2` | la Jetson publica el punto observado en `map` con la hora del cuadro |
 
 Antes de instalar el paquete acelerado en el G1 físico habrá que fijar una
 combinación compatible entre la Jetson real, su versión de JetPack, ROS 2 e
@@ -110,20 +120,30 @@ cualquier Jetson.
 Una prueba numérica no cierra la cámara hasta que Lucas confirme también que
 la imagen y las cajas tienen sentido.
 
-## Próximo paso: de recuadro a coordenada
+## De recuadro a coordenada: validado el 30 de julio de 2026
 
 Una caja 2D dice dónde aparece la mesa en la foto, no dónde está en la
 habitación. El G1 real incluye cámara de profundidad y LiDAR 3D según la ficha
-de Unitree. El flujo transferible es:
+de Unitree. El flujo transferible implementado es:
 
 1. publicar color, profundidad y calibración de la misma cámara;
-2. medir la distancia sólo dentro del recuadro;
-3. transformar ese punto al mapa usando la pose del sensor;
-4. generar una pose segura de aproximación para navegación;
-5. usar profundidad otra vez para la alineación final.
+2. medir la distancia sólo en los píxeles rojos o azules del recuadro;
+3. transformar ese punto al mapa usando la pose histórica del sensor;
+4. publicar una `Detection3DArray` estándar en `/g1/table_detections_3d`.
 
-Isaac Lab ofrece `distance_to_image_plane`, calibración y conversión de
-profundidad a puntos 3D. No se usará la coordenada interna del objeto en Isaac.
+Isaac Lab ofrece `distance_to_image_plane`, calibración y pose de cámara. Su
+opción `update_latest_camera_pose` está desactivada por defecto por rendimiento;
+encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
+
+| Prueba | Punto medido | Referencia física |
+|---|---|---|
+| mesa roja | `(3,63; 2,45; 0,52)` m | cayó dentro de su superficie |
+| mesa azul | `(3,62; -2,53; 0,52)` m | cayó dentro de su superficie |
+| nodo permanente, azul | `(3,63; -2,65; 0,52)` m, confianza 0,923 | coincidió con el verificador independiente |
+
+El punto representa la superficie vista, no el centro completo de la mesa. El
+próximo paso es producir una pose segura de aproximación y buscar por distintas
+vistas sin conocer antes la coordenada.
 
 Referencias oficiales:
 
@@ -132,5 +152,9 @@ Referencias oficiales:
   https://isaac-sim.github.io/IsaacLab/develop/source/overview/core-concepts/sensors/camera.html
 - Conversión oficial a puntos 3D:
   https://isaac-sim.github.io/IsaacLab/develop/source/how-to/save_camera_output.html
+- Transformaciones temporales de ROS 2:
+  https://docs.ros.org/en/jazzy/p/tf2/generated/doxygen/html/index.html
+- Mensaje 3D estándar de ROS 2:
+  https://docs.ros.org/en/jazzy/p/vision_msgs/msg/Detection3D.html
 - Detección de objetos de Isaac ROS:
   https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html

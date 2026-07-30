@@ -13,16 +13,33 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
+
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+import tf2_geometry_msgs  # noqa: F401
+from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Odometry
+from rclpy.duration import Duration
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
+from tf2_ros import Buffer, TransformException, TransformListener
+from vision_msgs.msg import Detection2DArray
 
+from camera_stream import (
+    SynchronizedCameraFrames,
+    color_array,
+    depth_array,
+)
+from depth_geometry import colored_table_point
 from open_vocabulary_core import make_search_request
+from perception_core import bounded_box
+from scene_layout import SCENE_POSITIONS, TABLE_SIZE
 
 OBSERVATION_POSES = {
     # A 1,4 m la cámara de la cabeza sólo veía la punta de la botella: la mesa
@@ -34,6 +51,7 @@ NAVIGATION_TIMEOUT_S = 180.0
 DETECTION_TIMEOUT_S = 12.0
 SEARCH_TIMEOUT_S = 50.0
 MIN_SAMPLES = 3
+MAX_CAMERA_FRAMES = 120
 
 
 class TableChecker(Node):
@@ -44,6 +62,17 @@ class TableChecker(Node):
         self.robot_mode = None
         self.detections = []
         self.search_status = None
+        self.camera_frames = SynchronizedCameraFrames(MAX_CAMERA_FRAMES)
+        self.search_detections = {}
+        # El análisis remoto puede tardar decenas de segundos. El historial
+        # estándar de diez segundos de tf2 perdería justo la pose del cuadro
+        # analizado y obligaría a mezclarlo con la pose actual del robot.
+        self.tf_buffer = Buffer(cache_time=Duration(seconds=120.0))
+        self.tf_listener = TransformListener(
+            self.tf_buffer,
+            self,
+            spin_thread=False,
+        )
         self.control_pub = self.create_publisher(String, "/g1/control", 10)
         self.goal_pub = self.create_publisher(PoseStamped, "/g1/goal", 10)
         self.search_pub = self.create_publisher(
@@ -70,6 +99,30 @@ class TableChecker(Node):
             "/g1/perception/search_status",
             self.on_search_status,
             10,
+        )
+        self.create_subscription(
+            Image,
+            "/g1/head_cam/image",
+            self.on_color,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Image,
+            "/g1/head_cam/depth",
+            self.on_depth,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            CameraInfo,
+            "/g1/head_cam/camera_info",
+            self.on_camera_info,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection2DArray,
+            "/g1/open_vocabulary_detections",
+            self.on_open_vocabulary_detections,
+            qos_profile_sensor_data,
         )
 
     def on_odom(self, msg: Odometry):
@@ -108,6 +161,23 @@ class TableChecker(Node):
         except json.JSONDecodeError:
             pass
 
+    def on_color(self, message: Image):
+        self.camera_frames.add("color", message)
+
+    def on_depth(self, message: Image):
+        self.camera_frames.add("depth", message)
+
+    def on_camera_info(self, message: CameraInfo):
+        self.camera_frames.add("info", message)
+
+    def on_open_vocabulary_detections(self, message: Detection2DArray):
+        for detection in message.detections:
+            parts = detection.id.split(":")
+            if len(parts) >= 3 and parts[0] == "grounding_dino":
+                self.search_detections.setdefault(parts[1], []).append(
+                    (message.header, detection)
+                )
+
     def wait_for_active(self) -> bool:
         end = time.monotonic() + 10.0
         last_request = 0.0
@@ -118,6 +188,23 @@ class TableChecker(Node):
                 last_request = now
             rclpy.spin_once(self, timeout_sec=0.1)
             if self.robot_mode == "active":
+                return True
+        return False
+
+    def wait_for_camera_transform(self) -> bool:
+        end = time.monotonic() + 10.0
+        while time.monotonic() < end:
+            rclpy.spin_once(self, timeout_sec=0.1)
+            frame = self.camera_frames.latest_complete()
+            if frame is None:
+                continue
+            header = frame["color"].header
+            if self.tf_buffer.can_transform(
+                "map",
+                header.frame_id,
+                Time.from_msg(header.stamp),
+                timeout=Duration(seconds=0.1),
+            ):
                 return True
         return False
 
@@ -155,6 +242,7 @@ class TableChecker(Node):
         request = make_search_request(target, request_id)
         self.search_status = None
         self.detections.clear()
+        self.search_detections.pop(request_id, None)
 
         # Esperar que exista el consumidor evita que un único mensaje se
         # pierda justo mientras se reinician las capas de percepción.
@@ -184,6 +272,78 @@ class TableChecker(Node):
                 )
         raise RuntimeError("la búsqueda visual no respondió a tiempo")
 
+    def measure_search_result(self, request_id: str):
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end:
+            rclpy.spin_once(self, timeout_sec=0.1)
+            candidates = self.search_detections.get(request_id, [])
+            ready = [
+                (header, detection)
+                for header, detection in candidates
+                if self.camera_frames.complete(header) is not None
+            ]
+            if ready:
+                break
+        else:
+            raise RuntimeError(
+                "la detección no conserva su cuadro sincronizado de cámara"
+            )
+
+        def confidence(item):
+            detection = item[1]
+            if not detection.results:
+                return 0.0
+            return detection.results[0].hypothesis.score
+
+        header, detection = max(ready, key=confidence)
+        frame = self.camera_frames.complete(header)
+        color_message = frame["color"]
+        depth_message = frame["depth"]
+        info = frame["info"]
+        if (
+            color_message.width != depth_message.width
+            or color_message.height != depth_message.height
+            or info.width != color_message.width
+            or info.height != color_message.height
+        ):
+            raise RuntimeError("el cuadro sincronizado tiene tamaños distintos")
+        center = detection.bbox.center.position
+        box = bounded_box(
+            center.x,
+            center.y,
+            detection.bbox.size_x,
+            detection.bbox.size_y,
+            color_message.width,
+            color_message.height,
+        )
+        try:
+            camera_point = colored_table_point(
+                color_array(color_message),
+                depth_array(depth_message),
+                np.asarray(info.k, dtype=np.float64).reshape(3, 3),
+                box,
+            )
+        except ValueError as error:
+            raise RuntimeError(
+                f"no se pudo medir la superficie de la mesa: {error}"
+            ) from error
+        point_message = PointStamped()
+        point_message.header = header
+        point_message.point.x = camera_point.right_m
+        point_message.point.y = camera_point.down_m
+        point_message.point.z = camera_point.forward_m
+        try:
+            map_point = self.tf_buffer.transform(
+                point_message,
+                "map",
+                timeout=Duration(seconds=2.0),
+            )
+        except TransformException as error:
+            raise RuntimeError(
+                f"no se pudo llevar la medición al mapa: {error}"
+            ) from error
+        return camera_point, map_point.point
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -203,6 +363,10 @@ def main() -> int:
     try:
         if not checker.wait_for_active():
             raise RuntimeError("el robot no confirmó el estado activo")
+        if not checker.wait_for_camera_transform():
+            raise RuntimeError(
+                "no llegó un cuadro con su ubicación temporal en el mapa"
+            )
         if args.current_view:
             print(
                 f"vista actual: ({checker.pose[0]:.2f}, "
@@ -233,6 +397,41 @@ def main() -> int:
             f"{search_status.get('elapsed_s')} s totales, "
             f"{search_status.get('inference_s')} s de modelo"
         )
+        point, map_point = checker.measure_search_result(
+            search_status["request_id"]
+        )
+        print(
+            "distancia visual: "
+            f"{point.forward_m:.2f} m hacia delante, "
+            f"{point.right_m:+.2f} m a la derecha, "
+            f"{point.down_m:+.2f} m hacia abajo "
+            f"({point.sample_count} píxeles {point.color})"
+        )
+        print(
+            "posición medida en el mapa: "
+            f"({map_point.x:.2f}, {map_point.y:.2f}, {map_point.z:.2f}) m"
+        )
+        if point.color != args.color:
+            raise RuntimeError(
+                f"la profundidad pertenece al color {point.color}, "
+                f"no al {args.color}"
+            )
+        table_center = SCENE_POSITIONS[f"{args.color}_table"]
+        half_x, half_y = TABLE_SIZE[0] / 2, TABLE_SIZE[1] / 2
+        if not (
+            table_center[0] - half_x - 0.10
+            <= map_point.x
+            <= table_center[0] + half_x + 0.10
+            and table_center[1] - half_y - 0.10
+            <= map_point.y
+            <= table_center[1] + half_y + 0.10
+            and 0.0 <= map_point.z <= 1.10
+        ):
+            raise RuntimeError(
+                "la distancia visual no cae dentro de la mesa real de la "
+                f"escena: ({map_point.x:.2f}, {map_point.y:.2f}, "
+                f"{map_point.z:.2f})"
+            )
         samples = checker.collect_detections()
         if len(samples) < MIN_SAMPLES:
             raise RuntimeError(
@@ -253,7 +452,10 @@ def main() -> int:
             )
         if opposite_count:
             raise RuntimeError("la mesa apareció también con el color opuesto")
-        print("APROBADO: la mesa y su color se reconocen desde la cámara viva")
+        print(
+            "APROBADO: la mesa se reconoce y se mide desde el mismo "
+            "cuadro de cámara"
+        )
         return 0
     except RuntimeError as error:
         print(f"FALLA MESA: {error}")

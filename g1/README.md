@@ -15,6 +15,7 @@ python3 stand_hold.py          # corrige la deriva durante una espera
 python3 skills/go_to.py        # navegación
 python3 skills/object_detector.py   # detector neuronal local
 python3 skills/open_vocabulary_detector.py # búsqueda puntual en el servidor
+python3 skills/table_localizer.py   # lleva una mesa detectada al mapa
 python3 skills/detection_adapter.py # cajas, color y recorte del reloj
 python3 agent/agent.py         # ejecutor local de la misión
 
@@ -35,9 +36,10 @@ hasta volver a pasar las pruebas físicas.
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
 | Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
-| Cámara de cabeza | funciona — óptica oficial Unitree, 640×480 a 3 Hz |
+| Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
 | Detector local RT-DETR | integrado; reloj 3/3, mesa visible pero debajo del umbral |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
+| Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
 | Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
@@ -59,10 +61,10 @@ versión anterior quedaron fuera del alcance actual.
               | recorte/cuadro JPEG        /g1/goal /g1/arm_pose
               |                                  |
               +-- [ open_vocabulary_detector.py ] [ object_detector.py ]
-                                      \             /
-                                       [ adapter ] [ go_to.py ]
-                                                   |
-                                    /g1/cmd_vel/navigation
+                         |                 \             /
+                 [ table_localizer ]        [ adapter ] [ go_to.py ]
+                         |                             |
+              /g1/table_detections_3d      /g1/cmd_vel/navigation
                                                    |
                             [ stand_hold.py ] -> [ mobility_authority.py ]
                                                           |
@@ -84,6 +86,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/object_detections` | Detection2DArray | el detector neuronal |
 | `/g1/perception/search_request` | String (JSON) | agente o verificador |
 | `/g1/open_vocabulary_detections` | Detection2DArray | búsqueda puntual |
+| `/g1/table_detections_3d` | Detection3DArray | localizador de mesas |
 | `/g1/perception/search_status` | String (JSON) | búsqueda puntual |
 | `/g1/detections` | String (JSON) | el adaptador de la demo |
 | `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
@@ -94,6 +97,9 @@ versión anterior quedaron fuera del alcance actual.
 | `/cmd_vel` | Twist | sólo `mobility_authority.py` |
 | `/g1/odom`, `/g1/joint_states` | Odometry, JointState | el robot |
 | `/g1/head_cam/image` | Image | el robot |
+| `/g1/head_cam/depth` | Image 32FC1 | el robot |
+| `/g1/head_cam/camera_info` | CameraInfo | el robot |
+| `/tf`: `map` → `head_cam_optical` | TransformStamped | el robot simulado |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
@@ -115,6 +121,7 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
 | `skills/open_vocabulary_detector.py` | manda un cuadro al detector remoto sólo por pedido |
+| `skills/table_localizer.py` | une caja, profundidad y pose histórica; publica el punto en el mapa |
 | `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
 | `agent/agent.py` | ejecutor local de la misión y cliente del servidor |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
@@ -177,9 +184,8 @@ desplazamiento e inclinación del cuerpo; la búsqueda visual debe usar `listo`.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Publicar profundidad y calibración** de la cámara simulada, como el sensor
-   del G1 real, y convertir una caja visual en un punto del mapa.
-2. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
+1. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
+2. **Convertir la superficie encontrada en una pose segura de aproximación.**
 3. **Guardar `home` y regresar** sin carga.
 4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
