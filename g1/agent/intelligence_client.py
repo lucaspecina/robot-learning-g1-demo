@@ -11,6 +11,7 @@ import uuid
 
 DEFAULT_SERVER_URL = "http://172.30.0.20:8000"
 DEFAULT_TIMEOUT_S = 15.0
+DEFAULT_DETECTION_TIMEOUT_S = 45.0
 FAILURE_THRESHOLD = 3
 OPEN_INTERVAL_S = 30.0
 
@@ -94,16 +95,12 @@ class IntelligenceClient:
         if self.consecutive_failures >= FAILURE_THRESHOLD:
             self.opened_at = self.monotonic()
 
-    def read_clock(self, image: bytes) -> dict:
+    def _post(self, path: str, payload: dict, timeout_s: float):
         self._allow_request()
         request_id = str(uuid.uuid4())
-        body = json.dumps(
-            {
-                "image_base64": base64.b64encode(image).decode("ascii"),
-            }
-        ).encode("utf-8")
+        body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            f"{self.server_url}/v1/read-clock",
+            f"{self.server_url}{path}",
             data=body,
             headers={
                 "Content-Type": "application/json",
@@ -113,7 +110,7 @@ class IntelligenceClient:
         )
 
         try:
-            with self.opener(request, timeout=self.timeout_s) as response:
+            with self.opener(request, timeout=timeout_s) as response:
                 payload = json.loads(response.read())
         except (
             OSError,
@@ -124,17 +121,31 @@ class IntelligenceClient:
         ) as error:
             self._record_failure()
             raise RemoteIntelligenceError(
-                f"falló la lectura remota: {type(error).__name__}"
+                f"falló el pedido remoto: {type(error).__name__}"
             ) from error
 
         if (
             not payload.get("ok")
             or payload.get("request_id") != request_id
-            or not isinstance(payload.get("reading"), dict)
         ):
             self._record_failure()
             raise RemoteIntelligenceError(
                 "el servidor devolvió una respuesta inválida"
+            )
+        return payload, request_id
+
+    def read_clock(self, image: bytes) -> dict:
+        payload, request_id = self._post(
+            "/v1/read-clock",
+            {
+                "image_base64": base64.b64encode(image).decode("ascii"),
+            },
+            self.timeout_s,
+        )
+        if not isinstance(payload.get("reading"), dict):
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                "el servidor no devolvió una lectura"
             )
 
         try:
@@ -145,6 +156,82 @@ class IntelligenceClient:
         self._record_success()
         return {
             **reading,
+            "elapsed_s": payload.get("elapsed_s"),
+            "request_id": request_id,
+        }
+
+    def detect_objects(self, image: bytes, labels: list[str]) -> dict:
+        if (
+            not isinstance(labels, list)
+            or not labels
+            or any(not isinstance(label, str) or not label.strip() for label in labels)
+        ):
+            raise ValueError("labels debe contener categorías no vacías")
+        timeout_s = float(
+            os.environ.get(
+                "INTELLIGENCE_DETECTION_TIMEOUT_S",
+                DEFAULT_DETECTION_TIMEOUT_S,
+            )
+        )
+        payload, request_id = self._post(
+            "/v1/detect-objects",
+            {
+                "image_base64": base64.b64encode(image).decode("ascii"),
+                "labels": labels,
+            },
+            timeout_s,
+        )
+        detections = payload.get("detections")
+        image_width = payload.get("image_width")
+        image_height = payload.get("image_height")
+        valid_size = (
+            isinstance(image_width, int)
+            and image_width > 0
+            and isinstance(image_height, int)
+            and image_height > 0
+        )
+        if not isinstance(detections, list) or not valid_size:
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                "el servidor no devolvió detecciones válidas"
+            )
+        validated = []
+        for detection in detections:
+            if not isinstance(detection, dict):
+                self._record_failure()
+                raise RemoteIntelligenceError("detección remota inválida")
+            label = detection.get("label")
+            confidence = detection.get("confidence")
+            box = detection.get("box")
+            valid_box = (
+                isinstance(box, list)
+                and len(box) == 4
+                and all(isinstance(value, (int, float)) for value in box)
+                and 0 <= box[0] < box[2] <= image_width
+                and 0 <= box[1] < box[3] <= image_height
+            )
+            if (
+                not isinstance(label, str)
+                or not isinstance(confidence, (int, float))
+                or not 0.0 <= confidence <= 1.0
+                or not valid_box
+            ):
+                self._record_failure()
+                raise RemoteIntelligenceError("detección remota inválida")
+            validated.append(
+                {
+                    "label": label,
+                    "confidence": float(confidence),
+                    "box": [float(value) for value in box],
+                }
+            )
+        self._record_success()
+        return {
+            "detections": validated,
+            "image_width": image_width,
+            "image_height": image_height,
+            "model": payload.get("model"),
+            "inference_s": payload.get("inference_s"),
             "elapsed_s": payload.get("elapsed_s"),
             "request_id": request_id,
         }

@@ -43,7 +43,7 @@ launch() {   # nombre archivo_log script
 
 stop_layers() {
     sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py" \
+        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|detection_adapter.py|agent.py" \
         2>/dev/null
 }
 
@@ -54,6 +54,7 @@ start_layers() {
     launch "quieto"               stand.log             stand_hold.py
     launch "navegacion"           goto.log              skills/go_to.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
+    launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
 }
@@ -222,6 +223,13 @@ table)
         "$ROS && python3 $D/tools/check_table_detection.py '$COLOR'"
     ;;
 
+search-table)
+    COLOR="${2:-red}"
+    sudo docker exec jetson bash -c \
+        "$ROS && python3 $D/tools/check_table_detection.py \
+        '$COLOR' --current-view"
+    ;;
+
 mission)
     MISSION="${2:-fijate la hora en el reloj y llevale la botella a quien corresponda}"
     sudo docker exec jetson bash -c \
@@ -236,11 +244,12 @@ reset)
     # para poder repetir la mision desde cero sin relanzar el simulador.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
     sudo docker exec jetson pkill -f \
-        "go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py" \
+        "go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|detection_adapter.py|agent.py" \
         2>/dev/null
     sleep 2
     launch "navegacion"           goto.log              skills/go_to.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
+    launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
@@ -251,7 +260,7 @@ status)
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
-    for p in mobility_authority stand_hold go_to object_detector detection_adapter agent dashboard; do
+    for p in mobility_authority stand_hold go_to object_detector open_vocabulary_detector detection_adapter agent dashboard; do
         if sudo docker exec jetson pgrep -f "$p.py" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
@@ -291,9 +300,9 @@ down)
     # La autoridad y stand_hold pertenecen al robot a bordo: siguen activos
     # mientras el robot esté de pie. Sólo se detienen tareas y percepción.
     sudo docker exec jetson pkill -f \
-        "go_to.py|detector.py|object_detector.py|detection_adapter.py|agent.py"
+        "go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|detection_adapter.py|agent.py"
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|pose [reposo|listo|transporte]|check [authority|stand|walk|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

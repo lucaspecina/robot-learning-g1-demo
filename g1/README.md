@@ -14,6 +14,7 @@ python3 mobility_authority.py  # único dueño de /cmd_vel
 python3 stand_hold.py          # corrige la deriva durante una espera
 python3 skills/go_to.py        # navegación
 python3 skills/object_detector.py   # detector neuronal local
+python3 skills/open_vocabulary_detector.py # búsqueda puntual en el servidor
 python3 skills/detection_adapter.py # cajas, color y recorte del reloj
 python3 agent/agent.py         # ejecutor local de la misión
 
@@ -36,7 +37,7 @@ hasta volver a pasar las pruebas físicas.
 | Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
 | Cámara de cabeza | funciona — óptica oficial Unitree, 640×480 a 3 Hz |
 | Detector local RT-DETR | integrado; reloj 3/3, mesa visible pero debajo del umbral |
-| Búsqueda visual abierta | Grounding DINO reconoce la mesa; falta ubicarlo sin afectar el control |
+| Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
 | Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
@@ -53,11 +54,13 @@ versión anterior quedaron fuera del alcance actual.
 ```
       SERVIDOR EXTERNO                    JETSON A BORDO
  [ intelligence_service.py ] <---HTTP--- [ agent/agent.py ]
-       modelo visual                      ejecuta la misión
+       modelos visuales                    ejecuta la misión
               ^                                  |
-              | recorte JPEG              /g1/goal /g1/arm_pose
+              | recorte/cuadro JPEG        /g1/goal /g1/arm_pose
               |                                  |
-              +------------ [ object_detector.py + adapter ] [ go_to.py ]
+              +-- [ open_vocabulary_detector.py ] [ object_detector.py ]
+                                      \             /
+                                       [ adapter ] [ go_to.py ]
                                                    |
                                     /g1/cmd_vel/navigation
                                                    |
@@ -79,6 +82,9 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/goal` | PoseStamped | el agente |
 | `/g1/nav_status` | String | la navegación |
 | `/g1/object_detections` | Detection2DArray | el detector neuronal |
+| `/g1/perception/search_request` | String (JSON) | agente o verificador |
+| `/g1/open_vocabulary_detections` | Detection2DArray | búsqueda puntual |
+| `/g1/perception/search_status` | String (JSON) | búsqueda puntual |
 | `/g1/detections` | String (JSON) | el adaptador de la demo |
 | `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
 | `/g1/arm_pose` | String | el agente |
@@ -108,6 +114,7 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
+| `skills/open_vocabulary_detector.py` | manda un cuadro al detector remoto sólo por pedido |
 | `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
 | `agent/agent.py` | ejecutor local de la misión y cliente del servidor |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
@@ -153,16 +160,28 @@ reloj y la manda al servidor por HTTP. El servidor consulta el modelo visual y
 devuelve datos validados. Si la red o el proveedor fallan, el paso se aborta;
 equilibrio, espera y autoridad de movilidad siguen funcionando localmente.
 
+**Llegar tiene memoria.** El balanceo del bípedo hacía que la posición cruzara
+el límite de 10 cm mientras terminaba de orientar el cuerpo, alternando para
+siempre entre posición y ángulo. Como el verificador de objetivos de Nav2, la
+navegación recuerda que ya alcanzó la posición y usa un margen de 10 cm
+mientras cierra el ángulo. Las pruebas de mesa terminaron a 10,4 y 11,5 cm;
+eso sirve como pose de observación, no como alineación de agarre.
+
+**La pose de brazos cambia lo que ve la cámara.** En `reposo` las manos ocupan
+las esquinas superiores. `listo` y `transporte` dejan libre todo el cuadro.
+Las tres poses fueron verificadas con ángulos reales y con altura,
+desplazamiento e inclinación del cuerpo; la búsqueda visual debe usar `listo`.
+
 ## Lo siguiente
 
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Integrar la búsqueda puntual con Grounding DINO** fuera de los lazos de
-   control y probar el efecto de red y cómputo.
-2. **Guardar `home` y regresar** sin carga.
-3. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
-4. **Rediseñar `transporte`**: quieto es estable, pero caminando sesga el rumbo;
+1. **Publicar profundidad y calibración** de la cámara simulada, como el sensor
+   del G1 real, y convertir una caja visual en un punto del mapa.
+2. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
+3. **Guardar `home` y regresar** sin carga.
+4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
 5. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.

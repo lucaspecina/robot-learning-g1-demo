@@ -98,6 +98,66 @@ class IntelligenceClientTests(unittest.TestCase):
             client.read_clock(b"jpeg")
         self.assertEqual(client.consecutive_failures, 1)
 
+    def test_reads_bounded_object_detections(self):
+        def opener(request, timeout):
+            request_payload = json.loads(request.data)
+            self.assertEqual(request_payload["labels"], ["a red table"])
+            request_id = request.headers["X-request-id"]
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "detections": [
+                        {
+                            "label": "a red table",
+                            "confidence": 0.62,
+                            "box": [10.0, 20.0, 100.0, 120.0],
+                        }
+                    ],
+                    "image_width": 640,
+                    "image_height": 480,
+                    "model": "grounding-dino-test",
+                    "inference_s": 1.2,
+                    "elapsed_s": 1.3,
+                }
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=opener,
+        )
+        result = client.detect_objects(b"jpeg", ["a red table"])
+
+        self.assertEqual(result["detections"][0]["confidence"], 0.62)
+        self.assertEqual(result["image_width"], 640)
+        self.assertEqual(client.consecutive_failures, 0)
+
+    def test_rejects_detection_box_outside_image(self):
+        def opener(request, timeout):
+            request_id = request.headers["X-request-id"]
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "detections": [
+                        {
+                            "label": "a red table",
+                            "confidence": 0.62,
+                            "box": [-1.0, 20.0, 100.0, 120.0],
+                        }
+                    ],
+                    "image_width": 640,
+                    "image_height": 480,
+                }
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=opener,
+        )
+        with self.assertRaises(RemoteIntelligenceError):
+            client.detect_objects(b"jpeg", ["a red table"])
+
 
 if __name__ == "__main__":
     unittest.main()

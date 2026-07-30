@@ -8,7 +8,8 @@ claro. Si un peldaño falla, los de arriba no significan nada.
     python3 checks.py authority peldaño 0: hay un solo dueño y cancela bien?
     python3 checks.py stand     peldaño 1: se queda de pie sin hacer nada?
     python3 checks.py walk      peldaño 2: camina hacia adelante y frena?
-    python3 checks.py goto      peldaño 3: llega a un punto y avisa que llego?
+    python3 checks.py turn      peldaño 3: el signo del giro es correcto?
+    python3 checks.py goto      peldaño 4: llega a un punto y avisa que llego?
     python3 checks.py all      los tres en orden, frenando en el primero que falle
 
 Todo se mide en TIEMPO DE PARED (el del reloj de quien mira). El simulador
@@ -43,6 +44,9 @@ GOTO_DISTANCE = 1.0          # metros hacia adelante para el peldaño 2
 WALK_MAX_PATH_ANGLE_DEG = 10.0
 WALK_MAX_YAW_ERROR_DEG = 10.0
 WALK_MAX_BRAKE_M = 0.20
+TURN_SPEED = 0.3
+TURN_DURATION_S = 15.0
+TURN_MIN_RESPONSE_DEG = 5.0
 
 
 class Checker(Node):
@@ -359,9 +363,52 @@ def check_walk(c: Checker) -> bool:
     )
 
 
+def check_turn(c: Checker) -> bool:
+    """Peldaño 3: una orden positiva produce un giro positivo medido."""
+    print("\n=== PELDAÑO 3: el signo del giro coincide con ROS? ===")
+    print(
+        f"  Ordeno +{TURN_SPEED:.1f} rad/s durante {TURN_DURATION_S:.0f} s "
+        "de reloj y mido el cuerpo.\n"
+    )
+
+    c.reset_robot()
+    if not c.acquire_test_mobility():
+        return veredicto(
+            False,
+            f"el árbitro no concedió TEST; dueño actual: {c.mobility_owner}",
+        )
+    _, _, z0, yaw0 = c.pose
+    try:
+        c.drive(TURN_DURATION_S, vyaw=TURN_SPEED)
+        c.spin_for(2.0)
+        _, _, z1, yaw1 = c.pose
+    finally:
+        c.release_test_mobility("prueba de signo de giro terminada")
+
+    yaw_change = math.degrees(
+        math.atan2(
+            math.sin(yaw1 - yaw0),
+            math.cos(yaw1 - yaw0),
+        )
+    )
+    if z1 <= STANDING_HEIGHT_MIN:
+        return veredicto(False, f"se cayó durante el giro: altura {z1:.3f} m")
+    if yaw_change < TURN_MIN_RESPONSE_DEG:
+        direction = "sentido contrario" if yaw_change < 0 else "casi no giró"
+        return veredicto(
+            False,
+            f"orden positiva, respuesta {yaw_change:+.1f}° ({direction})",
+        )
+    return veredicto(
+        True,
+        f"orden positiva, respuesta {yaw_change:+.1f}°, altura "
+        f"{z0:.3f}->{z1:.3f} m",
+    )
+
+
 def check_goto(c: Checker) -> bool:
-    """Peldaño 2: la navegacion lleva al robot a un punto y avisa que llego."""
-    print("\n=== PELDAÑO 2: llega a un punto y avisa que llego? ===")
+    """Peldaño 4: la navegacion lleva al robot a un punto y avisa que llego."""
+    print("\n=== PELDAÑO 4: llega a un punto y avisa que llego? ===")
     print(f"  Objetivo: {GOTO_DISTANCE} m hacia adelante de donde esta.")
     print("  Ahora si interviene la navegacion. Hasta 3 minutos de reloj.\n")
 
@@ -399,6 +446,7 @@ CHECKS = {
     "authority": check_authority,
     "stand": check_stand,
     "walk": check_walk,
+    "turn": check_turn,
     "goto": check_goto,
 }
 

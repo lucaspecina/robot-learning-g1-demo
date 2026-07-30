@@ -57,7 +57,9 @@ from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray
 
 PORT = 8080
-HISTORY_MAX = 60
+# La detección abierta vuelve desde el servidor varios segundos después. El
+# tablero conserva un minuto para poder mostrar el cuadro exacto que analizó.
+HISTORY_MAX = 180
 
 # La altura del pelvis separa "de pie" de "fallen": parado mide ~0.72 m.
 FALLEN_HEIGHT = 0.45
@@ -66,6 +68,12 @@ FALLEN_HEIGHT = 0.45
 # El robot publica su estado 50 veces por segundo: 3 s de silencio es muchisimo.
 OFFLINE_AFTER_S = 3.0
 
+# El resultado a pedido puede tardar unos 20 s en una CPU limitada. Una vez
+# recibido lo retenemos un minuto: ocho segundos no alcanzaron para terminar
+# el verificador y abrir el tablero antes de que RT-DETR lo reemplazara.
+OPEN_RESULT_HOLD_S = 60.0
+ANALYSIS_OFFLINE_AFTER_S = OPEN_RESULT_HOLD_S + 5.0
+
 # Estado compartido entre el nodo ROS y el servidor web.
 state = {
     "camera_jpeg": None,
@@ -73,6 +81,8 @@ state = {
     "analysis_jpeg": None,
     "analysis_time": 0.0,
     "analysis_labels": [],
+    "analysis_source": "-",
+    "analysis_hold_until": 0.0,
     "odom_time": 0.0,      # cuando llego el ultimo dato del robot
     "frames": 0,
     "detections": {},
@@ -82,6 +92,7 @@ state = {
         "processed_frames": 0,
         "dropped_frames": 0,
     },
+    "search": {"state": "ready"},
     "pose": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
     "real_speed": 0.0,
     "fallen": False,
@@ -158,7 +169,13 @@ class DashboardNode(Node):
         self.create_subscription(
             Detection2DArray,
             "/g1/object_detections",
-            self.on_object_detections,
+            self.on_rtdetr_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection2DArray,
+            "/g1/open_vocabulary_detections",
+            self.on_open_vocabulary_detections,
             qos_profile_sensor_data,
         )
         self.create_subscription(String, "/g1/detections", self.on_detections, 10)
@@ -166,6 +183,12 @@ class DashboardNode(Node):
             String,
             "/g1/perception/status",
             self.on_perception,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/perception/search_status",
+            self.on_search_status,
             10,
         )
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
@@ -192,7 +215,7 @@ class DashboardNode(Node):
         ).copy()
         key = (msg.header.stamp.sec, msg.header.stamp.nanosec)
         self.image_cache[key] = img
-        while len(self.image_cache) > 60:
+        while len(self.image_cache) > HISTORY_MAX:
             self.image_cache.popitem(last=False)
         # No comprimimos todos los frames: el navegador pide ~4 por segundo.
         if time.time() - state["camera_time"] < 0.15:
@@ -208,10 +231,24 @@ class DashboardNode(Node):
             state["camera_time"] = time.time()
             state["frames"] = n
 
-    def on_object_detections(self, msg: Detection2DArray):
+    def on_rtdetr_detections(self, msg: Detection2DArray):
+        self.on_object_detections(msg, "RT-DETR")
+
+    def on_open_vocabulary_detections(self, msg: Detection2DArray):
+        self.on_object_detections(msg, "Grounding DINO")
+
+    def on_object_detections(self, msg: Detection2DArray, source: str):
         key = (msg.header.stamp.sec, msg.header.stamp.nanosec)
         image = self.image_cache.get(key)
         if image is None:
+            return
+        now = time.time()
+        with lock:
+            hold_result = state["analysis_hold_until"] > now
+        if source != "Grounding DINO" and hold_result:
+            # La respuesta puntual tardó mucho en llegar. Mantenerla visible
+            # unos segundos permite inspeccionarla antes de que el flujo rápido
+            # de RT-DETR vuelva a actualizar el panel.
             return
         try:
             jpeg, labels = to_analysis_jpeg(image, msg.detections)
@@ -219,8 +256,14 @@ class DashboardNode(Node):
             return
         with lock:
             state["analysis_jpeg"] = jpeg
-            state["analysis_time"] = time.time()
+            state["analysis_time"] = now
             state["analysis_labels"] = labels
+            state["analysis_source"] = source
+            state["analysis_hold_until"] = (
+                now + OPEN_RESULT_HOLD_S
+                if source == "Grounding DINO"
+                else 0.0
+            )
 
     def on_detections(self, msg: String):
         try:
@@ -233,6 +276,13 @@ class DashboardNode(Node):
         try:
             with lock:
                 state["perception"] = json.loads(msg.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_search_status(self, msg: String):
+        try:
+            with lock:
+                state["search"] = json.loads(msg.data)
         except json.JSONDecodeError:
             pass
 
@@ -382,6 +432,9 @@ PAGINA = """<!doctype html>
       <tr><td>modelo visual local<small>tiempo por análisis y cuadros que
         descartó para trabajar siempre sobre la imagen más nueva</small></td>
         <td id="perception">-</td></tr>
+      <tr><td>búsqueda visual puntual<small>consulta al servidor sólo cuando
+        hace falta encontrar una categoría nueva</small></td>
+        <td id="search">-</td></tr>
     </table></div>
 
   <div class="card" style="grid-column:1/-1"><h2>La mission, paso a paso</h2>
@@ -475,7 +528,7 @@ let estabaOnline = false;
 function apagarPanel(s){
   // Robot apagado: ningun numero viejo en pantalla. Guiones en todo, para que
   // nunca se confunda lo que pasa ahora con lo que paso antes de matarlo.
-  ['pos','yaw','vreal','cmd','mobility','nav','goal','arm','vida','perception'].forEach(id =>
+  ['pos','yaw','vreal','cmd','mobility','nav','goal','arm','vida','perception','search'].forEach(id =>
     document.getElementById(id).textContent = APAGADO);
   document.getElementById('fr').textContent = APAGADO;
   document.getElementById('dets').innerHTML =
@@ -532,13 +585,22 @@ async function tick(){
       `${localModel || 'detector local'} · ${s.perception.latency_ms} ms` +
       ` · procesados ${s.perception.processed_frames}` +
       ` · descartados ${s.perception.dropped_frames}`;
+    const searchState = s.search || {state: 'ready'};
+    document.getElementById('search').textContent =
+      searchState.state === 'running'
+      ? `buscando ${searchState.target} en el servidor`
+      : searchState.state === 'complete'
+      ? `terminó · ${searchState.count} cajas · ${searchState.elapsed_s} s`
+      : searchState.state === 'failed'
+      ? `falló de forma segura · ${searchState.error}`
+      : searchState.state;
     document.getElementById('analysis-labels').innerHTML =
       s.analysis_labels.length
       ? s.analysis_labels.map(label => `<span class="tag">${label}</span>`).join('')
       : '<span style="color:#5f6675">sin detecciones en ese cuadro</span>';
     document.getElementById('analysis-age').textContent =
       s.analysis_age_s == null ? 'Esperando el primer análisis.' :
-      `Analizado hace ${s.analysis_age_s} s.`;
+      `${s.analysis_source} · analizado hace ${s.analysis_age_s} s.`;
     document.getElementById('dets').innerHTML = Object.keys(s.detections).length
       ? Object.entries(s.detections).map(([k,v]) =>
           `<span class="tag">${k} · confianza ${v.confidence ?? '-'} · ` +
@@ -598,7 +660,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(jpeg)
         elif route == "/analysis.jpg":
             with lock:
-                old = time.time() - state["analysis_time"] > OFFLINE_AFTER_S * 2
+                old = (
+                    time.time() - state["analysis_time"]
+                    > ANALYSIS_OFFLINE_AFTER_S
+                )
                 jpeg = None if old else state["analysis_jpeg"]
             if jpeg is None:
                 self._headers(404, "text/plain")
@@ -615,7 +680,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = {
                     k: v
                     for k, v in state.items()
-                    if k not in ("camera_jpeg", "analysis_jpeg")
+                    if k not in (
+                        "camera_jpeg",
+                        "analysis_jpeg",
+                        "analysis_hold_until",
+                    )
                 }
                 ahora = time.time()
                 data["online"] = (ahora - state["odom_time"]) < OFFLINE_AFTER_S

@@ -31,8 +31,21 @@ CLASS_NAMES = {
     # estable el contrato ROS al cambiar el backend.
     "diningtable": "mesa",
     "dining table": "mesa",
+    "a red table": "mesa",
+    "a blue table": "mesa",
+    "a table": "mesa",
 }
-TABLE_CLASS_NAMES = {"diningtable", "dining table"}
+TABLE_CLASS_NAMES = {
+    "diningtable",
+    "dining table",
+    "a red table",
+    "a blue table",
+    "a table",
+}
+SOURCE_TTL_S = {
+    "rtdetr": 4.0,
+    "grounding_dino": 8.0,
+}
 
 
 def bounded_box(
@@ -91,6 +104,7 @@ def legacy_detection(
     box: ImageBox,
     image_width: int,
     image_height: int,
+    source: str = "rtdetr",
 ) -> dict:
     """Construye la vista compacta que todavía consumen agente y tablero."""
     return {
@@ -100,6 +114,15 @@ def legacy_detection(
             4,
         ),
         "confidence": round(score, 3),
-        "source": "rtdetr",
+        "source": source,
         "class": class_name,
     }
+
+
+def merge_source_detections(source_outputs: dict, now: float) -> dict:
+    """Combina resultados recientes sin que una fuente borre a otra."""
+    merged = {}
+    for source, (received_at, detections) in source_outputs.items():
+        if now - received_at <= SOURCE_TTL_S[source]:
+            merged.update(detections)
+    return merged

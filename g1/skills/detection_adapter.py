@@ -7,6 +7,7 @@ cuando el RT-DETR de compatibilidad sea reemplazado por Isaac ROS en el G1.
 import io
 import json
 import sys
+import time
 from collections import OrderedDict
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from perception_core import (  # noqa: E402
     bounded_box,
     classify_table_color,
     legacy_detection,
+    merge_source_detections,
     padded_box,
 )
 
@@ -32,7 +34,9 @@ from sensor_msgs.msg import CompressedImage, Image  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from vision_msgs.msg import Detection2DArray  # noqa: E402
 
-IMAGE_CACHE_SIZE = 60
+# Grounding DINO puede tardar decenas de segundos en el servidor. El historial
+# cubre un minuto a 3 Hz para conservar el cuadro exacto sin grabar a disco.
+IMAGE_CACHE_SIZE = 180
 
 
 def stamp_key(header) -> tuple[int, int]:
@@ -43,6 +47,7 @@ class DetectionAdapter(Node):
     def __init__(self):
         super().__init__("detection_adapter")
         self.images = OrderedDict()
+        self.source_outputs = {}
         self.detections_pub = self.create_publisher(
             String,
             "/g1/detections",
@@ -62,11 +67,17 @@ class DetectionAdapter(Node):
         self.create_subscription(
             Detection2DArray,
             "/g1/object_detections",
-            self.on_detections,
+            self.on_rtdetr_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection2DArray,
+            "/g1/open_vocabulary_detections",
+            self.on_open_vocabulary_detections,
             qos_profile_sensor_data,
         )
         self.get_logger().info(
-            "adaptador listo; espera cajas en /g1/object_detections"
+            "adaptador listo; combina RT-DETR y búsqueda visual puntual"
         )
 
     def on_image(self, msg: Image):
@@ -81,7 +92,13 @@ class DetectionAdapter(Node):
         while len(self.images) > IMAGE_CACHE_SIZE:
             self.images.popitem(last=False)
 
-    def on_detections(self, msg: Detection2DArray):
+    def on_rtdetr_detections(self, msg: Detection2DArray):
+        self.on_detections(msg, "rtdetr")
+
+    def on_open_vocabulary_detections(self, msg: Detection2DArray):
+        self.on_detections(msg, "grounding_dino")
+
+    def on_detections(self, msg: Detection2DArray, source: str):
         image_entry = self.images.get(stamp_key(msg.header))
         if image_entry is None:
             self.get_logger().warning(
@@ -118,11 +135,15 @@ class DetectionAdapter(Node):
                 box,
                 image_width,
                 image_height,
+                source=source,
             )
             if class_name == "clock":
                 self.publish_clock_crop(source_header, rgb, box)
+        now = time.monotonic()
+        self.source_outputs[source] = (now, output)
+        merged = merge_source_detections(self.source_outputs, now)
         self.detections_pub.publish(
-            String(data=json.dumps(output, ensure_ascii=False))
+            String(data=json.dumps(merged, ensure_ascii=False))
         )
 
     def publish_clock_crop(self, header, rgb: np.ndarray, box):

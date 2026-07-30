@@ -9,6 +9,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 import time
 import uuid
 from http import HTTPStatus
@@ -51,6 +52,10 @@ class InvalidImageError(ValueError):
 
 
 class InvalidModelResponseError(ValueError):
+    pass
+
+
+class ObjectDetectorUnavailableError(RuntimeError):
     pass
 
 
@@ -188,8 +193,11 @@ class ClockReader:
 
 
 class IntelligenceService:
-    def __init__(self, clock_reader=None):
+    def __init__(self, clock_reader=None, object_detector=None):
         self.configuration_error = None
+        self.object_detector = object_detector
+        self.object_detector_error = None
+        self.object_detector_lock = threading.Lock()
         if clock_reader is not None:
             self.clock_reader = clock_reader
             return
@@ -203,6 +211,40 @@ class IntelligenceService:
     def configured(self) -> bool:
         return self.clock_reader is not None
 
+    @property
+    def object_detector_ready(self) -> bool:
+        return self.object_detector is not None
+
+    def get_object_detector(self):
+        """Carga el modelo sólo cuando una tarea realmente lo necesita."""
+        if self.object_detector is not None:
+            return self.object_detector
+        with self.object_detector_lock:
+            if self.object_detector is not None:
+                return self.object_detector
+            if self.object_detector_error is not None:
+                raise ObjectDetectorUnavailableError(
+                    self.object_detector_error
+                )
+            try:
+                try:
+                    from .open_vocabulary_detector import (
+                        OpenVocabularyDetector,
+                    )
+                except ImportError:
+                    from open_vocabulary_detector import (
+                        OpenVocabularyDetector,
+                    )
+                self.object_detector = OpenVocabularyDetector()
+            except Exception as error:
+                self.object_detector_error = (
+                    f"{type(error).__name__}: {error}"
+                )
+                raise ObjectDetectorUnavailableError(
+                    self.object_detector_error
+                ) from error
+        return self.object_detector
+
     def read_clock(self, image: bytes) -> dict:
         if self.clock_reader is None:
             raise ServiceConfigurationError(
@@ -213,6 +255,16 @@ class IntelligenceService:
         return {
             "ok": True,
             "reading": reading,
+            "elapsed_s": round(time.monotonic() - started_at, 3),
+        }
+
+    def detect_objects(self, image: bytes, labels) -> dict:
+        started_at = time.monotonic()
+        detector = self.get_object_detector()
+        result = detector.detect(image, labels)
+        return {
+            "ok": True,
+            **result,
             "elapsed_s": round(time.monotonic() - started_at, 3),
         }
 
@@ -234,7 +286,13 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "ok": True,
+                    # Se conserva este campo porque los chequeos existentes lo
+                    # usan para saber si el lector de reloj tiene credenciales.
                     "configured": self.service.configured,
+                    "clock_reader_configured": self.service.configured,
+                    "object_detector_ready": (
+                        self.service.object_detector_ready
+                    ),
                 },
             )
             return
@@ -242,7 +300,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request_id = self.headers.get("X-Request-ID") or str(uuid.uuid4())
-        if self.path != "/v1/read-clock":
+        if self.path not in ("/v1/read-clock", "/v1/detect-objects"):
             self.send_json(
                 HTTPStatus.NOT_FOUND,
                 {"ok": False, "error": "ruta", "request_id": request_id},
@@ -269,10 +327,20 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise InvalidImageError("el pedido debe ser un objeto JSON")
             image = decode_image(payload.get("image_base64"))
-            result = self.service.read_clock(image)
+            if self.path == "/v1/read-clock":
+                result = self.service.read_clock(image)
+            else:
+                result = self.service.detect_objects(
+                    image,
+                    payload.get("labels"),
+                )
             result["request_id"] = request_id
             self.send_json(HTTPStatus.OK, result)
-        except (json.JSONDecodeError, InvalidImageError) as error:
+        except (
+            json.JSONDecodeError,
+            InvalidImageError,
+            ValueError,
+        ) as error:
             self.send_json(
                 HTTPStatus.BAD_REQUEST,
                 {
@@ -287,6 +355,15 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "ok": False,
                     "error": "modelo visual no configurado",
+                    "request_id": request_id,
+                },
+            )
+        except ObjectDetectorUnavailableError:
+            self.send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": False,
+                    "error": "detector visual no disponible",
                     "request_id": request_id,
                 },
             )
@@ -314,7 +391,8 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(
         f"[intelligence] escuchando en 0.0.0.0:{PORT}; "
-        f"modelo configurado: {Handler.service.configured}",
+        f"lector de reloj configurado: {Handler.service.configured}; "
+        "detector abierto: carga diferida",
         flush=True,
     )
     server.serve_forever()

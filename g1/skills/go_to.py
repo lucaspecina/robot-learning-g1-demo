@@ -42,7 +42,13 @@ from std_msgs.msg import String
 # adaptativa cuando el robot deja de progresar. Primero medimos la condición
 # fina sola; 35 cm declaraba éxito demasiado lejos para nuestra demo.
 TOLERANCE_M = 0.10        # a esta distancia del objetivo damos por llegado
+# Nav2 conserva el logro de posición mientras termina la orientación. Sin ese
+# margen, el balanceo del bípedo cruza 10 cm y alterna eternamente entre
+# corregir posición y corregir rumbo.
+POSITION_LATCH_BUFFER_M = 0.10
 FINAL_YAW_TOLERANCE_RAD = math.radians(5.0)
+FINAL_YAW_GAIN = 1.5
+MIN_FINAL_ANGULAR_VEL = 0.10
 SALTO_M = 1.0              # un salto mayor a esto entre dos lecturas solo puede
                            # ser un teletransporte (reinicio o freeze), no un paso
 TOLERANCE_RAD = 0.25      # error de heading tolerado antes de empezar a avanzar
@@ -68,6 +74,7 @@ class GoTo(Node):
         super().__init__("go_to")
         self.pose = None            # (x, y, yaw) del robot
         self.goal = None            # (x, y, yaw opcional) objetivo
+        self.position_reached = False
         self.mobility_owner = None
         self.last_claim_at = float("-inf")
 
@@ -106,6 +113,7 @@ class GoTo(Node):
             if math.hypot(p.x - anterior[0], p.y - anterior[1]) > SALTO_M:
                 had_goal = self.goal is not None
                 self.goal = None
+                self.position_reached = False
                 self.get_logger().warn(
                     f"el robot se teletransporto a ({p.x:.2f}, {p.y:.2f}): "
                     "cancelo el objetivo")
@@ -137,6 +145,7 @@ class GoTo(Node):
                 # objetivo vigente. Reanudarlo al liberar el joystick haría
                 # que una intención vieja mueva el robot sin una orden nueva.
                 self.goal = None
+                self.position_reached = False
                 self.publish_status("cancelado")
 
     def on_goal(self, msg: PoseStamped):
@@ -156,6 +165,7 @@ class GoTo(Node):
                 orientation.z,
             )
         self.goal = (msg.pose.position.x, msg.pose.position.y, goal_yaw)
+        self.position_reached = False
         yaw_text = "libre" if goal_yaw is None else f"{math.degrees(goal_yaw):.1f}°"
         self.get_logger().info(
             f"objetivo nuevo: ({self.goal[0]:.2f}, {self.goal[1]:.2f}), "
@@ -206,12 +216,32 @@ class GoTo(Node):
         # Un objetivo sin cuaternión conserva el comportamiento anterior y
         # acepta cualquier orientación final.
         if distance < TOLERANCE_M:
+            self.position_reached = True
+        elif (
+            self.position_reached
+            and distance > TOLERANCE_M + POSITION_LATCH_BUFFER_M
+        ):
+            self.position_reached = False
+
+        if self.position_reached:
             if goal_yaw is not None:
                 final_yaw_error = normalize_angle(goal_yaw - yaw)
                 if abs(final_yaw_error) > FINAL_YAW_TOLERANCE_RAD:
                     cmd = Twist()
-                    cmd.angular.z = ANGULAR_VEL * (
-                        1.0 if final_yaw_error > 0 else -1.0
+                    # A velocidad fija el G1 cruzaba el objetivo y volvía a
+                    # cruzarlo indefinidamente. Reducir la orden junto con el
+                    # error conserva el giro rápido lejos y permite cerrar los
+                    # últimos grados sin rebotar de un lado al otro.
+                    requested_speed = max(
+                        MIN_FINAL_ANGULAR_VEL,
+                        min(
+                            ANGULAR_VEL,
+                            FINAL_YAW_GAIN * abs(final_yaw_error),
+                        ),
+                    )
+                    cmd.angular.z = math.copysign(
+                        requested_speed,
+                        final_yaw_error,
                     )
                     self.pub_cmd.publish(cmd)
                     return
@@ -222,6 +252,7 @@ class GoTo(Node):
             )
             self.publish_status("llegue")
             self.goal = None
+            self.position_reached = False
             self.request_mobility("release", "objetivo de navegación terminado")
             return
 

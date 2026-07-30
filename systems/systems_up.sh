@@ -63,6 +63,7 @@ if ! sudo docker ps --format '{{.Names}}' | grep -q '^server$' \
     fi
     sudo docker run -d --restart unless-stopped --name server \
         --network robotnet --ip 172.30.0.20 \
+        --cpus=2 --memory=6g \
         --cap-add=NET_ADMIN \
         "${server_env_args[@]}" \
         intelligence-server >/dev/null

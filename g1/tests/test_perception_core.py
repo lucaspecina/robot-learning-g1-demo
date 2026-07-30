@@ -10,6 +10,7 @@ from perception_core import (
     bounded_box,
     classify_table_color,
     legacy_detection,
+    merge_source_detections,
     padded_box,
 )
 
@@ -20,6 +21,8 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertEqual(CLASS_NAMES["dining table"], "mesa")
         self.assertIn("diningtable", TABLE_CLASS_NAMES)
         self.assertIn("dining table", TABLE_CLASS_NAMES)
+        self.assertIn("a red table", TABLE_CLASS_NAMES)
+        self.assertIn("a table", TABLE_CLASS_NAMES)
 
     def test_box_is_clipped_to_image(self):
         self.assertEqual(
@@ -55,6 +58,32 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertEqual(result["cx"], 0.2)
         self.assertEqual(result["area"], 0.08)
         self.assertEqual(result["confidence"], 0.94)
+
+    def test_recent_open_detection_is_not_erased_by_empty_rtdetr(self):
+        merged = merge_source_detections(
+            {
+                "rtdetr": (100.0, {}),
+                "grounding_dino": (
+                    99.0,
+                    {"mesa_roja": {"source": "grounding_dino"}},
+                ),
+            },
+            now=101.0,
+        )
+        self.assertIn("mesa_roja", merged)
+
+    def test_expired_open_detection_is_removed(self):
+        merged = merge_source_detections(
+            {
+                "rtdetr": (110.0, {}),
+                "grounding_dino": (
+                    100.0,
+                    {"mesa_roja": {"source": "grounding_dino"}},
+                ),
+            },
+            now=110.0,
+        )
+        self.assertNotIn("mesa_roja", merged)
 
 
 if __name__ == "__main__":

@@ -10,26 +10,32 @@ vista más amplia que el robot use a escondidas.
 ```text
 cámara frontal
       |
-      v
-RT-DETR local ----> cajas estándar `/g1/object_detections`
-      |                         |
-      |                         +--> cuadro exacto con cajas en el tablero
-      v
-adaptador de la demo
+      +--> RT-DETR local continuo --> `/g1/object_detections` --------+
+      |                                                               |
+      +--> pedido puntual --> servidor Grounding DINO                 |
+                              --> `/g1/open_vocabulary_detections` ----+
+                                                                      v
+                                                          adaptador de la demo
       |
       +--> reloj / botella / mesa roja o azul en `/g1/detections`
       |
       +--> sólo el recorte del reloj en `/g1/clock_crop/compressed`
                                 |
                                 v
-                    modelo visual remoto, sólo al leer la hora
+                    modelo visual remoto, al leer la hora
 ```
 
 RT-DETR es un modelo liviano que encuentra objetos conocidos y devuelve un
 rectángulo para cada uno. Corre a bordo y no necesita Internet. El modelo
 remoto recibe únicamente un recorte cuando la tarea requiere entender un
-detalle, por ejemplo leer los dígitos del reloj. Navegar y quedarse de pie no
-dependen de ese modelo ni de la red externa.
+detalle, por ejemplo leer los dígitos del reloj.
+
+Grounding DINO es otro modelo remoto. Sólo se activa por un pedido interno
+acotado (`red_table` o `blue_table`) y recibe un cuadro JPEG. Encuentra la
+clase general `mesa`; no decide el color. Una prueba le pidió “mesa azul” sobre
+una mesa roja y respondió incorrectamente con confianza 0,805. Por eso el
+adaptador mide rojo o azul dentro del recuadro. Navegar y quedarse de pie no
+dependen de ninguno de estos modelos ni de la red externa.
 
 ## Memoria de imágenes
 
@@ -37,13 +43,15 @@ No se graba video infinito:
 
 - El detector conserva sólo el cuadro más nuevo mientras trabaja. Si llegan
   más, descarta los viejos para no tomar decisiones atrasadas.
-- El adaptador conserva en RAM hasta 60 cuadros identificados por su hora,
-  aproximadamente 20 segundos a 3 cuadros por segundo. Esto permite unir una
+- El adaptador conserva en RAM hasta 180 cuadros identificados por su hora,
+  aproximadamente un minuto a 3 cuadros por segundo. Esto permite unir una
   respuesta lenta con la imagen exacta que la produjo.
 - El agente conserva sólo el último recorte del reloj y lo considera vencido
   después de 10 segundos.
-- El tablero usa otro historial acotado de 60 cuadros para dibujar las cajas
-  sobre el cuadro correcto. No escribe esas imágenes en disco.
+- El tablero usa otro historial acotado de 180 cuadros para dibujar las cajas
+  sobre el cuadro correcto. Conserva el último resultado puntual durante un
+  minuto para que el operador alcance a inspeccionarlo. No escribe esas
+  imágenes en disco.
 
 Para investigar una falla concreta se podrá grabar una corrida acotada con las
 herramientas de ROS 2. La grabación permanente no debe ser el modo normal del
@@ -70,9 +78,9 @@ no reaccionó, o falló el modelo remoto.
 |---|---|---|
 | Cámara G1 simulada | Unitree: 7,6 mm, apertura 20 mm, 640×480, recta | mismos valores principales; montaje sobre nuestro `head_link` y 3 Hz son adaptaciones que deben medirse |
 | Detección | NVIDIA Isaac ROS ofrece RT-DETR y publica cajas estándar de ROS 2 | mismo modelo conceptual y mismo tipo de mensaje |
-| Búsqueda de categorías nuevas | NVIDIA ofrece Grounding DINO con una descripción escrita y recomienda usarlo de forma intercalada por su costo | prueba puntual correcta; todavía no integrado |
+| Búsqueda de categorías nuevas | NVIDIA ofrece Grounding DINO con una descripción escrita y recomienda usarlo de forma intercalada por su costo | integrado a pedido en el servidor; no corre dentro del control |
 | Ejecución en la VM | Isaac ROS actual requiere una GPU más nueva que la T4 | backend compatible en CPU dentro de la Jetson simulada |
-| Uso de modelo grande | procesar sólo cuando una tarea lo necesita | sólo se envía el recorte del reloj |
+| Uso de modelo grande | procesar sólo cuando una tarea lo necesita | recorte para el reloj; un cuadro para buscar una mesa |
 
 Antes de instalar el paquete acelerado en el G1 físico habrá que fijar una
 combinación compatible entre la Jetson real, su versión de JetPack, ROS 2 e
@@ -91,6 +99,38 @@ cualquier Jetson.
 | resolución oficial 640×480 | reloj 3/3, 0/3 falsos, RTF 0,23–0,24; la mesa entró completa pero RT-DETR quedó debajo del umbral |
 | confianza cruda de RT-DETR sobre la mesa | `diningtable` fue la mejor clase, 0,574, con la caja correcta; también reveló una diferencia de nombre corregida |
 | Grounding DINO pequeño, consulta “mesa roja / mesa azul” | mesa roja correcta a 0,618; 18,9 s en los dos CPU simulados, demasiado lento para ejecutarlo continuamente a bordo |
+| servidor separado, consulta genérica “mesa” | mesa roja 0,897; evita confiar en el atributo de color del modelo |
+| navegación + mesa roja + servidor | llegada a 0,115 m y 4,9°; roja 3/3, azul 0/3; 17,05 s |
+| navegación + mesa azul + servidor | llegada a 0,104 m y 5,0°; azul 3/3, roja 0/3; 16,78 s |
+| misma mesa azul, wifi malo | azul 3/3, roja 0/3; 15,62 s; cuerpo a 0,734 m y orden cero |
+| enlace cortado | falla explícita en 14,30 s; `stand` conserva el control y el cuerpo queda a 0,734 m |
+| brazos en `reposo` | las manos tapan dos esquinas grandes de la cámara |
+| brazos en `listo` | manos fuera del cuadro; pose y cuerpo aprobados; mesa azul 3/3 y caja visualmente correcta |
 
 Una prueba numérica no cierra la cámara hasta que Lucas confirme también que
 la imagen y las cajas tienen sentido.
+
+## Próximo paso: de recuadro a coordenada
+
+Una caja 2D dice dónde aparece la mesa en la foto, no dónde está en la
+habitación. El G1 real incluye cámara de profundidad y LiDAR 3D según la ficha
+de Unitree. El flujo transferible es:
+
+1. publicar color, profundidad y calibración de la misma cámara;
+2. medir la distancia sólo dentro del recuadro;
+3. transformar ese punto al mapa usando la pose del sensor;
+4. generar una pose segura de aproximación para navegación;
+5. usar profundidad otra vez para la alineación final.
+
+Isaac Lab ofrece `distance_to_image_plane`, calibración y conversión de
+profundidad a puntos 3D. No se usará la coordenada interna del objeto en Isaac.
+
+Referencias oficiales:
+
+- Unitree G1, sensores: https://www.unitree.com/mobile/g1/
+- Cámara y profundidad de Isaac Lab:
+  https://isaac-sim.github.io/IsaacLab/develop/source/overview/core-concepts/sensors/camera.html
+- Conversión oficial a puntos 3D:
+  https://isaac-sim.github.io/IsaacLab/develop/source/how-to/save_camera_output.html
+- Detección de objetos de Isaac ROS:
+  https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html
