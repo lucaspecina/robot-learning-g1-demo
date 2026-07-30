@@ -599,7 +599,10 @@ def main():
     sim = sim_utils.SimulationContext(
         sim_utils.SimulationCfg(dt=physics_dt, device=args_cli.device)
     )
-    sim.set_camera_view(eye=(2.5, 2.5, 1.8), target=(0.0, 0.0, 0.8))
+    # La vista del operador nace fuera y muy por encima de las paredes para
+    # mostrar la habitación como una maqueta sin perder la perspectiva. Esto
+    # no es un sensor del robot ni modifica lo que recibe la cámara frontal.
+    sim.set_camera_view(eye=(-4.5, -7.0, 10.5), target=(2.0, 0.25, 0.4))
     # Piso con la MISMA friccion que el simulador donde Unitree valida la
     # policy. IsaacLab trae 0.5 por defecto; MuJoCo usa 1.0. Con la mitad de
     # agarre los pies patinan, y el robot deriva varios centimetros por segundo
