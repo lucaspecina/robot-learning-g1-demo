@@ -81,6 +81,12 @@ def build_demo_plan() -> list[dict]:
             "label": "Preparar los brazos",
         },
         {
+            "id": "align_with_table",
+            "skill": "align_with_table",
+            "argument": "$selected_table",
+            "label": "Alinearse con precisión para agarrar",
+        },
+        {
             "id": "grasp_object",
             "skill": "grasp_object",
             "argument": None,

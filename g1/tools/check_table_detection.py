@@ -223,7 +223,7 @@ class TableChecker(Node):
 
     def send_goal(self, x: float, y: float, yaw: float):
         message = PoseStamped()
-        message.header.frame_id = "odom"
+        message.header.frame_id = "map"
         message.pose.position.x = x
         message.pose.position.y = y
         message.pose.orientation.z = math.sin(yaw / 2)

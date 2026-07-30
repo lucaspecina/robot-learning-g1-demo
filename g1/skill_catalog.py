@@ -147,11 +147,11 @@ SKILL_CATALOG = [
     {
         "name": "approach_table",
         "description": (
-            "Calcula y ejecuta una pose de aproximación segura a partir de "
-            "la mesa medida. Su contrato está definido, pero la ejecución "
-            "todavía no está implementada."
+            "Calcula una pose de preaproximación sobre la línea de visión, "
+            "navega hasta ella, queda mirando la mesa y vuelve a medirla. "
+            "No afirma que la base ya esté alineada para agarrar."
         ),
-        "availability": "placeholder",
+        "availability": "ready",
         "variants": [
             {
                 "argument": "$selected_table",
@@ -159,7 +159,7 @@ SKILL_CATALOG = [
                     "La mesa localizada por search_table o scan_for_table."
                 ),
                 "preconditions": ["table_location_known"],
-                "effects": ["at_selected_table"],
+                "effects": ["at_table_staging"],
             }
         ],
     },
@@ -176,7 +176,7 @@ SKILL_CATALOG = [
                 "argument_description": (
                     "Libera la cámara y prepara los brazos para agarrar."
                 ),
-                "preconditions": ["at_selected_table"],
+                "preconditions": ["at_table_staging"],
                 "effects": ["arms_ready"],
             },
             {
@@ -187,6 +187,26 @@ SKILL_CATALOG = [
                 "preconditions": ["object_grasped"],
                 "effects": ["transport_pose_set"],
             },
+        ],
+    },
+    {
+        "name": "align_with_table",
+        "description": (
+            "Ajusta finamente la base usando nuevas mediciones de la mesa y "
+            "del objeto hasta quedar dentro de la tolerancia de agarre. El "
+            "contrato existe, pero el control visual todavía no está "
+            "implementado."
+        ),
+        "availability": "placeholder",
+        "variants": [
+            {
+                "argument": "$selected_table",
+                "argument_description": (
+                    "Mesa elegida y confirmada desde la preaproximación."
+                ),
+                "preconditions": ["at_table_staging", "arms_ready"],
+                "effects": ["at_selected_table"],
+            }
         ],
     },
     {

@@ -178,6 +178,7 @@ def check_authority(c: Checker) -> bool:
     c.reset_robot()
     x0, y0, _, yaw0 = c.pose
     goal = PoseStamped()
+    goal.header.frame_id = "map"
     goal.pose.position.x = x0 + 1.0 * math.cos(yaw0)
     goal.pose.position.y = y0 + 1.0 * math.sin(yaw0)
     c.nav = None
@@ -420,6 +421,7 @@ def check_goto(c: Checker) -> bool:
 
     c.nav = None
     g = PoseStamped()
+    g.header.frame_id = "map"
     g.pose.position.x, g.pose.position.y = gx, gy
     c.pub_goal.publish(g)
 

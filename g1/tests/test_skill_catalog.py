@@ -29,12 +29,20 @@ class SkillCatalogTest(unittest.TestCase):
             initial_facts=INITIAL_WORLD_FACTS,
         )
 
-        self.assertEqual(len(validated), 11)
+        self.assertEqual(len(validated), 12)
         self.assertEqual(
             next(
                 step
                 for step in validated
-                if step["id"] == "grasp_object"
+                if step["id"] == "approach_table"
+            )["availability"],
+            "ready",
+        )
+        self.assertEqual(
+            next(
+                step
+                for step in validated
+                if step["id"] == "align_with_table"
             )["availability"],
             "placeholder",
         )

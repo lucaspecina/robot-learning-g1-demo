@@ -98,7 +98,7 @@ class NavigationActionCheck(Node):
             return 1
 
         goal = NavigateToPose.Goal()
-        goal.pose.header.frame_id = "odom"
+        goal.pose.header.frame_id = "map"
         goal.pose.header.stamp = self.get_clock().now().to_msg()
         goal.pose.pose.position.x = (
             float(self.pose.position.x) if args.current else args.x

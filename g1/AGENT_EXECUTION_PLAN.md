@@ -58,7 +58,7 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
-Las 81 pruebas locales de `g1` y las 18 del servicio externo pasan juntas.
+Las 87 pruebas locales de `g1` y las 18 del servicio externo pasan juntas.
 El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
 servidor y mantiene un estado vacío estable.
 
@@ -75,6 +75,16 @@ que la misión estaba cumplida pero sólo podía elegir `continue` o `stop`, y
 eligió `stop`. Se agregó `complete` como cierre exitoso explícito. Una llamada
 real posterior con `gpt-4.1-mini` devolvió `complete`; servidor y Jetson
 rechazan usarlo después de una falla o si todavía quedan pasos.
+
+La preaproximación a la mesa también quedó cerrada como etapa independiente.
+El primer diseño pidió 0,9 m desde un punto visible de la superficie: una
+corrida quedó a 0,543 m y otras perdieron la mesa del cuadro. La prueba
+dedicada de cámara ya había medido que la vista estable estaba cerca de 2,5 m
+del centro. Con 2,2 m desde la superficie visible, una misión integral llegó
+con 9,8 cm de error, volvió a detectar la mesa a 1,968 m con confianza 0,94,
+conservó 0,737 m de altura y preparó los brazos con 0,0254 rad de error
+máximo. El agente se bloqueó después porque `align_with_table` y
+`grasp_object` siguen declaradas como no disponibles.
 
 Todavía no funciona:
 
@@ -175,6 +185,7 @@ Ejemplos iniciales:
 | `look_at` | llegan imágenes recientes y detecciones del objetivo | objetivo confirmado con umbral válido | terminar sin movimiento y devolver evidencia |
 | `read_clock` | pedido remoto aceptado y respuesta dentro del plazo | lectura estructurada y consistente | abrir el circuito remoto y conservar `STAND` |
 | `search_table` | llegan cuadros y resultados de búsqueda | mesa elegida localizada con profundidad válida | bloquear hasta tener barrido activo |
+| `approach_table` | baja la distancia a la pose gruesa y llega una detección nueva | superficie a 1,8–2,8 m, base orientada y cuerpo en pie | volver a `STAND`; como máximo dos intentos por misión |
 | `set_arm_pose` | disminuye el error de articulaciones | pose medida dentro de tolerancia | detener el pedido de brazo sin iniciar locomoción |
 
 Los plazos se medirán con reloj simulado cuando esté disponible. Mientras el
@@ -187,6 +198,8 @@ Habrá límites duros para evitar ciclos infinitos:
 - un reintento automático del mismo paso ante el mismo error;
 - máximo dos barridos completos por misión; otro exige cambiar el punto de
   observación o pedir ayuda;
+- máximo dos preaproximaciones por misión, aunque el modelo cambie el nombre
+  del paso al revisar el plan;
 - una respuesta inválida del modelo no reemplaza el plan validado;
 - un corte de red nunca impide cancelar localmente ni mantener `STAND`.
 
@@ -272,14 +285,17 @@ armará el plan inicial y el tablero lo mostrará. El robot:
 5. elegirá la mesa roja o azul mediante la regla determinista;
 6. buscará la mesa alrededor con cinco vistas superpuestas y sólo llamará al
    detector remoto ante un candidato local;
-7. revisará después de cada paso, incluido el último, si debe continuar,
+7. calculará una preaproximación, navegará hasta ella y volverá a medir la
+   mesa antes de preparar los brazos;
+8. revisará después de cada paso, incluido el último, si debe continuar,
    cambiar el plan o declarar la misión completada;
-8. cancelará cualquier paso trabado y quedará activamente en `STAND`;
-9. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
+9. cancelará cualquier paso trabado y quedará activamente en `STAND`;
+10. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
 
 El sistema todavía se bloqueará honestamente si no encuentra la mesa después
-del barrido, si necesita una aproximación fina o cuando llegue al agarre. Los
-pasos inmediatamente posteriores serán la aproximación a la mesa y el agarre.
+del barrido, cuando necesite la alineación visual fina o cuando llegue al
+agarre. La preaproximación gruesa ya está implementada; no se presenta como
+precisión suficiente para manipular.
 
 Por lo tanto, este tramo no completa aún la entrega del objeto. Convierte la
 demo de una lista rígida en una misión observable que detecta fallas, se pone
@@ -304,6 +320,11 @@ segura y puede corregir la parte ejecutable de su plan.
   https://opentelemetry.io/blog/2026/genai-observability/
 - OpenAI, imágenes por URL Base64 y nivel de detalle para OCR:
   https://developers.openai.com/api/docs/guides/images-vision
+- Nav2, navegación a una pose de espera, nueva detección y control visual
+  refinado:
+  https://docs.nav2.org/tutorials/docs/using_docking.html
+- Nav2, plazos, reintentos y separación configurable de la pose de espera:
+  https://docs.nav2.org/configuration/packages/configuring-docking-server.html
 
 ## Qué es oficial y qué es adaptación propia
 
@@ -322,4 +343,6 @@ Adaptación propia de esta demo:
 - imágenes puntuales en lugar de video continuo;
 - topics actuales que se migrarán gradualmente a Actions;
 - navegación simple hasta incorporar Nav2 y SLAM;
+- preaproximación inspirada en el flujo de Nav2 Docking, pero con nuestra
+  distancia medida y sin afirmar que el servidor oficial ya está integrado;
 - AGILE conserva locomoción y balance; el modelo no controla el cuerpo.

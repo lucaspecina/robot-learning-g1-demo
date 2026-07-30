@@ -47,7 +47,8 @@ hasta volver a pasar las pruebas físicas.
 | Giro relativo | funciona — Action estándar `/g1/spin`, cancelable y con distancia angular |
 | Barrido visual activo | funciona — cinco vistas superpuestas, confirmación remota sólo ante candidato |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
-| Ejecutor de misión | integrado hasta localizar la mesa; se bloquea explícitamente antes de acercarse |
+| Preaproximación a la mesa | funciona — calcula pose desde profundidad, navega y vuelve a confirmar |
+| Ejecutor de misión | integrado hasta preparar los brazos frente a la mesa; se bloquea antes de la alineación fina |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
@@ -186,6 +187,16 @@ callbacks actualizan.
 objeto. Si el destino es el centro de la mesa, el robot camina contra el mueble
 y la navegación nunca da por cumplido el objetivo.
 
+**Preaproximarse no es alinearse para agarrar.** El flujo de Nav2 para
+acercarse a infraestructura usa dos etapas: primero llega a una zona desde la
+que todavía puede ver el objetivo; después vuelve a detectarlo y entra en un
+control visual fino. Nuestra primera prueba intentó confirmar la mesa a 0,9 m:
+una corrida quedó a 0,543 m y otras perdieron el mueble por debajo de la
+cámara. La pose gruesa quedó por eso a 2,2 m del punto de superficie medido.
+La validación integral la confirmó a 1,968 m, con 9,8 cm de error de
+navegación, confianza 0,94 y cuerpo a 0,737 m. Esta etapa no autoriza el
+agarre; `align_with_table` sigue separado y pendiente.
+
 **Los plazos medidos en tiempo real no sirven** con el simulador corriendo al
 20 %: recorrer 8 m lleva más de dos minutos de reloj de pared. La solución de
 fondo es el reloj simulado de ROS 2 (`/clock` + `use_sim_time`).
@@ -243,8 +254,9 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Convertir la superficie encontrada en una pose segura de aproximación**,
-   con una llegada gruesa y una alineación visual fina separadas.
+1. **Implementar `align_with_table`**, el control visual fino posterior a la
+   preaproximación ya validada. Debe medir base, mesa y objeto continuamente;
+   no puede convertir una tolerancia gruesa en permiso para agarrar.
 2. **Guardar `home` y regresar** sin carga dentro de la misión completa.
 3. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.

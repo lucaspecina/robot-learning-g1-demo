@@ -283,8 +283,14 @@ ocho esferas de los pies contra MuJoCo.
   mesa roja en la cuarta vista con una llamada remota y terminaron en `STAND`.
   La primera base se desplazó 17,1 cm durante el barrido: es aceptable en sala
   abierta, no para manipular. El JPEG exacto de Grounding DINO, su pedido y su
-  respuesta literal ya aparecen en el tablero. Falta la pose de aproximación
-  y la alineación fina.
+  respuesta literal ya aparecen en el tablero.
+- **Preaproximación visual, validada**: la primera versión a `0,9 m` llegó a
+  quedar a `0,543 m` y perdió la mesa en otras vistas. Se separó la llegada
+  gruesa del control fino, siguiendo el patrón del servidor de docking de
+  Nav2. Con `2,2 m` desde la superficie detectada, la corrida integral llegó
+  con `9,8 cm` de error, reconfirmó la mesa a `1,968 m`, confianza `0,94`,
+  cuerpo a `0,737 m` y brazos listos con `0,0254 rad` de error. Falta
+  `align_with_table`; esa etapa deberá exigir los `2–3 cm` definidos arriba.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso

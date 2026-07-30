@@ -144,7 +144,7 @@ class ClockChecker(Node):
 
     def send_goal(self):
         goal = PoseStamped()
-        goal.header.frame_id = "odom"
+        goal.header.frame_id = "map"
         goal.pose.position.x = GOAL_X
         goal.pose.position.y = GOAL_Y
         goal.pose.orientation.z = math.sin(GOAL_YAW / 2.0)

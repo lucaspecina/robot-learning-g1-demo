@@ -73,11 +73,15 @@ from mission_contract import MissionTracker, build_demo_plan, validate_plan
 from model_trace import build_model_event
 from navigation_core import normalize_angle
 from open_vocabulary_core import make_search_request
-from scene_layout import NAVIGATION_TARGETS
+from scene_layout import NAVIGATION_TARGETS, WORLD_BOUNDS
 from skill_catalog import (
     INITIAL_WORLD_FACTS,
     SKILL_CATALOG,
     skill_catalog_for_model,
+)
+from table_approach import (
+    compute_table_staging_pose,
+    next_table_approach_attempt,
 )
 from visual_evidence import (
     CLOCK_CROP_TOPIC,
@@ -130,6 +134,19 @@ COLOR_SCOUT_MIN_PIXELS = 600
 # Un segundo barrido puede ser útil después de cambiar de lugar. Un tercero
 # sin evidencia nueva sólo acumula movimiento y deriva en un robot físico.
 MAX_ACTIVE_SCANS_PER_MISSION = 2
+# A 1,4 m la prueba dedicada sólo veía la botella y perdía la mesa por debajo
+# del cuadro; a 2,5 m del centro la mesa se midió repetidamente. Como la
+# profundidad entrega un punto de su borde visible, 2,2 m respecto de esa
+# superficie reproduce esa zona observable sin inventar el centro del mueble.
+TABLE_STAGING_STANDOFF_M = 2.20
+TABLE_STAGING_MIN_SURFACE_DISTANCE_M = 1.80
+TABLE_STAGING_MAX_SURFACE_DISTANCE_M = 2.80
+# Una esquina distinta de la misma mesa puede mover el punto observado varios
+# grados. Esta tolerancia sólo valida la vista amplia de preaproximación; la
+# alineación de agarre tendrá un límite propio y mucho más estricto.
+TABLE_STAGING_MAX_YAW_ERROR_DEG = 20.0
+MAX_TABLE_APPROACH_ATTEMPTS_PER_MISSION = 2
+MIN_SAFE_BODY_HEIGHT_M = 0.65
 
 
 def succeeded(message: str, measurements: dict = None) -> dict:
@@ -381,6 +398,7 @@ class Agent(Node):
                     "x": float(point.x),
                     "y": float(point.y),
                     "z": float(point.z),
+                    "coordinate_frame": message.header.frame_id or "map",
                     "frame_ref": frame_reference,
                 }
             )
@@ -924,11 +942,17 @@ class Agent(Node):
         if skill == "scan_for_table":
             return self.scan_for_table(argument)
         if skill == "approach_table":
-            return blocked(
-                "falta calcular una pose segura desde la mesa medida"
-            )
+            return self.approach_table(argument)
         if skill == "set_arm_pose":
             return self.set_arm_pose(str(argument))
+        if skill == "align_with_table":
+            return blocked(
+                "falta la alineación visual fina de la base con la mesa",
+                blocker={
+                    "type": "missing_skill",
+                    "skill": "align_with_table",
+                },
+            )
         if skill == "grasp_object":
             return blocked(
                 "el agarre todavía no está implementado; será una policy aparte"
@@ -956,10 +980,19 @@ class Agent(Node):
             pose = SEMANTIC_MAP.get(target)
             if pose is None:
                 return failed(f"destino desconocido: {target}")
+        return self.navigate_to_pose(pose, target)
+
+    def navigate_to_pose(
+        self,
+        pose: tuple[float, float, float],
+        target_label: str,
+        frame_id: str = "map",
+    ) -> dict:
+        """Navega a una pose ya validada sin convertir un objeto en destino."""
         x, y, yaw = pose
         goal = PoseStamped()
         goal.header.stamp = self.get_clock().now().to_msg()
-        goal.header.frame_id = "odom"
+        goal.header.frame_id = frame_id
         goal.pose.position.x = float(x)
         goal.pose.position.y = float(y)
         goal.pose.orientation.z = math.sin(yaw / 2.0)
@@ -1073,7 +1106,7 @@ class Agent(Node):
                 measurements,
             )
         if wrapped.status == GoalStatus.STATUS_SUCCEEDED:
-            return succeeded(f"llegó a {target}", measurements)
+            return succeeded(f"llegó a {target_label}", measurements)
 
         error_message = str(
             getattr(wrapped.result, "error_msg", "")
@@ -1505,6 +1538,141 @@ class Agent(Node):
                 "type": "unresolved_perception",
                 "target": target,
             },
+        )
+
+    def approach_table(self, target: str) -> dict:
+        """Llega a una preaproximación y vuelve a medir antes de manipular."""
+        try:
+            approach_attempt, allowed = next_table_approach_attempt(
+                int(self.mission_context.get("table_approach_attempts", 0)),
+                MAX_TABLE_APPROACH_ATTEMPTS_PER_MISSION,
+            )
+        except (TypeError, ValueError) as error:
+            return failed(f"el contador de aproximaciones es inválido: {error}")
+        self.mission_context["table_approach_attempts"] = approach_attempt
+        if not allowed:
+            return blocked(
+                "ya se hicieron dos preaproximaciones; hace falta cambiar la "
+                "estrategia o pedir ayuda antes de volver a mover la base",
+                {"approach_attempt": approach_attempt},
+                blocker={
+                    "type": "approach_exhausted",
+                    "target": target,
+                },
+            )
+
+        table_point = self.mission_context.get("table_point")
+        if (
+            target not in ("red_table", "blue_table")
+            or not isinstance(table_point, dict)
+            or table_point.get("class_id") != target
+        ):
+            return failed("no existe una medición de la mesa elegida")
+        if table_point.get("coordinate_frame", "map") != "map":
+            return failed("la mesa medida no está expresada en el mapa")
+        if self.current_pose is None:
+            return failed("no llegó la posición para calcular la aproximación")
+
+        robot_x, robot_y, _robot_z, _robot_yaw = self.current_pose
+        try:
+            staging = compute_table_staging_pose(
+                robot_x=robot_x,
+                robot_y=robot_y,
+                table_x=table_point["x"],
+                table_y=table_point["y"],
+                standoff_m=TABLE_STAGING_STANDOFF_M,
+                world_bounds=WORLD_BOUNDS,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            return failed(f"no se pudo calcular una aproximación segura: {error}")
+
+        self.mission_context["table_staging_pose"] = (
+            staging.x,
+            staging.y,
+            staging.yaw,
+        )
+        navigation = self.navigate_to_pose(
+            self.mission_context["table_staging_pose"],
+            f"preaproximación de {target}",
+            frame_id="map",
+        )
+        if navigation["state"] != "succeeded":
+            return failed(
+                "falló la preaproximación: " + navigation["message"],
+                navigation.get("measurements"),
+            )
+
+        observation = self.search_table_in_current_view(target)
+        if observation["state"] != "succeeded":
+            return failed(
+                "llegó a la preaproximación, pero no volvió a confirmar la "
+                "mesa: " + observation["message"],
+                {
+                    **navigation.get("measurements", {}),
+                    **observation.get("measurements", {}),
+                },
+            )
+        refreshed = self.mission_context.get("table_point")
+        if self.current_pose is None or not isinstance(refreshed, dict):
+            return failed("faltan mediciones posteriores a la aproximación")
+
+        current_x, current_y, current_z, current_yaw = self.current_pose
+        surface_distance_m = math.hypot(
+            refreshed["x"] - current_x,
+            refreshed["y"] - current_y,
+        )
+        desired_yaw = math.atan2(
+            refreshed["y"] - current_y,
+            refreshed["x"] - current_x,
+        )
+        yaw_error_deg = math.degrees(
+            abs(normalize_angle(desired_yaw - current_yaw))
+        )
+        measurements = {
+            "approach_attempt": approach_attempt,
+            "staging_x_m": round(staging.x, 3),
+            "staging_y_m": round(staging.y, 3),
+            "staging_yaw_deg": round(math.degrees(staging.yaw), 2),
+            "requested_standoff_m": TABLE_STAGING_STANDOFF_M,
+            "initial_surface_distance_m": round(
+                staging.initial_surface_distance_m,
+                3,
+            ),
+            "navigation_error_m": navigation.get(
+                "measurements",
+                {},
+            ).get("distance_remaining_m"),
+            "confirmed_surface_distance_m": round(surface_distance_m, 3),
+            "confirmed_yaw_error_deg": round(yaw_error_deg, 2),
+            "body_height_m": round(current_z, 3),
+            "confidence": observation.get("measurements", {}).get(
+                "confidence"
+            ),
+            "confirmed_x_m": observation.get("measurements", {}).get("x_m"),
+            "confirmed_y_m": observation.get("measurements", {}).get("y_m"),
+        }
+        if current_z < MIN_SAFE_BODY_HEIGHT_M:
+            return failed(
+                "el robot llegó pero no conservó una altura segura",
+                measurements,
+            )
+        if not (
+            TABLE_STAGING_MIN_SURFACE_DISTANCE_M
+            <= surface_distance_m
+            <= TABLE_STAGING_MAX_SURFACE_DISTANCE_M
+        ):
+            return failed(
+                "la mesa quedó fuera de la separación de preaproximación",
+                measurements,
+            )
+        if yaw_error_deg > TABLE_STAGING_MAX_YAW_ERROR_DEG:
+            return failed(
+                "la base no terminó mirando suficientemente hacia la mesa",
+                measurements,
+            )
+        return succeeded(
+            f"quedó en preaproximación de {target} y volvió a confirmarla",
+            measurements,
         )
 
     def wait_for_local_detection_updates(

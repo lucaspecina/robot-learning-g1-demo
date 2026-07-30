@@ -176,8 +176,7 @@ encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
 | mesa azul | `(3,62; -2,53; 0,52)` m | cayó dentro de su superficie |
 | nodo permanente, azul | `(3,63; -2,65; 0,52)` m, confianza 0,923 | coincidió con el verificador independiente |
 
-El punto representa la superficie vista, no el centro completo de la mesa. El
-próximo paso es producir una pose segura de aproximación.
+El punto representa la superficie vista, no el centro completo de la mesa.
 
 ## Búsqueda activa validada el 30 de julio de 2026
 
@@ -205,6 +204,34 @@ produjeron mesas ni siquiera a 0,15. Se fijó 0,25 porque conservó 6/6 positivo
 y 0/5 falsos en ese control. Es una calibración local medida, no un valor
 “oficial”.
 
+## De superficie a preaproximación: validado el 30 de julio de 2026
+
+El flujo estándar de Nav2 Docking no navega directamente al contacto. Primero
+calcula una pose de espera que todavía deja el objetivo visible, navega hasta
+ella, vuelve a detectar y recién después entra en un lazo de control visual
+que actualiza el objetivo continuamente.
+
+Nuestra adaptación implementa sólo esa primera etapa. La profundidad entrega
+un punto de la parte visible de la mesa, no su centro ni su orientación
+completa. La base se coloca sobre la línea robot–punto a 2,2 m, queda mirando
+hacia él y exige una detección nueva antes de declarar éxito. Un máximo duro de
+dos intentos no puede ser eludido por una revisión del LLM.
+
+La distancia no se copió de Nav2: se midió con esta cámara. A 0,9 m, una prueba
+terminó a 0,543 m y otras perdieron la mesa del cuadro. En la validación
+integral, la nueva etapa:
+
+- llegó a la pose gruesa con 0,098 m de error;
+- volvió a ubicar la superficie a 1,968 m y confianza 0,94;
+- conservó 0,737 m de altura y terminó en `STAND`;
+- preparó los brazos con 0,0254 rad de error máximo;
+- se bloqueó honestamente antes de `align_with_table`, todavía pendiente.
+
+Esto coincide con la separación oficial entre llegada gruesa y control visual
+refinado. No es el servidor Docking de Nav2 ni una alineación de agarre: el
+navegador actual sólo funciona en la habitación despejada y todavía no tiene
+mapa local de obstáculos.
+
 Referencias oficiales:
 
 - Unitree G1, sensores: https://www.unitree.com/mobile/g1/
@@ -224,3 +251,7 @@ Referencias oficiales:
   https://api.nav2.org/actions/rolling/spin.html
 - Configuración del servidor de comportamientos de Nav2:
   https://docs.nav2.org/configuration/packages/configuring-behavior-server.html
+- Flujo de preaproximación y refinamiento visual de Nav2 Docking:
+  https://docs.nav2.org/tutorials/docs/using_docking.html
+- Configuración y tolerancias de Nav2 Docking:
+  https://docs.nav2.org/configuration/packages/configuring-docking-server.html

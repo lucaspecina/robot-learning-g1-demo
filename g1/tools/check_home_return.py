@@ -114,7 +114,7 @@ class HomeReturnChecker(Node):
 
     def navigate(self, goal: PlanarPose) -> bool:
         message = PoseStamped()
-        message.header.frame_id = "odom"
+        message.header.frame_id = "map"
         message.pose.position.x = goal.x
         message.pose.position.y = goal.y
         message.pose.orientation.z = math.sin(goal.yaw / 2.0)

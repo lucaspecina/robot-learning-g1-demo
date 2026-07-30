@@ -253,17 +253,14 @@ class GoTo(Node):
 
     def handle_goal(self, request: NavigateToPose.Goal):
         pose = request.pose
-        if pose.header.frame_id not in ("", "odom"):
+        # El simulador publica su posición absoluta en `map`. Aceptar también
+        # `odom` como si fuese idéntico ocultaría un error que en el robot real
+        # debe resolver Nav2 mediante la transformación dinámica map→odom.
+        validation_error = self.goal_validation_error(pose)
+        if validation_error is not None:
             self.get_logger().warn(
-                f"objetivo rechazado: marco {pose.header.frame_id!r}; "
-                "este navegador simple sólo conoce odom"
+                f"objetivo rechazado: {validation_error}"
             )
-            return GoalResponse.REJECT
-        if not all(
-            math.isfinite(value)
-            for value in (pose.pose.position.x, pose.pose.position.y)
-        ):
-            self.get_logger().warn("objetivo rechazado: coordenadas inválidas")
             return GoalResponse.REJECT
         with self.state_lock:
             if self.goal_reserved or self.navigation_active:
@@ -293,6 +290,13 @@ class GoTo(Node):
 
     def on_legacy_goal(self, message: PoseStamped):
         """Puente transitorio para las herramientas que aún publican un topic."""
+        validation_error = self.goal_validation_error(message)
+        if validation_error is not None:
+            self.get_logger().warn(
+                f"objetivo heredado rechazado: {validation_error}"
+            )
+            self.publish_status(f"fallo: {validation_error}")
+            return
         with self.state_lock:
             if self.goal_reserved or self.navigation_active:
                 self.publish_status("fallo: ya existe una navegación activa")
@@ -304,6 +308,20 @@ class GoTo(Node):
             daemon=True,
         )
         thread.start()
+
+    @staticmethod
+    def goal_validation_error(pose: PoseStamped):
+        if pose.header.frame_id != "map":
+            return (
+                f"marco {pose.header.frame_id!r}; "
+                "este navegador simple sólo controla en map"
+            )
+        if not all(
+            math.isfinite(value)
+            for value in (pose.pose.position.x, pose.pose.position.y)
+        ):
+            return "coordenadas inválidas"
+        return None
 
     def execute_legacy(self, message: PoseStamped):
         self._run_navigation(message, goal_handle=None)
@@ -337,7 +355,7 @@ class GoTo(Node):
         )
         target = PoseStamped()
         target.header.stamp = self.get_clock().now().to_msg()
-        target.header.frame_id = "odom"
+        target.header.frame_id = "map"
         target.pose.position.x = pose.x
         target.pose.position.y = pose.y
         target.pose.orientation.z = math.sin(target_yaw / 2.0)
