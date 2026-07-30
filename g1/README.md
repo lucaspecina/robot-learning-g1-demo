@@ -45,7 +45,7 @@ hasta volver a pasar las pruebas físicas.
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
 | Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
-| Ejecutor de misión | en migración a la misión de mesas roja/azul y regreso a `home` |
+| Ejecutor de misión | integrado hasta la búsqueda; se bloquea explícitamente porque falta el barrido visual activo |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
@@ -83,6 +83,8 @@ versión anterior quedaron fuera del alcance actual.
 | Topic | Mensaje | Quién lo produce |
 |---|---|---|
 | `/g1/mission` | String | vos (o el reconocimiento de voz, más adelante) |
+| `/g1/mission_state` | String (JSON transitorio) | estado, pasos y decisiones verificables de la misión |
+| `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
 | `/g1/goal` | PoseStamped | el agente |
 | `/g1/nav_status` | String | la navegación |
 | `/g1/object_detections` | Detection2DArray | el detector neuronal |
@@ -127,6 +129,8 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `skills/open_vocabulary_detector.py` | manda un cuadro al detector remoto sólo por pedido |
 | `skills/table_localizer.py` | une caja, profundidad y pose histórica; publica el punto en el mapa |
 | `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
+| `mission_contract.py` | contrato de misión, pasos, estados y decisiones |
+| `model_trace.py` | contrato de trazabilidad de modelos, incluido el texto literal |
 | `agent/agent.py` | ejecutor local de la misión y cliente del servidor |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
@@ -200,7 +204,7 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Buscar la mesa roja o azul** sin pasarle una coordenada por nombre.
+1. **Agregar el barrido visual activo** para buscar la mesa correcta sin pasarle una coordenada.
 2. **Convertir la superficie encontrada en una pose segura de aproximación.**
 3. **Guardar `home` y regresar** sin carga.
 4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;

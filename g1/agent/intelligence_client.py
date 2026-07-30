@@ -17,7 +17,16 @@ OPEN_INTERVAL_S = 30.0
 
 
 class RemoteIntelligenceError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        request_id: str = None,
+        raw_output: str = None,
+    ):
+        super().__init__(message)
+        self.request_id = request_id
+        self.raw_output = raw_output
 
 
 class CircuitOpenError(RemoteIntelligenceError):
@@ -111,17 +120,34 @@ class IntelligenceClient:
 
         try:
             with self.opener(request, timeout=timeout_s) as response:
-                payload = json.loads(response.read())
+                response_text = response.read().decode("utf-8")
+                payload = json.loads(response_text)
+        except urllib.error.HTTPError as error:
+            raw_output = None
+            try:
+                failure_payload = json.loads(
+                    error.read().decode("utf-8")
+                )
+                raw_output = failure_payload.get("raw_output")
+            except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                f"falló el pedido remoto: HTTP {error.code}",
+                request_id=request_id,
+                raw_output=raw_output,
+            ) from error
         except (
             OSError,
             TimeoutError,
-            urllib.error.HTTPError,
             urllib.error.URLError,
             json.JSONDecodeError,
+            UnicodeDecodeError,
         ) as error:
             self._record_failure()
             raise RemoteIntelligenceError(
-                f"falló el pedido remoto: {type(error).__name__}"
+                f"falló el pedido remoto: {type(error).__name__}",
+                request_id=request_id,
             ) from error
 
         if (
@@ -130,12 +156,13 @@ class IntelligenceClient:
         ):
             self._record_failure()
             raise RemoteIntelligenceError(
-                "el servidor devolvió una respuesta inválida"
+                "el servidor devolvió una respuesta inválida",
+                request_id=request_id,
             )
-        return payload, request_id
+        return payload, request_id, response_text
 
     def read_clock(self, image: bytes) -> dict:
-        payload, request_id = self._post(
+        payload, request_id, _response_text = self._post(
             "/v1/read-clock",
             {
                 "image_base64": base64.b64encode(image).decode("ascii"),
@@ -146,6 +173,13 @@ class IntelligenceClient:
             self._record_failure()
             raise RemoteIntelligenceError(
                 "el servidor no devolvió una lectura"
+            )
+        raw_output = payload.get("raw_output")
+        if not isinstance(raw_output, str):
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                "el servidor no conservó la salida literal del modelo",
+                request_id=request_id,
             )
 
         try:
@@ -158,6 +192,8 @@ class IntelligenceClient:
             **reading,
             "elapsed_s": payload.get("elapsed_s"),
             "request_id": request_id,
+            "model": payload.get("model"),
+            "raw_output": raw_output,
         }
 
     def detect_objects(self, image: bytes, labels: list[str]) -> dict:
@@ -173,7 +209,7 @@ class IntelligenceClient:
                 DEFAULT_DETECTION_TIMEOUT_S,
             )
         )
-        payload, request_id = self._post(
+        payload, request_id, response_text = self._post(
             "/v1/detect-objects",
             {
                 "image_base64": base64.b64encode(image).decode("ascii"),
@@ -234,4 +270,5 @@ class IntelligenceClient:
             "inference_s": payload.get("inference_s"),
             "elapsed_s": payload.get("elapsed_s"),
             "request_id": request_id,
+            "raw_output": response_text,
         }

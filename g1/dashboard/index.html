@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>G1 — misión en vivo</title>
+  <style>
+    :root{
+      color-scheme:dark;
+      --background:#0d1016;
+      --surface:#171b24;
+      --surface-raised:#1d2330;
+      --border:#2a3242;
+      --text:#edf0f6;
+      --muted:#8993a6;
+      --faint:#5f6878;
+      --blue:#62a3ff;
+      --green:#5ed28a;
+      --yellow:#f0c968;
+      --red:#ff7d86;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--background);
+      color:var(--text);
+      font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;
+    }
+    header{
+      position:sticky;
+      top:0;
+      z-index:10;
+      display:flex;
+      align-items:center;
+      gap:14px;
+      padding:11px 20px;
+      background:rgba(23,27,36,.96);
+      border-bottom:1px solid var(--border);
+      backdrop-filter:blur(8px);
+    }
+    header strong{font-size:17px}
+    header span{color:var(--muted)}
+    #system-alert{margin-left:auto;color:var(--red);font-weight:700}
+    main{max-width:1600px;margin:0 auto;padding:16px}
+    .mission-banner{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto auto;
+      gap:20px;
+      align-items:center;
+      margin-bottom:16px;
+      padding:15px 18px;
+      background:linear-gradient(115deg,#182437,#171b24 58%);
+      border:1px solid #2c405d;
+      border-radius:12px;
+    }
+    .eyebrow,.card h2,.section-label{
+      margin:0 0 6px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:.09em;
+      text-transform:uppercase;
+    }
+    #task-text{font-size:18px;font-weight:650}
+    .summary-value{font-size:15px;font-weight:650;text-align:right}
+    .summary-label{color:var(--muted);font-size:11px;text-align:right}
+    .top-grid,.evidence-grid{
+      display:grid;
+      grid-template-columns:minmax(0,2fr) minmax(340px,1fr);
+      gap:16px;
+      margin-bottom:16px;
+    }
+    .evidence-grid{grid-template-columns:minmax(0,1.4fr) minmax(340px,.8fr)}
+    .card{
+      min-width:0;
+      padding:14px;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:11px;
+    }
+    .card h2{margin-bottom:10px}
+    img,canvas{
+      display:block;
+      width:100%;
+      border-radius:7px;
+      background:#050608;
+    }
+    .camera-frame{position:relative}
+    .live-badge{
+      position:absolute;
+      top:9px;
+      right:9px;
+      padding:3px 8px;
+      border-radius:999px;
+      background:rgba(0,0,0,.7);
+      color:var(--green);
+      font-size:11px;
+      font-weight:700;
+    }
+    .hint{margin-top:7px;color:var(--faint);font-size:11px}
+    .tags{margin-top:8px}
+    .tag,.status-badge{
+      display:inline-block;
+      margin:2px 4px 2px 0;
+      padding:3px 9px;
+      border-radius:999px;
+      background:#253147;
+      color:#9fc7ff;
+      font-size:12px;
+    }
+    .status-badge{margin:0;background:#2b3342;color:var(--muted)}
+    .status-running{background:#443b20;color:var(--yellow)}
+    .status-succeeded{background:#183c2a;color:var(--green)}
+    .status-failed,.status-blocked{background:#47252a;color:var(--red)}
+    .status-planning{background:#253858;color:#9fc7ff}
+    .current-action{
+      margin-bottom:12px;
+      padding:11px 12px;
+      background:var(--surface-raised);
+      border-left:3px solid var(--yellow);
+      border-radius:6px;
+    }
+    .current-action strong{display:block;font-size:15px}
+    .steps{display:flex;flex-direction:column;gap:6px}
+    .step{
+      display:grid;
+      grid-template-columns:22px minmax(0,1fr);
+      gap:7px;
+      padding:7px 8px;
+      border-radius:7px;
+      color:var(--muted);
+    }
+    .step-running{background:#302c20;color:var(--text)}
+    .step-succeeded{color:#a9d9ba}
+    .step-failed,.step-blocked{background:#352126;color:#ffc0c4}
+    .step-detail{display:block;color:var(--faint);font-size:11px}
+    .decision{
+      margin-top:12px;
+      padding:10px;
+      background:#131720;
+      border:1px solid #252d3a;
+      border-radius:7px;
+    }
+    .decision-row{margin:3px 0}
+    .decision-row span{color:var(--muted)}
+    .evidence-images{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    .evidence-images h3{
+      margin:0 0 6px;
+      font-size:12px;
+      color:#c8ceda;
+    }
+    .image-placeholder{
+      display:grid;
+      min-height:160px;
+      place-items:center;
+      padding:16px;
+      border:1px dashed #323a49;
+      border-radius:7px;
+      color:var(--faint);
+      text-align:center;
+    }
+    .model-trace{
+      margin-top:13px;
+      padding-top:12px;
+      border-top:1px solid var(--border);
+    }
+    .model-meta{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      margin-bottom:10px;
+    }
+    .metric{
+      padding:7px 9px;
+      background:#12161e;
+      border-radius:6px;
+      overflow:hidden;
+    }
+    .metric span{display:block;color:var(--faint);font-size:10px;text-transform:uppercase}
+    .metric strong{display:block;overflow:hidden;text-overflow:ellipsis}
+    pre{
+      min-height:68px;
+      max-height:240px;
+      margin:6px 0 0;
+      padding:10px;
+      overflow:auto;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      background:#090b10;
+      border:1px solid #242a35;
+      border-radius:7px;
+      color:#d9e1ef;
+      font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
+    }
+    .timeline{max-height:270px;overflow:auto}
+    .event{
+      display:grid;
+      grid-template-columns:70px minmax(0,1fr);
+      gap:10px;
+      padding:6px 0;
+      border-bottom:1px solid #232a37;
+    }
+    .event time{color:var(--faint);font-variant-numeric:tabular-nums}
+    details{margin-top:16px}
+    details summary{
+      cursor:pointer;
+      padding:12px 14px;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:9px;
+      color:#cbd2df;
+      font-weight:650;
+    }
+    details[open] summary{border-radius:9px 9px 0 0}
+    .technical{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:0 24px;
+      padding:14px;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-top:0;
+      border-radius:0 0 9px 9px;
+    }
+    .technical-row{
+      display:flex;
+      justify-content:space-between;
+      gap:14px;
+      padding:6px 0;
+      border-bottom:1px solid #232a37;
+    }
+    .technical-row span:first-child{color:var(--muted)}
+    .technical-row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+    .empty{color:var(--faint)}
+    @media(max-width:1050px){
+      .top-grid,.evidence-grid{grid-template-columns:1fr}
+      .mission-banner{grid-template-columns:1fr auto}
+      .mission-banner>div:first-child{grid-column:1/-1}
+    }
+    @media(max-width:700px){
+      main{padding:10px}
+      .mission-banner{grid-template-columns:1fr}
+      .summary-value,.summary-label{text-align:left}
+      .evidence-images,.model-meta,.technical{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>G1 — en vivo</strong>
+    <span id="heartbeat">conectando…</span>
+    <span id="system-alert"></span>
+  </header>
+
+  <main>
+    <section class="mission-banner">
+      <div>
+        <div class="eyebrow">Tarea recibida</div>
+        <div id="task-text">Esperando una misión</div>
+      </div>
+      <div>
+        <div class="summary-label">Estado</div>
+        <div class="summary-value" id="mission-status">Sin misión</div>
+      </div>
+      <div>
+        <div class="summary-label">Progreso</div>
+        <div class="summary-value" id="mission-progress">0 / 0</div>
+      </div>
+    </section>
+
+    <section class="top-grid">
+      <article class="card">
+        <h2>Lo que ve el robot</h2>
+        <div class="camera-frame">
+          <img id="live-camera" alt="Video de la cámara frontal del robot">
+          <span class="live-badge" id="live-badge">LIVE</span>
+        </div>
+        <div class="tags" id="live-detections"></div>
+        <div class="hint">
+          Éste es todo el campo visual utilizado por el robot. Los recuadros
+          aparecen abajo sobre el cuadro exacto que analizó el modelo.
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Misión y subtareas</h2>
+        <div class="current-action">
+          <div class="section-label">Ahora</div>
+          <strong id="current-action">Esperando una tarea</strong>
+          <span class="hint" id="current-action-detail"></span>
+        </div>
+        <div class="steps" id="mission-steps"></div>
+        <div class="decision" id="decision-card" hidden>
+          <div class="section-label">Última decisión comprobable</div>
+          <div class="decision-row"><span>Vio:</span> <b id="decision-evidence"></b></div>
+          <div class="decision-row"><span>Regla:</span> <b id="decision-rule"></b></div>
+          <div class="decision-row"><span>Decidió:</span> <b id="decision-outcome"></b></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="evidence-grid">
+      <article class="card">
+        <h2>Evidencia visual y modelos</h2>
+        <div class="evidence-images">
+          <div>
+            <h3>Cuadro analizado por el detector</h3>
+            <img id="analysis-image" alt="Cuadro exacto con detecciones">
+            <div class="image-placeholder" id="analysis-placeholder">
+              Esperando el primer análisis
+            </div>
+            <div class="tags" id="analysis-labels"></div>
+            <div class="hint" id="analysis-age"></div>
+          </div>
+          <div>
+            <h3>Entrada exacta del LLM/VLM</h3>
+            <img id="model-input-image" alt="Imagen exacta enviada al modelo">
+            <div class="image-placeholder" id="model-input-placeholder">
+              Todavía no se envió una imagen a un modelo
+            </div>
+            <div class="hint" id="model-input-age"></div>
+          </div>
+        </div>
+
+        <div class="model-trace">
+          <div class="model-meta">
+            <div class="metric"><span>Tarea</span><strong id="model-task">—</strong></div>
+            <div class="metric"><span>Modelo</span><strong id="model-name">—</strong></div>
+            <div class="metric"><span>Estado</span><strong id="model-status">—</strong></div>
+            <div class="metric"><span>Duración</span><strong id="model-duration">—</strong></div>
+          </div>
+          <div class="section-label">Texto literal devuelto por el modelo</div>
+          <pre id="model-raw-output">Todavía no hubo una llamada a un LLM o VLM.</pre>
+          <div class="section-label" style="margin-top:10px">Resultado validado que usó el robot</div>
+          <pre id="model-validated-output">—</pre>
+          <div class="hint">
+            Si la API no entrega un razonamiento interno adicional, no se
+            inventa. Acá se muestra exactamente lo que sí devolvió.
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Mapa y recorrido</h2>
+        <canvas id="map" width="480" height="430"></canvas>
+        <div class="hint">
+          Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
+          vigente. El mapa y la escena física comparten las mismas medidas.
+        </div>
+      </article>
+    </section>
+
+    <article class="card">
+      <h2>Historia de la misión</h2>
+      <div class="timeline" id="mission-timeline">
+        <span class="empty">Todavía no hay eventos.</span>
+      </div>
+    </article>
+
+    <details>
+      <summary>Detalles técnicos del robot, percepción y control</summary>
+      <div class="technical">
+        <div class="technical-row"><span>Cuerpo</span><span id="body-state">—</span></div>
+        <div class="technical-row"><span>Posición</span><span id="robot-position">—</span></div>
+        <div class="technical-row"><span>Velocidad real</span><span id="real-speed">—</span></div>
+        <div class="technical-row"><span>Orden de velocidad</span><span id="velocity-command">—</span></div>
+        <div class="technical-row"><span>Dueño de movilidad</span><span id="mobility-owner">—</span></div>
+        <div class="technical-row"><span>Navegación</span><span id="navigation-state">—</span></div>
+        <div class="technical-row"><span>Objetivo</span><span id="navigation-goal">—</span></div>
+        <div class="technical-row"><span>Brazos</span><span id="arm-state">—</span></div>
+        <div class="technical-row"><span>Cámara</span><span id="camera-state">—</span></div>
+        <div class="technical-row"><span>Detector local</span><span id="perception-state">—</span></div>
+        <div class="technical-row"><span>Búsqueda puntual</span><span id="search-state">—</span></div>
+        <div class="technical-row"><span>Red Jetson-servidor</span><span id="network-state">medición pendiente</span></div>
+      </div>
+    </details>
+  </main>
+
+  <script>
+    const scene = __SCENE_LAYOUT__;
+    const world = scene.world;
+    const trail = [];
+    let wasOnline = false;
+
+    function escapeHtml(value){
+      return String(value ?? '')
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'",'&#039;');
+    }
+
+    function setText(id,value){
+      document.getElementById(id).textContent = value;
+    }
+
+    function refreshImage(imageId,path,delay,placeholderId){
+      const image = document.getElementById(imageId);
+      const placeholder = placeholderId
+        ? document.getElementById(placeholderId)
+        : null;
+      const load = () => {
+        image.src = `${path}?${Date.now()}`;
+      };
+      image.onload = () => {
+        image.hidden = false;
+        if(placeholder) placeholder.hidden = true;
+        setTimeout(load,delay);
+      };
+      image.onerror = () => {
+        image.hidden = true;
+        image.removeAttribute('src');
+        if(placeholder) placeholder.hidden = false;
+        setTimeout(load,Math.max(delay,1200));
+      };
+      load();
+    }
+
+    refreshImage('live-camera','/camera.jpg',300,null);
+    refreshImage('analysis-image','/analysis.jpg',750,'analysis-placeholder');
+    refreshImage('model-input-image','/model-input.jpg',1400,'model-input-placeholder');
+
+    const missionStateNames = {
+      idle:'Sin misión',
+      planning:'Planificando',
+      running:'Ejecutando',
+      succeeded:'Completada',
+      failed:'Falló',
+      blocked:'Bloqueada'
+    };
+    const stepIcons = {
+      pending:'○',
+      running:'▶',
+      succeeded:'✓',
+      failed:'✕',
+      blocked:'■',
+      skipped:'–'
+    };
+
+    function renderMission(mission){
+      const steps = mission.steps || [];
+      setText('task-text',mission.command || 'Esperando una misión');
+      const statusName = missionStateNames[mission.state] || mission.state || '—';
+      const status = document.getElementById('mission-status');
+      status.textContent = statusName;
+      status.className = `summary-value status-${mission.state || 'idle'}`;
+      const completed = steps.filter(step => step.state === 'succeeded').length;
+      setText('mission-progress',`${completed} / ${steps.length}`);
+
+      const active = steps.find(step => step.id === mission.active_step_id);
+      setText(
+        'current-action',
+        active?.label ||
+          (mission.state === 'succeeded' ? 'Misión completada' :
+           mission.state === 'blocked' ? 'Misión bloqueada' :
+           mission.state === 'failed' ? 'La misión falló' :
+           mission.state === 'planning' ? 'Armando el plan' :
+           'Esperando una tarea')
+      );
+      setText(
+        'current-action-detail',
+        active?.resolved_argument ||
+          mission.error ||
+          (mission.planner ? `planificador: ${mission.planner}` : '')
+      );
+
+      document.getElementById('mission-steps').innerHTML = steps.length
+        ? steps.map(step => {
+            const detail = step.error || step.result || '';
+            return `<div class="step step-${escapeHtml(step.state)}">
+              <span>${stepIcons[step.state] || '?'}</span>
+              <span>${escapeHtml(step.label)}
+                ${detail ? `<small class="step-detail">${escapeHtml(detail)}</small>` : ''}
+              </span>
+            </div>`;
+          }).join('')
+        : '<span class="empty">El plan aparecerá cuando llegue una misión.</span>';
+
+      const decision = mission.decision;
+      const decisionCard = document.getElementById('decision-card');
+      decisionCard.hidden = !decision;
+      if(decision){
+        setText('decision-evidence',decision.evidence);
+        setText('decision-rule',decision.rule);
+        setText('decision-outcome',decision.outcome);
+      }
+    }
+
+    function renderModel(events,state){
+      const event = events.length ? events[events.length - 1] : null;
+      if(!event){
+        setText('model-task','—');
+        setText('model-name','—');
+        setText('model-status','—');
+        setText('model-duration','—');
+        setText('model-raw-output','Todavía no hubo una llamada a un LLM o VLM.');
+        setText('model-validated-output','—');
+        setText('model-input-age','');
+        return;
+      }
+      setText('model-task',event.task || '—');
+      setText('model-name',event.model || 'esperando respuesta');
+      setText('model-status',missionStateNames[event.state] || event.state);
+      setText(
+        'model-duration',
+        event.duration_s == null ? '—' : `${event.duration_s} s`
+      );
+      setText(
+        'model-raw-output',
+        event.raw_output ??
+          (event.state === 'running'
+            ? 'Esperando la respuesta literal del modelo…'
+            : `No hubo salida: ${event.error || 'error desconocido'}`)
+      );
+      setText(
+        'model-validated-output',
+        event.validated_output == null
+          ? '—'
+          : JSON.stringify(event.validated_output,null,2)
+      );
+      setText(
+        'model-input-age',
+        state.model_input_event_id === event.event_id
+          ? `Entrada de esta llamada · conservada hace ${state.model_input_age_s ?? 0} s`
+          : 'La entrada exacta de esta llamada no está en el buffer.'
+      );
+    }
+
+    function toScreen(canvas,x,y){
+      return [
+        (x-world.xmin)/(world.xmax-world.xmin)*canvas.width,
+        canvas.height-(y-world.ymin)/(world.ymax-world.ymin)*canvas.height
+      ];
+    }
+
+    function drawMap(state){
+      const canvas = document.getElementById('map');
+      const context = canvas.getContext('2d');
+      context.clearRect(0,0,canvas.width,canvas.height);
+      context.strokeStyle='#202632';
+      context.lineWidth=1;
+      for(let x=Math.ceil(world.xmin);x<=world.xmax;x++){
+        const [screenX] = toScreen(canvas,x,0);
+        context.beginPath();
+        context.moveTo(screenX,0);
+        context.lineTo(screenX,canvas.height);
+        context.stroke();
+      }
+      for(let y=Math.ceil(world.ymin);y<=world.ymax;y++){
+        const [,screenY] = toScreen(canvas,0,y);
+        context.beginPath();
+        context.moveTo(0,screenY);
+        context.lineTo(canvas.width,screenY);
+        context.stroke();
+      }
+      context.font='11px sans-serif';
+      scene.landmarks.forEach(item => {
+        if(item.shape === 'rectangle'){
+          const [x1,y1] = toScreen(
+            canvas,item.x-item.size_x/2,item.y+item.size_y/2);
+          const [x2,y2] = toScreen(
+            canvas,item.x+item.size_x/2,item.y-item.size_y/2);
+          context.fillStyle=item.color;
+          context.fillRect(x1,y1,x2-x1,y2-y1);
+          context.fillStyle='#d5dae5';
+          context.fillText(item.label,x1+4,y1+14);
+          return;
+        }
+        const [x,y] = toScreen(canvas,item.x,item.y);
+        const edge = toScreen(canvas,item.x+item.radius,item.y);
+        const radius = Math.max(7,Math.abs(edge[0]-x));
+        context.beginPath();
+        context.arc(x,y,radius,0,2*Math.PI);
+        context.fillStyle=item.color;
+        context.fill();
+        context.fillStyle='#d5dae5';
+        context.fillText(item.label,x+radius+4,y+4);
+      });
+      if(trail.length>1){
+        context.strokeStyle='#3875b4';
+        context.lineWidth=2;
+        context.beginPath();
+        trail.forEach((point,index) => {
+          const [x,y] = toScreen(canvas,point[0],point[1]);
+          index ? context.lineTo(x,y) : context.moveTo(x,y);
+        });
+        context.stroke();
+      }
+      if(state.goal){
+        const [x,y] = toScreen(canvas,state.goal.x,state.goal.y);
+        context.strokeStyle='#5ed28a';
+        context.lineWidth=2;
+        context.beginPath();
+        context.moveTo(x-8,y);
+        context.lineTo(x+8,y);
+        context.moveTo(x,y-8);
+        context.lineTo(x,y+8);
+        context.stroke();
+      }
+      const [robotX,robotY] = toScreen(canvas,state.pose.x,state.pose.y);
+      context.beginPath();
+      context.arc(robotX,robotY,7,0,2*Math.PI);
+      context.fillStyle=state.fallen ? '#ff7d86' : '#62a3ff';
+      context.fill();
+      const angle=state.pose.yaw*Math.PI/180;
+      context.strokeStyle='#edf0f6';
+      context.lineWidth=2;
+      context.beginPath();
+      context.moveTo(robotX,robotY);
+      context.lineTo(
+        robotX+14*Math.cos(angle),
+        robotY-14*Math.sin(angle)
+      );
+      context.stroke();
+    }
+
+    function renderTechnical(state){
+      setText(
+        'body-state',
+        state.fallen ? `CAÍDO (${state.pose.z} m)` : `de pie (${state.pose.z} m)`
+      );
+      setText(
+        'robot-position',
+        `x ${state.pose.x} · y ${state.pose.y} · rumbo ${state.pose.yaw}°`
+      );
+      setText('real-speed',`${state.real_speed} m/s`);
+      setText(
+        'velocity-command',
+        `vx ${state.cmd.vx} · vy ${state.cmd.vy} · giro ${state.cmd.vyaw}`
+      );
+      setText(
+        'mobility-owner',
+        `${state.mobility.owner}:${state.mobility.requester} · ${state.mobility.transition_reason}`
+      );
+      setText('navigation-state',state.nav);
+      setText(
+        'navigation-goal',
+        state.goal ? `(${state.goal.x}, ${state.goal.y})` : '—'
+      );
+      setText('arm-state',state.arms);
+      setText(
+        'camera-state',
+        `${state.frames} cuadros${state.video_online ? '' : ' · detenida'}`
+      );
+      const perception=state.perception || {};
+      const localModel=(perception.model || '').split('/').pop();
+      setText(
+        'perception-state',
+        perception.latency_ms == null
+          ? '—'
+          : `${localModel || 'detector local'} · ${perception.latency_ms} ms · ` +
+            `${perception.processed_frames} procesados · ${perception.dropped_frames} descartados`
+      );
+      const search=state.search || {};
+      setText(
+        'search-state',
+        search.state === 'running'
+          ? `buscando ${search.target}`
+          : search.state === 'complete'
+          ? `${search.count} cajas · ${search.elapsed_s} s`
+          : search.state === 'failed'
+          ? `falló: ${search.error}`
+          : search.state || '—'
+      );
+    }
+
+    function renderTimeline(events){
+      document.getElementById('mission-timeline').innerHTML = events.length
+        ? events.slice().reverse().map(event =>
+            `<div class="event"><time>${escapeHtml(event.time)}</time>` +
+            `<span>${escapeHtml(event.text)}</span></div>`
+          ).join('')
+        : '<span class="empty">Todavía no hay eventos.</span>';
+    }
+
+    function renderOffline(state){
+      setText(
+        'system-alert',
+        `⏻ ROBOT SIN DATOS${state.silence_s == null ? '' : ` HACE ${state.silence_s} S`}`
+      );
+      setText('heartbeat','esperando al robot…');
+      document.getElementById('live-badge').textContent='OFFLINE';
+      document.getElementById('live-badge').style.color='var(--red)';
+    }
+
+    async function tick(){
+      try{
+        const response=await fetch('/state');
+        const state=await response.json();
+        renderMission(state.mission_state || {});
+        renderModel(state.model_events || [],state);
+        renderTimeline(state.mission_events || []);
+
+        if(!state.online){
+          if(wasOnline) trail.length=0;
+          wasOnline=false;
+          renderOffline(state);
+          setTimeout(tick,600);
+          return;
+        }
+        if(!wasOnline){
+          trail.length=0;
+          wasOnline=true;
+        }
+        setText('heartbeat',`actualizado ${new Date().toLocaleTimeString()}`);
+        setText('system-alert',state.fallen ? '⚠ EL ROBOT ESTÁ EN EL PISO' : '');
+        document.getElementById('live-badge').textContent='LIVE';
+        document.getElementById('live-badge').style.color='var(--green)';
+
+        document.getElementById('live-detections').innerHTML =
+          Object.keys(state.detections || {}).length
+          ? Object.entries(state.detections).map(([name,value]) =>
+              `<span class="tag">${escapeHtml(name)} · confianza ` +
+              `${escapeHtml(value.confidence ?? '—')} · centro ` +
+              `${escapeHtml(value.cx)} · origen ` +
+              `${escapeHtml((value.source || 'desconocido').toUpperCase())}</span>`
+            ).join('')
+          : '<span class="empty">No reconoce nada en este momento.</span>';
+
+        document.getElementById('analysis-labels').innerHTML =
+          state.analysis_labels?.length
+          ? state.analysis_labels.map(label =>
+              `<span class="tag">${escapeHtml(label)}</span>`
+            ).join('')
+          : '<span class="empty">Sin detecciones en ese cuadro.</span>';
+        setText(
+          'analysis-age',
+          state.analysis_age_s == null
+            ? 'Esperando el primer análisis.'
+            : `${state.analysis_source} · analizado hace ${state.analysis_age_s} s`
+        );
+
+        const last=trail[trail.length-1];
+        if(!last || Math.hypot(last[0]-state.pose.x,last[1]-state.pose.y)>0.05){
+          trail.push([state.pose.x,state.pose.y]);
+          if(trail.length>600) trail.shift();
+        }
+        drawMap(state);
+        renderTechnical(state);
+      }catch(error){
+        setText('heartbeat','sin conexión, reintentando…');
+      }
+      setTimeout(tick,400);
+    }
+
+    tick();
+  </script>
+</body>
+</html>

@@ -240,8 +240,9 @@ ocho esferas de los pies contra MuJoCo.
   cámara→detector→recorte→servidor→Azure leyó `09:00` 3/3 veces
   (`1,77–2,29 s` punta a punta).
   Las credenciales y el endpoint viven sólo en `.env` de la VM con permisos
-  `600`; no están en Git. Falta validar visualmente el recorte nuevo e invocar
-  este paso desde la misión ROS completa.
+  `600`; no están en Git. La misión ROS completa ya invoca este paso y publica
+  por separado la imagen exacta, el texto literal del modelo y el dato
+  validado. Falta la confirmación visual de Lucas sobre el tablero nuevo.
 - **Carrera del lanzador visual, corregida**: `run_demo.sh clock` soltaba el
   robot, esperaba dos segundos y mandaba el objetivo. Una corrida tomó
   navegación y perdió la concesión 12 s después; la prueba que espera la
@@ -276,11 +277,14 @@ ocho esferas de los pies contra MuJoCo.
   detecciones frente al display, centro `0,528` y cero confusiones con botella.
   Es válida para la escena controlada; en el robot real se reemplazará por un
   detector visual y profundidad, no por rangos de color.
-- **Código viejo de personas**: `agent.py` todavía contiene la rama anterior.
-  Hay que reemplazarla por selección de mesa roja/azul, búsqueda y regreso a
-  `home`; no extender `buscar_persona`.
-- **El planificador es de reglas**: la estructura para el modelo de lenguaje ya
-  está; falta proveedor y credenciales.
+- **Ejecutor migrado a la misión actual**: ya guarda `home`, lee el reloj,
+  elige mesa roja/azul y publica cada paso y decisión con estado explícito. La
+  búsqueda se bloquea de forma honesta si la mesa no está en la vista actual:
+  falta implementar el barrido visual activo antes de acercarse.
+- **El planificador sigue siendo de reglas**: el proveedor visual ya está
+  integrado para leer el reloj. Si más adelante un modelo de lenguaje propone
+  el plan, el tablero conservará su texto literal separado del plan validado;
+  el modelo no mandará velocidades al cuerpo.
 - **Reloj simulado** (`/clock` + `use_sim_time`): sin él, los plazos medidos en
   tiempo de pared no significan nada con el simulador al 20 %. Ya nos rompió un
   timeout de navegación.

@@ -52,7 +52,11 @@ class InvalidImageError(ValueError):
 
 
 class InvalidModelResponseError(ValueError):
-    pass
+    """Conserva la salida literal cuando el modelo responde algo inválido."""
+
+    def __init__(self, message: str, raw_output: str = None):
+        super().__init__(message)
+        self.raw_output = raw_output
 
 
 class ObjectDetectorUnavailableError(RuntimeError):
@@ -187,9 +191,23 @@ class ClockReader:
             reading = json.loads(message)
         except json.JSONDecodeError as error:
             raise InvalidModelResponseError(
-                "el modelo no devolvió JSON válido"
+                "el modelo no devolvió JSON válido",
+                raw_output=message,
             ) from error
-        return validate_reading(reading)
+        try:
+            reading = validate_reading(reading)
+        except InvalidModelResponseError as error:
+            raise InvalidModelResponseError(
+                str(error),
+                raw_output=message,
+            ) from error
+        return {
+            "reading": reading,
+            # El tablero debe mostrar lo que realmente devolvió el modelo, no
+            # una reconstrucción posterior a partir de los campos validados.
+            "raw_output": message,
+            "model": self.deployment,
+        }
 
 
 class IntelligenceService:
@@ -251,10 +269,10 @@ class IntelligenceService:
                 self.configuration_error or "servicio no configurado"
             )
         started_at = time.monotonic()
-        reading = self.clock_reader.read(image)
+        model_result = self.clock_reader.read(image)
         return {
             "ok": True,
-            "reading": reading,
+            **model_result,
             "elapsed_s": round(time.monotonic() - started_at, 3),
         }
 
@@ -336,6 +354,15 @@ class Handler(BaseHTTPRequestHandler):
                 )
             result["request_id"] = request_id
             self.send_json(HTTPStatus.OK, result)
+        except InvalidModelResponseError as error:
+            response = {
+                "ok": False,
+                "error": str(error),
+                "request_id": request_id,
+            }
+            if error.raw_output is not None:
+                response["raw_output"] = error.raw_output
+            self.send_json(HTTPStatus.BAD_GATEWAY, response)
         except (
             json.JSONDecodeError,
             InvalidImageError,

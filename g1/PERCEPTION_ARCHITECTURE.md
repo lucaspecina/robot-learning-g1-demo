@@ -72,14 +72,16 @@ El tablero muestra:
 
 1. el video vivo completo;
 2. el último cuadro que realmente analizó el detector, con cajas y confianza;
-3. el nombre del modelo, tiempo por análisis, cuadros procesados y descartados;
-4. qué objeto produjo cada detección;
-5. en el relato de la misión, el aviso anterior a una llamada remota y su
-   respuesta.
+3. la imagen exacta enviada al modelo remoto;
+4. el nombre del modelo y el tiempo de la llamada;
+5. el texto literal que devolvió, sin resumirlo ni corregirlo;
+6. el dato estructurado que aceptó el validador antes de que el robot actuara;
+7. qué paso de la misión está activo, qué decisión se tomó y con qué evidencia.
 
 Esto permite distinguir cuatro casos diferentes: el objeto no entró en la
 cámara, entró pero el detector no lo reconoció, fue reconocido pero la tarea
-no reaccionó, o falló el modelo remoto.
+no reaccionó, o falló el modelo remoto. También deja visible una quinta falla:
+que el texto del modelo sea correcto pero nuestro validador lo interprete mal.
 
 ## Coincidencia con los flujos oficiales
 

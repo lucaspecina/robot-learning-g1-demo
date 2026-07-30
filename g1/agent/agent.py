@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""El agente: recibe una mision en lenguaje natural y la ejecuta con skills.
+"""El agente local: convierte una misión en pasos observables y los ejecuta.
 
-Es la cima del sistema. No toca motores ni velocidades: solo decide QUE hacer
-y en que orden, llamando a las capacidades que el robot ya tiene. Cada skill se
-encarga de su parte y le reporta si salio bien.
+No toca motores ni velocidades. Publica objetivos para las capacidades del
+robot y conserva, por separado, tres tipos de evidencia:
 
-  recibe:  /g1/mission         (std_msgs/String — la mision, en castellano)
-           /g1/detections      (lo que la camara reconoce)
-           /g1/clock_crop/compressed (recorte del reloj)
-           /g1/nav_status      (si la navegacion llego)
-  publica: /g1/goal            (a donde ir)
-           /g1/arm_pose        (que hacer con los brazos)
-           /g1/mission_status  (como viene la mision)
+  recibe:  /g1/mission                    orden original en castellano
+           /g1/detections                 objetos vistos por la cámara
+           /g1/clock_crop/compressed      recorte exacto del reloj
+           /g1/nav_status                 resultado de navegación
+           /g1/odom                       ubicación medida del cuerpo
+           /g1/arm_status                 medición real de los brazos
+           /g1/perception/search_status   resultado de búsqueda puntual
+           /g1/table_detections_3d        mesa ubicada desde sensores
 
-Corre en la Jetson como ejecutor local de la misión. Las decisiones que
-necesitan modelos grandes se piden por HTTP al servidor externo. Si ese enlace
-falla, aborta el paso y el control local deja al robot estable.
+  publica: /g1/goal                       objetivo de navegación
+           /g1/arm_pose                   postura pedida a los brazos
+           /g1/perception/search_request  categoría visual acotada
+           /g1/mission_status             relato humano, sólo para el historial
+           /g1/mission_state              estado estructurado de cada paso
+           /g1/model_events               salida literal de LLM/VLM y validación
 
-Sobre el planificador: hoy resuelve la mision con reglas. La estructura ya esta
-lista para que un modelo de lenguaje arme el plan (ver `plan_con_llm`): el
-catalogo de skills y el formato del plan son los que se le pasarian al modelo.
-Cuando haya credenciales, se cambia el planificador y el resto sigue igual.
+Las decisiones lentas se piden al servidor externo. Si la red o el modelo
+fallan, la misión se detiene, pero el control local conserva el equilibrio.
 """
 import json
 import math
@@ -28,41 +29,87 @@ import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
-from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
+from vision_msgs.msg import Detection3DArray
 
-from scene_layout import NAVIGATION_TARGETS
 from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
 )
+from mission_contract import MissionTracker, build_demo_plan
+from model_trace import build_model_event
+from open_vocabulary_core import make_search_request
+from scene_layout import NAVIGATION_TARGETS
 
-# El mapa semantico: donde PARARSE para usar cada cosa.
-#
-# Ojo con esto, que es un error facil de cometer: los destinos de navegacion no
-# son las coordenadas del objeto sino POSES DE APROXIMACION — el lugar desde el
-# cual el robot puede usarlo. Si el destino fuera el centro de la mesa, el robot
-# caminaria contra el mueble, quedaria trabado a medio metro y la navegacion
-# nunca daria por cumplido el objetivo (nos paso).
-SEMANTIC_MAP = NAVIGATION_TARGETS
 
-# El catalogo de skills: lo que el robot sabe hacer. Esto es, literalmente, lo
-# que se le describiria a un modelo de lenguaje para que arme un plan.
-SKILLS = {
-    "ir_a": "ir_a(lugar) — camina hasta un lugar del mapa: mesa, reloj",
-    "mirar": "mirar(objeto) — informa si lo ve y donde: reloj, botella, persona_roja, persona_azul",
-    "brazos": "brazos(pose) — mueve los brazos: reposo, listo, transporte",
-    "buscar_persona": "buscar_persona(color) — gira hasta encontrar a la persona de ese color",
-    "decir": "decir(texto) — le habla a la gente",
+STATE_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
+MODEL_EVENT_QOS = QoSProfile(
+    depth=20,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
+
+# Estas son poses seguras desde las que usar un objeto, no las coordenadas del
+# objeto. La mesa no figura: la misión objetivo exige encontrarla con sensores.
+SEMANTIC_MAP = {
+    "clock": NAVIGATION_TARGETS["reloj"],
 }
+DETECTION_NAMES = {
+    "clock": "reloj",
+    "bottle": "botella",
+}
+ARM_POSES = {
+    "rest": "reposo",
+    "ready": "listo",
+    "transport": "transporte",
+}
+
+# Este catálogo será la entrada acotada del planificador con LLM. Los
+# identificadores son estables aunque cambie la explicación para el operador.
+SKILLS = {
+    "remember_home": "guardar la posición inicial de esta misión",
+    "navigate_to": "ir a una pose segura conocida o a home",
+    "look_at": "confirmar visualmente un objeto",
+    "read_clock": "leer el recorte del reloj con un VLM",
+    "choose_table": "aplicar la regla de las 12:00",
+    "search_table": "buscar una mesa no registrada por posición",
+    "approach_table": "crear y ejecutar una aproximación segura",
+    "set_arm_pose": "mover y verificar una postura de brazos",
+    "grasp_object": "agarrar el objeto",
+}
+
+
+def succeeded(message: str) -> dict:
+    return {"state": "succeeded", "message": message}
+
+
+def failed(message: str) -> dict:
+    return {"state": "failed", "message": message}
+
+
+def blocked(message: str) -> dict:
+    return {"state": "blocked", "message": message}
 
 
 class Agent(Node):
@@ -70,260 +117,506 @@ class Agent(Node):
         super().__init__("agent")
         self.detections = {}
         self.nav_status = None
+        self.current_pose = None
+        self.arm_status = None
+        self.search_status = None
+        self.localized_tables = {}
         self.mission_thread = None
         self.clock_crop = None
+        self.clock_crop_ref = None
         self.clock_crop_received_at = None
+        self.mission_context = {}
         self.intelligence = IntelligenceClient()
 
-        self.pub_goal = self.create_publisher(PoseStamped, "/g1/goal", 10)
-        self.pub_arms = self.create_publisher(String, "/g1/arm_pose", 10)
-        self.pub_status = self.create_publisher(String, "/g1/mission_status", 10)
+        self.goal_pub = self.create_publisher(PoseStamped, "/g1/goal", 10)
+        self.arms_pub = self.create_publisher(String, "/g1/arm_pose", 10)
+        self.search_pub = self.create_publisher(
+            String,
+            "/g1/perception/search_request",
+            10,
+        )
+        self.status_pub = self.create_publisher(
+            String,
+            "/g1/mission_status",
+            10,
+        )
+        self.mission_state_pub = self.create_publisher(
+            String,
+            "/g1/mission_state",
+            STATE_QOS,
+        )
+        self.model_events_pub = self.create_publisher(
+            String,
+            "/g1/model_events",
+            MODEL_EVENT_QOS,
+        )
+        self.mission_tracker = MissionTracker(
+            publisher=self.publish_mission_state,
+        )
+
         self.create_subscription(String, "/g1/mission", self.on_mission, 10)
-        self.create_subscription(String, "/g1/detections", self.on_detections, 10)
+        self.create_subscription(
+            String,
+            "/g1/detections",
+            self.on_detections,
+            10,
+        )
         self.create_subscription(
             CompressedImage,
             "/g1/clock_crop/compressed",
             self.on_clock_crop,
             2,
         )
-        self.create_subscription(String, "/g1/nav_status", self.on_nav_status, 10)
+        self.create_subscription(
+            String,
+            "/g1/nav_status",
+            self.on_nav_status,
+            10,
+        )
+        self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
+        self.create_subscription(
+            String,
+            "/g1/arm_status",
+            self.on_arm_status,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/perception/search_status",
+            self.on_search_status,
+            10,
+        )
+        self.create_subscription(
+            Detection3DArray,
+            "/g1/table_detections_3d",
+            self.on_table_detections,
+            qos_profile_sensor_data,
+        )
 
-        self.get_logger().info("agente listo. Esperando misiones en /g1/mission")
+        self.publish_mission_state(self.mission_tracker.snapshot())
+        self.get_logger().info(
+            "agente listo. Esperando misiones en /g1/mission"
+        )
 
     # ---------- entradas ----------
 
-    def on_detections(self, msg: String):
+    def on_detections(self, message: String):
         try:
-            self.detections = json.loads(msg.data)
+            self.detections = json.loads(message.data)
         except json.JSONDecodeError:
             pass
 
-    def on_nav_status(self, msg: String):
-        self.nav_status = msg.data
+    def on_nav_status(self, message: String):
+        self.nav_status = message.data
 
-    def on_clock_crop(self, msg: CompressedImage):
-        self.clock_crop = bytes(msg.data)
+    def on_clock_crop(self, message: CompressedImage):
+        self.clock_crop = bytes(message.data)
+        self.clock_crop_ref = {
+            "topic": "/g1/clock_crop/compressed",
+            "sec": int(message.header.stamp.sec),
+            "nanosec": int(message.header.stamp.nanosec),
+        }
         self.clock_crop_received_at = time.monotonic()
 
-    def on_mission(self, msg: String):
-        """Arranca la mision en un hilo aparte.
+    def on_odom(self, message: Odometry):
+        position = message.pose.pose.position
+        orientation = message.pose.pose.orientation
+        yaw = math.atan2(
+            2.0
+            * (
+                orientation.w * orientation.z
+                + orientation.x * orientation.y
+            ),
+            1.0
+            - 2.0
+            * (
+                orientation.y * orientation.y
+                + orientation.z * orientation.z
+            ),
+        )
+        self.current_pose = (
+            float(position.x),
+            float(position.y),
+            float(position.z),
+            float(yaw),
+        )
 
-        No se puede ejecutar aca mismo: este metodo corre DENTRO del sistema de
-        mensajes de ROS, y quedarse esperando adentro lo bloquea (el error es
-        explicito: "Executor is already spinning"). El hilo lee las variables
-        que los callbacks van actualizando.
-        """
+    def on_arm_status(self, message: String):
+        try:
+            self.arm_status = json.loads(message.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_search_status(self, message: String):
+        try:
+            self.search_status = json.loads(message.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_table_detections(self, message: Detection3DArray):
+        for detection in message.detections:
+            parts = detection.id.split(":")
+            if len(parts) < 3 or parts[0] != "grounding_dino":
+                continue
+            request_id = parts[1]
+            if not detection.results:
+                continue
+            hypothesis = detection.results[0].hypothesis
+            point = detection.bbox.center.position
+            self.localized_tables.setdefault(request_id, []).append(
+                {
+                    "class_id": hypothesis.class_id,
+                    "confidence": float(hypothesis.score),
+                    "x": float(point.x),
+                    "y": float(point.y),
+                    "z": float(point.z),
+                }
+            )
+
+    def on_mission(self, message: String):
+        """Ejecuta en otro hilo para no bloquear las entradas de sensores."""
         if self.mission_thread and self.mission_thread.is_alive():
-            self.reportar("ya hay una mision en curso; ignoro la nueva")
+            self.report("ya hay una misión en curso; ignoro la nueva")
             return
-        self.mission_thread = threading.Thread(target=self._run_mission,
-                                               args=(msg.data,), daemon=True)
+        self.mission_thread = threading.Thread(
+            target=self.run_mission,
+            args=(message.data,),
+            daemon=True,
+        )
         self.mission_thread.start()
 
-    def _run_mission(self, mision: str):
-        self.get_logger().info(f"mision recibida: {mision}")
-        self.reportar(f"planificando: {mision}")
-        plan = self.planificar(mision)
-        self.reportar("plan: " + " -> ".join(p[0] + "(" + str(p[1]) + ")" for p in plan))
-        self.ejecutar(plan)
+    # ---------- publicación observable ----------
 
-    # ---------- planificacion ----------
+    def publish_mission_state(self, state: dict):
+        self.mission_state_pub.publish(
+            String(data=json.dumps(state, ensure_ascii=False))
+        )
 
-    def planificar(self, mision: str):
-        """Devuelve una lista de pasos [(skill, argumento), ...]."""
-        if os.environ.get("AGENT_LLM_ENDPOINT"):
-            return self.plan_con_llm(mision)
-        return self.plan_con_reglas(mision)
+    def publish_model_event(self, event: dict):
+        self.model_events_pub.publish(
+            String(data=json.dumps(event, ensure_ascii=False))
+        )
 
-    def plan_con_reglas(self, mision: str):
-        """Planificador simple: reconoce la mision de la demo.
+    def report(self, text: str):
+        self.get_logger().info(text)
+        self.status_pub.publish(String(data=text))
 
-        Deliberadamente pobre: existe para que el sistema funcione de punta a
-        punta sin depender de un servicio externo. El plan que arma es el mismo
-        que armaria el modelo de lenguaje.
-        """
-        m = mision.lower()
-        if "reloj" in m or "hora" in m:
-            return [
-                ("ir_a", "reloj"),
-                ("mirar", "reloj"),
-                ("decidir_color", None),      # la rama: segun la hora
-                ("ir_a", "mesa"),
-                ("brazos", "listo"),
-                ("mirar", "botella"),
-                ("agarrar", None),            # pendiente: lo hara el VLA
-                ("brazos", "transporte"),
-                ("buscar_persona", "<color>"),  # se completa al decidir
-                ("decir", "aca tenes"),
-            ]
-        if "mesa" in m:
-            return [("ir_a", "mesa"), ("brazos", "listo")]
-        return [("decir", "no entendi la mision")]
+    # ---------- planificación y ejecución ----------
 
-    def plan_con_llm(self, mision: str):
-        """Arma el plan con un modelo de lenguaje.
+    def run_mission(self, command: str):
+        self.mission_context = {}
+        planner = "rules"
+        self.mission_tracker.begin(command, planner)
+        self.report(f"planificando: {command}")
+        try:
+            plan = self.plan_with_rules(command)
+            self.mission_tracker.set_plan(plan)
+        except ValueError as error:
+            self.mission_tracker.stop(str(error))
+            self.report(f"FALLO al planificar: {error}")
+            return
+        self.report(
+            "plan: " + " → ".join(step["label"] for step in plan)
+        )
+        self.execute_plan(plan)
 
-        Sin implementar todavia: falta decidir el proveedor y cargar
-        credenciales. El prompt seria la mision + el catalogo SKILLS + el mapa
-        semantico, y la respuesta esperada, la misma lista de pasos que produce
-        el planificador de reglas.
-        """
-        self.get_logger().warn("planificador LLM no configurado; uso reglas")
-        return self.plan_con_reglas(mision)
+    @staticmethod
+    def plan_with_rules(command: str) -> list[dict]:
+        """Produce sólo la misión de referencia mientras no haya un LLM."""
+        normalized = command.lower()
+        if not any(
+            word in normalized
+            for word in ("reloj", "hora", "mesa", "objeto")
+        ):
+            raise ValueError("no entendí la misión")
+        return build_demo_plan()
 
-    # ---------- ejecucion ----------
-
-    def ejecutar(self, plan):
-        color_objetivo = None
-
-        for skill, arg in plan:
-            if skill == "decidir_color":
-                hora = self.leer_reloj()
-                if hora is None:
-                    self.reportar(
-                        "FALLO al leer el reloj — misión abortada"
-                    )
-                    return
-                color_objetivo = "persona_roja" if hora < 6 else "persona_azul"
-                self.reportar(f"el reloj marca {hora}:00 -> {color_objetivo}")
+    def execute_plan(self, plan: list[dict]):
+        for step in plan:
+            argument = self.resolve_argument(step.get("argument"))
+            self.mission_tracker.start_step(step["id"], argument)
+            self.report(
+                f"ejecutando: {step['label']}"
+                + (f" ({argument})" if argument is not None else "")
+            )
+            outcome = self.execute_skill(step["skill"], argument)
+            if outcome["state"] == "succeeded":
+                self.mission_tracker.finish_step(
+                    step["id"],
+                    outcome["message"],
+                )
+                self.report(f"completado: {outcome['message']}")
                 continue
+            is_blocked = outcome["state"] == "blocked"
+            self.mission_tracker.stop_step(
+                step["id"],
+                outcome["message"],
+                blocked=is_blocked,
+            )
+            prefix = "BLOQUEADO" if is_blocked else "FALLO"
+            self.report(f"{prefix}: {outcome['message']}")
+            return
+        self.mission_tracker.complete("misión completada")
+        self.report("misión completada")
 
-            if arg == "<color>":
-                arg = color_objetivo or "persona_roja"
+    def resolve_argument(self, argument):
+        if argument == "$selected_table":
+            return self.mission_context.get("selected_table")
+        return argument
 
-            self.reportar(f"ejecutando {skill}({arg})")
-            ok = self.ejecutar_skill(skill, arg)
-            if not ok:
-                self.reportar(f"FALLO en {skill}({arg}) — mision abortada")
-                return
+    def execute_skill(self, skill: str, argument) -> dict:
+        if skill == "remember_home":
+            return self.remember_home()
+        if skill == "navigate_to":
+            return self.navigate_to(str(argument))
+        if skill == "look_at":
+            return self.look_at(str(argument))
+        if skill == "read_clock":
+            return self.read_clock()
+        if skill == "choose_table":
+            return self.choose_table()
+        if skill == "search_table":
+            return self.search_table(argument)
+        if skill == "approach_table":
+            return blocked(
+                "falta calcular una pose segura desde la mesa medida"
+            )
+        if skill == "set_arm_pose":
+            return self.set_arm_pose(str(argument))
+        if skill == "grasp_object":
+            return blocked(
+                "el agarre todavía no está implementado; será una policy aparte"
+            )
+        return failed(f"skill desconocida: {skill}")
 
-        self.reportar("mision completada")
+    # ---------- skills ----------
 
-    def ejecutar_skill(self, skill: str, arg) -> bool:
-        if skill == "ir_a":
-            if arg not in SEMANTIC_MAP:
-                return False
-            x, y, yaw = SEMANTIC_MAP[arg]
-            goal = PoseStamped()
-            goal.header.stamp = self.get_clock().now().to_msg()
-            goal.header.frame_id = "odom"
-            goal.pose.position.x, goal.pose.position.y = float(x), float(y)
-            goal.pose.orientation.z = math.sin(yaw / 2.0)
-            goal.pose.orientation.w = math.cos(yaw / 2.0)
-            self.nav_status = None
-            self.pub_goal.publish(goal)
-            return self.esperar_llegada()
+    def remember_home(self) -> dict:
+        end = time.monotonic() + 5.0
+        while self.current_pose is None and time.monotonic() < end:
+            time.sleep(0.05)
+        if self.current_pose is None:
+            return failed("no llegó la posición del robot")
+        x, y, _z, yaw = self.current_pose
+        self.mission_context["home"] = (x, y, yaw)
+        return succeeded(f"home guardado en ({x:.2f}, {y:.2f})")
 
-        if skill == "brazos":
-            self.pub_arms.publish(String(data=str(arg)))
-            self.dormir(3.0)
-            return True
+    def navigate_to(self, target: str) -> dict:
+        if target == "home":
+            pose = self.mission_context.get("home")
+            if pose is None:
+                return failed("home no fue guardado")
+        else:
+            pose = SEMANTIC_MAP.get(target)
+            if pose is None:
+                return failed(f"destino desconocido: {target}")
+        x, y, yaw = pose
+        goal = PoseStamped()
+        goal.header.stamp = self.get_clock().now().to_msg()
+        goal.header.frame_id = "odom"
+        goal.pose.position.x = float(x)
+        goal.pose.position.y = float(y)
+        goal.pose.orientation.z = math.sin(yaw / 2.0)
+        goal.pose.orientation.w = math.cos(yaw / 2.0)
+        self.nav_status = None
+        self.goal_pub.publish(goal)
+        if not self.wait_for_arrival():
+            return failed(f"la navegación hacia {target} no llegó a tiempo")
+        return succeeded(f"llegó a {target}")
 
-        if skill == "mirar":
-            visto = self.esperar_deteccion(str(arg), timeout_s=5.0)
-            if visto:
-                self.reportar(f"veo {arg}: {visto}")
-            else:
-                self.reportar(f"no veo {arg}")
-            return True   # no ver algo no aborta la mision; el plan decide
+    def look_at(self, target: str) -> dict:
+        detection_name = DETECTION_NAMES.get(target)
+        if detection_name is None:
+            return failed(f"objeto visual desconocido: {target}")
+        detection = self.wait_for_detection(detection_name, timeout_s=12.0)
+        if detection is None:
+            return failed(f"la cámara no confirmó {detection_name}")
+        return succeeded(
+            f"confirmó {detection_name} con confianza "
+            f"{detection.get('confidence', '?')}"
+        )
 
-        if skill == "buscar_persona":
-            return self.buscar(str(arg))
-
-        if skill == "decir":
-            self.reportar(f'dice: "{arg}"')
-            return True
-
-        if skill == "agarrar":
-            self.reportar("agarrar: pendiente (lo va a hacer el VLA)")
-            return True
-
-        self.reportar(f"skill desconocida: {skill}")
-        return False
-
-    # ---------- utilidades ----------
-
-    def leer_reloj(self):
-        """La hora que marca el reloj.
-
-        El detector local publica un recorte pequeño. El modelo vive detrás del
-        servidor externo para que una demora o caída de Azure no afecte el
-        equilibrio ni el control de movimiento.
-        """
+    def read_clock(self) -> dict:
         if (
             self.clock_crop is None
             or self.clock_crop_received_at is None
             or time.monotonic() - self.clock_crop_received_at > 10.0
         ):
-            self.reportar("no hay una imagen reciente del reloj")
-            return None
-        try:
-            self.reportar(
-                "reloj detectado: envío sólo su recorte al modelo visual remoto"
+            return failed("no hay un recorte reciente del reloj")
+
+        event_id = str(uuid.uuid4())
+        started_wall = time.time()
+        started_monotonic = time.monotonic()
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                task="read_clock",
+                state="running",
+                input_summary="recorte JPEG exacto del reloj detectado",
+                input_ref=self.clock_crop_ref,
+                created_at=started_wall,
             )
+        )
+        self.report(
+            "reloj detectado: envío sólo su recorte al modelo visual remoto"
+        )
+        try:
             reading = self.intelligence.read_clock(self.clock_crop)
         except RemoteIntelligenceError as error:
-            self.reportar(f"servidor de visión no disponible: {error}")
-            return None
-        if not reading["readable"]:
-            self.reportar("el modelo informa que el reloj no es legible")
-            return None
-        self.reportar(
-            f"lectura visual: {reading['text']} "
-            f"({reading.get('elapsed_s', '?')} s en el servidor)"
+            self.publish_model_event(
+                build_model_event(
+                    event_id=event_id,
+                    request_id=error.request_id,
+                    task="read_clock",
+                    state="failed",
+                    input_summary="recorte JPEG exacto del reloj detectado",
+                    input_ref=self.clock_crop_ref,
+                    raw_output=error.raw_output,
+                    duration_s=round(
+                        time.monotonic() - started_monotonic,
+                        3,
+                    ),
+                    error=str(error),
+                    created_at=started_wall,
+                )
+            )
+            return failed(f"servidor de visión no disponible: {error}")
+
+        validated = {
+            key: reading[key]
+            for key in ("readable", "hour", "minute", "text")
+        }
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                request_id=reading.get("request_id"),
+                task="read_clock",
+                state="succeeded",
+                input_summary="recorte JPEG exacto del reloj detectado",
+                input_ref=self.clock_crop_ref,
+                model=reading.get("model"),
+                raw_output=reading["raw_output"],
+                validated_output=validated,
+                duration_s=round(
+                    time.monotonic() - started_monotonic,
+                    3,
+                ),
+                created_at=started_wall,
+            )
         )
-        return int(reading["hour"])
+        if not reading["readable"]:
+            return failed("el modelo informa que el reloj no es legible")
+        self.mission_context["clock_reading"] = validated
+        return succeeded(f"el modelo leyó {reading['text']}")
 
-    def esperar_llegada(self, timeout_s: float = None) -> bool:
-        """Espera a que la navegacion reporte que llego.
+    def choose_table(self) -> dict:
+        reading = self.mission_context.get("clock_reading")
+        if reading is None:
+            return failed("no existe una lectura validada del reloj")
+        before_noon = (reading["hour"], reading["minute"]) < (12, 0)
+        selected_table = "red_table" if before_noon else "blue_table"
+        self.mission_context["selected_table"] = selected_table
+        table_label = (
+            "mesa A roja" if selected_table == "red_table" else "mesa B azul"
+        )
+        relation = "antes de" if before_noon else "a las 12:00 o después de"
+        self.mission_tracker.set_decision(
+            evidence=f"el reloj marca {reading['text']}",
+            rule=f"{relation} las 12:00",
+            outcome=f"buscar {table_label}",
+        )
+        return succeeded(f"eligió {table_label}")
 
-        El tiempo limite se lee del entorno porque depende de cuan rapido corra
-        el simulador: con el simulador al 20 % de la velocidad real, recorrer
-        8 metros lleva mas de dos minutos de reloj de pared. La solucion de
-        fondo es usar el reloj simulado de ROS 2 (/clock + use_sim_time) para
-        que los plazos se midan en tiempo de simulacion.
-        """
+    def search_table(self, target: str) -> dict:
+        if target not in ("red_table", "blue_table"):
+            return failed("no hay una mesa elegida")
+        request = make_search_request(target)
+        request_id = request["request_id"]
+        self.search_status = None
+        self.localized_tables.pop(request_id, None)
+        self.search_pub.publish(
+            String(data=json.dumps(request, ensure_ascii=False))
+        )
+        end = time.monotonic() + 60.0
+        while time.monotonic() < end:
+            time.sleep(0.1)
+            status = self.search_status or {}
+            if status.get("request_id") != request_id:
+                continue
+            if status.get("state") in ("failed", "rejected"):
+                return failed(
+                    "la búsqueda visual falló: "
+                    + str(status.get("error", status))
+                )
+            if status.get("state") == "complete":
+                break
+        else:
+            return failed("la búsqueda visual no respondió a tiempo")
+
+        localization_end = time.monotonic() + 6.0
+        while time.monotonic() < localization_end:
+            candidates = [
+                candidate
+                for candidate in self.localized_tables.get(request_id, [])
+                if candidate["class_id"] == target
+            ]
+            if candidates:
+                best = max(
+                    candidates,
+                    key=lambda candidate: candidate["confidence"],
+                )
+                self.mission_context["table_point"] = best
+                return succeeded(
+                    f"ubicó {target} en ({best['x']:.2f}, {best['y']:.2f})"
+                )
+            time.sleep(0.1)
+        return blocked(
+            "la mesa no apareció en la vista actual; falta el barrido visual "
+            "activo de la habitación"
+        )
+
+    def set_arm_pose(self, target: str) -> dict:
+        ros_pose = ARM_POSES.get(target)
+        if ros_pose is None:
+            return failed(f"postura de brazos desconocida: {target}")
+        end = time.monotonic() + 40.0
+        last_send = 0.0
+        while time.monotonic() < end:
+            now = time.monotonic()
+            if now - last_send >= 0.5:
+                self.arms_pub.publish(String(data=ros_pose))
+                last_send = now
+            status = self.arm_status or {}
+            if status.get("pose") == ros_pose and status.get("reached"):
+                return succeeded(
+                    f"brazos llegaron a {ros_pose}; error máximo "
+                    f"{status.get('max_error_rad', '?')} rad"
+                )
+            time.sleep(0.1)
+        return failed(f"los brazos no confirmaron la postura {ros_pose}")
+
+    # ---------- esperas ----------
+
+    def wait_for_arrival(self, timeout_s: float = None) -> bool:
+        """Usa tiempo de pared hasta integrar `/clock` en todos los nodos."""
         if timeout_s is None:
             timeout_s = float(os.environ.get("NAV_TIMEOUT_S", "600"))
-        inicio = time.time()
-        while time.time() - inicio < timeout_s:
+        end = time.monotonic() + timeout_s
+        while time.monotonic() < end:
             time.sleep(0.2)
             if self.nav_status == "llegue":
                 return True
-        self.reportar("la navegacion no llego a tiempo")
+            if self.nav_status and self.nav_status.startswith("fallo"):
+                return False
         return False
 
-    def esperar_deteccion(self, objeto: str, timeout_s: float = 5.0):
-        inicio = time.time()
-        while time.time() - inicio < timeout_s:
+    def wait_for_detection(self, target: str, timeout_s: float):
+        end = time.monotonic() + timeout_s
+        while time.monotonic() < end:
             time.sleep(0.2)
-            if objeto in self.detections:
-                return self.detections[objeto]
+            if target in self.detections:
+                return self.detections[target]
         return None
-
-    def buscar(self, objeto: str, timeout_s: float = 60.0) -> bool:
-        """Comportamiento de busqueda: girar hasta tenerlo al frente.
-
-        Gira publicando objetivos de navegacion relativos seria mas prolijo;
-        por ahora usamos la deteccion directa: si aparece en la imagen y esta
-        razonablemente centrado, damos por encontrado.
-        """
-        inicio = time.time()
-        while time.time() - inicio < timeout_s:
-            time.sleep(0.2)
-            visto = self.detections.get(objeto)
-            if visto and abs(visto["cx"] - 0.5) < 0.25:
-                self.reportar(f"encontre {objeto} (centro {visto['cx']}, tamaño {visto['area']})")
-                return True
-        self.reportar(f"no encontre {objeto}")
-        return False
-
-    def dormir(self, segundos: float):
-        time.sleep(segundos)
-
-    def reportar(self, texto: str):
-        self.get_logger().info(texto)
-        self.pub_status.publish(String(data=texto))
 
 
 def main():
@@ -333,8 +626,10 @@ def main():
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

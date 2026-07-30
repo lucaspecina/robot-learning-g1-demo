@@ -69,8 +69,7 @@ parser.add_argument("--payload_kg", type=float, default=0.0,
                          "cuanta carga tolera la locomocion (la policy de "
                          "Unitree fue entrenada con el robot vacio)")
 parser.add_argument("--scene", action="store_true",
-                    help="construir la habitacion de la demo (mesa, botella, "
-                         "reloj y dos personas)")
+                    help="construir la habitación de la demo (reloj, mesas y objetos)")
 parser.add_argument("--camera", action="store_true",
                     help="montar la camara de la cabeza y publicarla por ROS 2")
 parser.add_argument("--camera_hz", type=float, default=3.0,

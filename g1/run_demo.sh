@@ -232,9 +232,10 @@ search-table)
     ;;
 
 mission)
-    MISSION="${2:-fijate la hora en el reloj y llevale la botella a quien corresponda}"
+    MISSION="${2:-andá al reloj, leé la hora, elegí la mesa correcta, agarrá el objeto y volvé al inicio}"
     sudo docker exec jetson bash -c \
-        "$ROS && timeout 8 ros2 topic pub --once /g1/mission std_msgs/msg/String \"{data: $MISSION}\"" \
+        "$ROS && timeout 8 ros2 topic pub --once /g1/mission std_msgs/msg/String \
+        \"{data: '$MISSION'}\"" \
         >/dev/null 2>&1
     echo "mision enviada: $MISSION"
     echo "seguila en el tablero, o con: bash run_demo.sh status"

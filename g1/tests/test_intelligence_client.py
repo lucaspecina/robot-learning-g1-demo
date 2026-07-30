@@ -39,6 +39,11 @@ class IntelligenceClientTests(unittest.TestCase):
                         "minute": 0,
                         "text": "09:00",
                     },
+                    "model": "vision-test",
+                    "raw_output": (
+                        '{"readable":true,"hour":9,'
+                        '"minute":0,"text":"09:00"}'
+                    ),
                     "elapsed_s": 2.1,
                 }
             )
@@ -50,6 +55,11 @@ class IntelligenceClientTests(unittest.TestCase):
         result = client.read_clock(b"jpeg")
 
         self.assertEqual(result["text"], "09:00")
+        self.assertEqual(result["model"], "vision-test")
+        self.assertEqual(
+            result["raw_output"],
+            '{"readable":true,"hour":9,"minute":0,"text":"09:00"}',
+        )
         self.assertEqual(client.consecutive_failures, 0)
 
     def test_opens_circuit_after_three_failures(self):

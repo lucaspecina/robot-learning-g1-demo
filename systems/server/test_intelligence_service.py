@@ -111,7 +111,12 @@ class IntelligenceServiceTests(unittest.TestCase):
 
         result = reader.read(b"\xff\xd8" + b"x" * 200 + b"\xff\xd9")
 
-        self.assertEqual(result, payload)
+        self.assertEqual(result["reading"], payload)
+        self.assertEqual(
+            json.loads(result["raw_output"]),
+            payload,
+        )
+        self.assertEqual(result["model"], "vision-test")
         request = fake_client.chat.completions.last_kwargs
         self.assertEqual(request["model"], "vision-test")
         self.assertEqual(
