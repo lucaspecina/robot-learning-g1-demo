@@ -10,6 +10,7 @@ from systems.server.intelligence_service import (
     InvalidModelResponseError,
     MissionPlanner,
     decode_image,
+    decode_visual_evidence,
     validate_generated_plan,
     validate_generated_review,
     validate_reading,
@@ -182,6 +183,70 @@ class IntelligenceServiceTests(unittest.TestCase):
             "robot_step_review",
         )
 
+    def test_step_reviewer_attaches_image_without_copying_base64_to_trace(self):
+        catalog = [
+            {
+                "name": "look_at",
+                "description": "Confirma un objeto en la cámara.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": "clock",
+                        "argument_description": "Reloj.",
+                        "preconditions": [],
+                        "effects": ["clock_confirmed"],
+                    }
+                ],
+            }
+        ]
+        payload = {
+            "decision": "continue",
+            "reason": "La imagen confirma el reloj.",
+            "revised_steps": [],
+            "question": None,
+        }
+        fake_client = FakeClient(payload)
+        planner = MissionPlanner(
+            client=fake_client,
+            deployment="planner-test",
+        )
+        jpeg = b"\xff\xd8" + b"x" * 200 + b"\xff\xd9"
+
+        result = planner.review(
+            "Mirá el reloj",
+            catalog,
+            ["clock_confirmed"],
+            [{"id": "look", "state": "succeeded"}],
+            {
+                "id": "look",
+                "skill": "look_at",
+                "argument": "clock",
+                "label": "Confirmar el reloj",
+            },
+            {"state": "succeeded", "message": "confirmado"},
+            [],
+            1,
+            {
+                "image": jpeg,
+                "purpose": "cuadro exacto que confirmó el reloj",
+                "detail": "low",
+            },
+        )
+
+        sent_content = (
+            fake_client.chat.completions.last_kwargs["messages"][1]["content"]
+        )
+        self.assertIsInstance(sent_content, list)
+        sent_url = sent_content[1]["image_url"]["url"]
+        self.assertTrue(sent_url.startswith("data:image/jpeg;base64,"))
+        self.assertEqual(
+            sent_content[1]["image_url"]["detail"],
+            "low",
+        )
+        traced_content = result["model_input"]["messages"][1]["content"]
+        self.assertIn("<JPEG adjunto:", traced_content[1]["image_url"]["url"])
+        self.assertNotIn("base64,", json.dumps(traced_content))
+
     def test_reviewer_rejects_continue_after_failure(self):
         with self.assertRaisesRegex(
             InvalidModelResponseError,
@@ -197,6 +262,84 @@ class IntelligenceServiceTests(unittest.TestCase):
                 [],
                 [],
                 "failed",
+            )
+
+    def test_reviewer_rejects_reusing_an_executed_step_id(self):
+        review = {
+            "decision": "revise",
+            "reason": "Intentar otra estrategia.",
+            "revised_steps": [
+                {
+                    "id": "search_table",
+                    "skill": "remember_home",
+                    "argument": None,
+                    "label": "Repetir con otro nombre",
+                }
+            ],
+            "question": None,
+        }
+        catalog = [
+            {
+                "name": "remember_home",
+                "description": "Guarda la pose.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["home_saved"],
+                    }
+                ],
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "identificadores ya ejecutados",
+        ):
+            validate_generated_review(
+                review,
+                catalog,
+                [],
+                "blocked",
+                {"search_table"},
+            )
+
+    def test_reviewer_cannot_fake_a_missing_physical_skill(self):
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "skill faltante",
+        ):
+            validate_generated_review(
+                {
+                    "decision": "retry",
+                    "reason": "Moverse podría cambiar la vista.",
+                    "revised_steps": [],
+                    "question": None,
+                },
+                [
+                    {
+                        "name": "navigate_to",
+                        "description": "Va a un punto ya conocido.",
+                        "availability": "ready",
+                        "variants": [
+                            {
+                                "argument": "home",
+                                "preconditions": [],
+                                "effects": ["at_home"],
+                            }
+                        ],
+                    }
+                ],
+                [],
+                {
+                    "state": "blocked",
+                    "message": "falta barrer la habitación",
+                    "blocker": {
+                        "type": "missing_skill",
+                        "skill": "scan_for_table",
+                    },
+                },
             )
 
     def test_external_validator_rejects_missing_preconditions(self):
@@ -264,6 +407,31 @@ class IntelligenceServiceTests(unittest.TestCase):
         with self.assertRaises(InvalidImageError):
             decode_image(encoded)
 
+    def test_decodes_declared_visual_evidence(self):
+        jpeg = b"\xff\xd8" + b"x" * 200 + b"\xff\xd9"
+        evidence = decode_visual_evidence(
+            {
+                "purpose": "confirmar una mesa",
+                "image_base64": base64.b64encode(jpeg).decode("ascii"),
+                "detail": "low",
+            }
+        )
+
+        self.assertEqual(evidence["image"], jpeg)
+        self.assertEqual(evidence["purpose"], "confirmar una mesa")
+        self.assertEqual(evidence["detail"], "low")
+        self.assertIsNone(decode_visual_evidence(None))
+
+    def test_rejects_visual_evidence_without_declared_detail(self):
+        jpeg = b"\xff\xd8" + b"x" * 200 + b"\xff\xd9"
+        with self.assertRaisesRegex(InvalidImageError, "formato"):
+            decode_visual_evidence(
+                {
+                    "purpose": "confirmar una mesa",
+                    "image_base64": base64.b64encode(jpeg).decode("ascii"),
+                }
+            )
+
     def test_clock_reader_sends_image_and_schema(self):
         payload = {
             "readable": True,
@@ -292,6 +460,10 @@ class IntelligenceServiceTests(unittest.TestCase):
             "json_schema",
         )
         image_url = request["messages"][1]["content"][1]["image_url"]["url"]
+        self.assertEqual(
+            request["messages"][1]["content"][1]["image_url"]["detail"],
+            "high",
+        )
         encoded = image_url.split(",", 1)[1]
         self.assertTrue(base64.b64decode(encoded).startswith(b"\xff\xd8"))
 

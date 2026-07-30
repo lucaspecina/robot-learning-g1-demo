@@ -26,6 +26,10 @@ from perception_core import (  # noqa: E402
     merge_source_detections,
     padded_box,
 )
+from visual_evidence import (  # noqa: E402
+    VISUAL_EVIDENCE_TOPIC,
+    image_ref,
+)
 
 import rclpy  # noqa: E402
 from rclpy.node import Node  # noqa: E402
@@ -56,6 +60,11 @@ class DetectionAdapter(Node):
         self.clock_crop_pub = self.create_publisher(
             CompressedImage,
             "/g1/clock_crop/compressed",
+            2,
+        )
+        self.evidence_pub = self.create_publisher(
+            CompressedImage,
+            VISUAL_EVIDENCE_TOPIC,
             2,
         )
         self.create_subscription(
@@ -107,6 +116,7 @@ class DetectionAdapter(Node):
             return
         source_header, rgb = image_entry
         image_height, image_width = rgb.shape[:2]
+        frame_reference = image_ref(VISUAL_EVIDENCE_TOPIC, source_header)
         output = {}
         for detection in msg.detections:
             if not detection.results:
@@ -129,7 +139,7 @@ class DetectionAdapter(Node):
             name = CLASS_NAMES[class_name]
             if class_name in TABLE_CLASS_NAMES:
                 name = classify_table_color(rgb, box)
-            output[name] = legacy_detection(
+            compact = legacy_detection(
                 class_name,
                 best.score,
                 box,
@@ -137,8 +147,11 @@ class DetectionAdapter(Node):
                 image_height,
                 source=source,
             )
+            compact["frame_ref"] = frame_reference
+            output[name] = compact
             if class_name == "clock":
                 self.publish_clock_crop(source_header, rgb, box)
+        self.publish_visual_evidence(source_header, rgb)
         now = time.monotonic()
         self.source_outputs[source] = (now, output)
         merged = merge_source_detections(self.source_outputs, now)
@@ -156,6 +169,16 @@ class DetectionAdapter(Node):
         message.format = "jpeg"
         message.data = buffer.getvalue()
         self.clock_crop_pub.publish(message)
+
+    def publish_visual_evidence(self, header, rgb: np.ndarray):
+        """Publica el cuadro enlazable; sólo se envía fuera si un paso lo usa."""
+        buffer = io.BytesIO()
+        PILImage.fromarray(rgb).save(buffer, format="JPEG", quality=86)
+        message = CompressedImage()
+        message.header = header
+        message.format = "jpeg"
+        message.data = buffer.getvalue()
+        self.evidence_pub.publish(message)
 
 
 def main():

@@ -7,6 +7,8 @@ robot y conserva, por separado, tres tipos de evidencia:
   recibe:  /g1/mission                    orden original en castellano
            /g1/detections                 objetos vistos por la cámara
            /g1/clock_crop/compressed      recorte exacto del reloj
+           /g1/perception/evidence/compressed
+                                          cuadro visual enlazado por fecha
            /g1/odom                       ubicación medida del cuerpo
            /g1/mobility/status            confirmación de espera segura
            /g1/arm_status                 medición real de los brazos
@@ -17,6 +19,7 @@ robot y conserva, por separado, tres tipos de evidencia:
 
   publica: /g1/arm_pose                   postura pedida a los brazos
            /g1/perception/search_request  categoría visual acotada
+           /g1/model_input/compressed      JPEG exacto enviado a un modelo
            /g1/mission_status             relato humano, sólo para el historial
            /g1/mission_state              estado estructurado de cada paso
            /g1/model_events               salida literal de LLM/VLM y validación
@@ -32,6 +35,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 
@@ -69,6 +73,14 @@ from skill_catalog import (
     SKILL_CATALOG,
     skill_catalog_for_model,
 )
+from visual_evidence import (
+    CLOCK_CROP_TOPIC,
+    MODEL_INPUT_TOPIC,
+    VISUAL_EVIDENCE_TOPIC,
+    image_ref,
+    image_ref_key,
+    is_complete_jpeg,
+)
 
 
 STATE_QOS = QoSProfile(
@@ -98,6 +110,10 @@ ARM_POSES = {
 }
 MAX_MISSION_REVIEWS = 20
 MAX_SAME_STEP_RETRIES = 1
+VISUAL_EVIDENCE_CACHE_SIZE = 24
+# Grounding DINO puede tardar cerca de un minuto. La fecha exacta evita
+# confundir cuadros aunque la memoria deba sobrevivir durante esa inferencia.
+VISUAL_EVIDENCE_MAX_AGE_S = 90.0
 
 def succeeded(message: str, measurements: dict = None) -> dict:
     outcome = {"state": "succeeded", "message": message}
@@ -113,8 +129,17 @@ def failed(message: str, measurements: dict = None) -> dict:
     return outcome
 
 
-def blocked(message: str) -> dict:
-    return {"state": "blocked", "message": message}
+def blocked(
+    message: str,
+    measurements: dict = None,
+    blocker: dict = None,
+) -> dict:
+    outcome = {"state": "blocked", "message": message}
+    if measurements:
+        outcome["measurements"] = measurements
+    if blocker:
+        outcome["blocker"] = blocker
+    return outcome
 
 
 class Agent(Node):
@@ -130,6 +155,9 @@ class Agent(Node):
         self.clock_crop = None
         self.clock_crop_ref = None
         self.clock_crop_received_at = None
+        self.visual_evidence = OrderedDict()
+        self.visual_evidence_lock = threading.Lock()
+        self.current_review_evidence = None
         self.mission_context = {}
         self.intelligence = IntelligenceClient()
 
@@ -159,6 +187,11 @@ class Agent(Node):
             "/g1/model_events",
             MODEL_EVENT_QOS,
         )
+        self.model_input_pub = self.create_publisher(
+            CompressedImage,
+            MODEL_INPUT_TOPIC,
+            2,
+        )
         self.mission_tracker = MissionTracker(
             publisher=self.publish_mission_state,
         )
@@ -172,9 +205,15 @@ class Agent(Node):
         )
         self.create_subscription(
             CompressedImage,
-            "/g1/clock_crop/compressed",
+            CLOCK_CROP_TOPIC,
             self.on_clock_crop,
             2,
+        )
+        self.create_subscription(
+            CompressedImage,
+            VISUAL_EVIDENCE_TOPIC,
+            self.on_visual_evidence,
+            qos_profile_sensor_data,
         )
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(
@@ -222,13 +261,26 @@ class Agent(Node):
             pass
 
     def on_clock_crop(self, message: CompressedImage):
-        self.clock_crop = bytes(message.data)
-        self.clock_crop_ref = {
-            "topic": "/g1/clock_crop/compressed",
-            "sec": int(message.header.stamp.sec),
-            "nanosec": int(message.header.stamp.nanosec),
-        }
+        data = bytes(message.data)
+        if not is_complete_jpeg(data):
+            return
+        self.clock_crop = data
+        self.clock_crop_ref = image_ref(CLOCK_CROP_TOPIC, message.header)
         self.clock_crop_received_at = time.monotonic()
+
+    def on_visual_evidence(self, message: CompressedImage):
+        data = bytes(message.data)
+        if not is_complete_jpeg(data):
+            return
+        reference = image_ref(VISUAL_EVIDENCE_TOPIC, message.header)
+        with self.visual_evidence_lock:
+            self.visual_evidence[image_ref_key(reference)] = {
+                "image": data,
+                "input_ref": reference,
+                "received_at": time.monotonic(),
+            }
+            while len(self.visual_evidence) > VISUAL_EVIDENCE_CACHE_SIZE:
+                self.visual_evidence.popitem(last=False)
 
     def on_odom(self, message: Odometry):
         position = message.pose.pose.position
@@ -266,6 +318,10 @@ class Agent(Node):
             pass
 
     def on_table_detections(self, message: Detection3DArray):
+        frame_reference = image_ref(
+            VISUAL_EVIDENCE_TOPIC,
+            message.header,
+        )
         for detection in message.detections:
             parts = detection.id.split(":")
             if len(parts) < 3 or parts[0] != "grounding_dino":
@@ -282,6 +338,7 @@ class Agent(Node):
                     "x": float(point.x),
                     "y": float(point.y),
                     "z": float(point.z),
+                    "frame_ref": frame_reference,
                 }
             )
 
@@ -479,6 +536,7 @@ class Agent(Node):
         while pending:
             step = pending.pop(0)
             argument = self.resolve_argument(step.get("argument"))
+            self.current_review_evidence = None
             self.mission_tracker.start_step(step["id"], argument)
             self.report(
                 f"ejecutando: {step['label']}"
@@ -676,22 +734,36 @@ class Agent(Node):
             "pending_steps": deepcopy(pending),
             "review_count": review_count,
         }
+        visual_evidence = self.current_review_evidence
+        model_input_ref = None
+        if visual_evidence is not None:
+            model_input_ref = self.publish_model_input(visual_evidence)
         summary = (
             f"resultado medido de {step['id']} y "
             f"{len(pending)} pasos pendientes"
         )
+        if visual_evidence is not None:
+            summary += f"; imagen: {visual_evidence['purpose']}"
         self.publish_model_event(
             build_model_event(
                 event_id=event_id,
                 task="review_step",
                 state="running",
                 input_summary=summary,
+                input_ref=(
+                    model_input_ref
+                    if visual_evidence is not None
+                    else None
+                ),
                 input_payload=local_input,
                 created_at=started_wall,
             )
         )
         try:
-            review = self.intelligence.review_step(**local_input)
+            review = self.intelligence.review_step(
+                **local_input,
+                visual_evidence=visual_evidence,
+            )
         except RemoteIntelligenceError as error:
             self.publish_model_event(
                 build_model_event(
@@ -700,6 +772,11 @@ class Agent(Node):
                     task="review_step",
                     state="failed",
                     input_summary=summary,
+                    input_ref=(
+                        model_input_ref
+                        if visual_evidence is not None
+                        else None
+                    ),
                     input_payload=error.input_payload or local_input,
                     raw_output=error.raw_output,
                     duration_s=round(
@@ -727,6 +804,11 @@ class Agent(Node):
                     task="review_step",
                     state="failed",
                     input_summary=summary,
+                    input_ref=(
+                        model_input_ref
+                        if visual_evidence is not None
+                        else None
+                    ),
                     input_payload=review.get("model_input") or local_input,
                     raw_output=review.get("raw_output"),
                     duration_s=round(
@@ -750,6 +832,11 @@ class Agent(Node):
                 task="review_step",
                 state="succeeded",
                 input_summary=summary,
+                input_ref=(
+                    model_input_ref
+                    if visual_evidence is not None
+                    else None
+                ),
                 input_payload=review.get("model_input") or local_input,
                 model=review.get("model"),
                 raw_output=review["raw_output"],
@@ -951,12 +1038,31 @@ class Agent(Node):
         detection_name = DETECTION_NAMES.get(target)
         if detection_name is None:
             return failed(f"objeto visual desconocido: {target}")
-        detection = self.wait_for_detection(detection_name, timeout_s=12.0)
+        previous = self.detections.get(detection_name, {}).get("frame_ref")
+        detection = self.wait_for_detection(
+            detection_name,
+            timeout_s=12.0,
+            after_reference=previous,
+        )
         if detection is None:
             return failed(f"la cámara no confirmó {detection_name}")
+        reference = detection.get("frame_ref")
+        if reference is None or not self.set_review_evidence(
+            f"cuadro exacto que confirmó {detection_name}",
+            reference,
+            detail="high" if target == "clock" else "low",
+        ):
+            return failed(
+                f"se detectó {detection_name}, pero no se conservó su cuadro"
+            )
         return succeeded(
             f"confirmó {detection_name} con confianza "
-            f"{detection.get('confidence', '?')}"
+            f"{detection.get('confidence', '?')}",
+            {
+                key: detection[key]
+                for key in ("confidence", "cx", "area", "source")
+                if key in detection
+            },
         )
 
     def read_clock(self) -> dict:
@@ -970,13 +1076,22 @@ class Agent(Node):
         event_id = str(uuid.uuid4())
         started_wall = time.time()
         started_monotonic = time.monotonic()
+        self.current_review_evidence = {
+            "purpose": "recorte exacto usado para leer el reloj",
+            "image": self.clock_crop,
+            "input_ref": self.clock_crop_ref,
+            "detail": "high",
+        }
+        model_input_ref = self.publish_model_input(
+            self.current_review_evidence
+        )
         self.publish_model_event(
             build_model_event(
                 event_id=event_id,
                 task="read_clock",
                 state="running",
                 input_summary="recorte JPEG exacto del reloj detectado",
-                input_ref=self.clock_crop_ref,
+                input_ref=model_input_ref,
                 created_at=started_wall,
             )
         )
@@ -993,7 +1108,7 @@ class Agent(Node):
                     task="read_clock",
                     state="failed",
                     input_summary="recorte JPEG exacto del reloj detectado",
-                    input_ref=self.clock_crop_ref,
+                    input_ref=model_input_ref,
                     raw_output=error.raw_output,
                     duration_s=round(
                         time.monotonic() - started_monotonic,
@@ -1016,7 +1131,7 @@ class Agent(Node):
                 task="read_clock",
                 state="succeeded",
                 input_summary="recorte JPEG exacto del reloj detectado",
-                input_ref=self.clock_crop_ref,
+                input_ref=model_input_ref,
                 model=reading.get("model"),
                 raw_output=reading["raw_output"],
                 validated_output=validated,
@@ -1067,6 +1182,12 @@ class Agent(Node):
             if status.get("request_id") != request_id:
                 continue
             if status.get("state") in ("failed", "rejected"):
+                reference = status.get("frame_ref")
+                if reference is not None:
+                    self.set_review_evidence(
+                        f"cuadro usado en la búsqueda fallida de {target}",
+                        reference,
+                    )
                 return failed(
                     "la búsqueda visual falló: "
                     + str(status.get("error", status))
@@ -1089,13 +1210,37 @@ class Agent(Node):
                     key=lambda candidate: candidate["confidence"],
                 )
                 self.mission_context["table_point"] = best
+                if not self.set_review_evidence(
+                    f"cuadro exacto que ubicó {target}",
+                    best["frame_ref"],
+                ):
+                    return failed(
+                        "la mesa fue ubicada, pero no se conservó el cuadro "
+                        "exacto que originó la medición"
+                    )
                 return succeeded(
-                    f"ubicó {target} en ({best['x']:.2f}, {best['y']:.2f})"
+                    f"ubicó {target} en ({best['x']:.2f}, {best['y']:.2f})",
+                    {
+                        "confidence": round(best["confidence"], 3),
+                        "x_m": round(best["x"], 3),
+                        "y_m": round(best["y"], 3),
+                        "z_m": round(best["z"], 3),
+                    },
                 )
             time.sleep(0.1)
+        reference = (self.search_status or {}).get("frame_ref")
+        if reference is not None:
+            self.set_review_evidence(
+                f"cuadro donde no se encontró {target}",
+                reference,
+            )
         return blocked(
             "la mesa no apareció en la vista actual; falta el barrido visual "
-            "activo de la habitación"
+            "activo de la habitación",
+            blocker={
+                "type": "missing_skill",
+                "skill": "scan_for_table",
+            },
         )
 
     def set_arm_pose(self, target: str) -> dict:
@@ -1119,6 +1264,58 @@ class Agent(Node):
         return failed(f"los brazos no confirmaron la postura {ros_pose}")
 
     # ---------- esperas ----------
+
+    def set_review_evidence(
+        self,
+        purpose: str,
+        reference: dict,
+        detail: str = "low",
+        timeout_s: float = 1.5,
+    ) -> bool:
+        """Enlaza la revisión sólo si el cuadro exacto sigue en memoria."""
+        try:
+            key = image_ref_key(reference)
+        except ValueError:
+            return False
+        deadline = time.monotonic() + timeout_s
+        entry = None
+        while time.monotonic() < deadline:
+            with self.visual_evidence_lock:
+                entry = self.visual_evidence.get(key)
+            if entry is not None:
+                break
+            time.sleep(0.05)
+        if entry is None:
+            return False
+        age_s = time.monotonic() - entry["received_at"]
+        if age_s < 0 or age_s > VISUAL_EVIDENCE_MAX_AGE_S:
+            return False
+        self.current_review_evidence = {
+            "purpose": purpose,
+            "image": entry["image"],
+            "input_ref": entry["input_ref"],
+            "detail": detail,
+        }
+        return True
+
+    def publish_model_input(self, evidence: dict) -> dict:
+        """Publica sólo el JPEG que realmente cruza hacia un modelo."""
+        source_ref = evidence["input_ref"]
+        message = CompressedImage()
+        message.header.stamp.sec = int(source_ref["sec"])
+        message.header.stamp.nanosec = int(source_ref["nanosec"])
+        message.format = "jpeg"
+        message.data = evidence["image"]
+        self.model_input_pub.publish(message)
+        return {
+            "topic": MODEL_INPUT_TOPIC,
+            "source_topic": source_ref["topic"],
+            "sec": int(source_ref["sec"]),
+            "nanosec": int(source_ref["nanosec"]),
+            "purpose": evidence["purpose"],
+            "detail": evidence["detail"],
+            "bytes": len(evidence["image"]),
+        }
 
     @staticmethod
     def duration_seconds(duration) -> float:
@@ -1154,12 +1351,23 @@ class Agent(Node):
             time.sleep(0.05)
         return self.mobility_owner == "stand"
 
-    def wait_for_detection(self, target: str, timeout_s: float):
+    def wait_for_detection(
+        self,
+        target: str,
+        timeout_s: float,
+        after_reference: dict = None,
+    ):
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
             time.sleep(0.2)
-            if target in self.detections:
-                return self.detections[target]
+            detection = self.detections.get(target)
+            if detection is None:
+                continue
+            if after_reference is None:
+                return detection
+            reference = detection.get("frame_ref")
+            if reference != after_reference:
+                return detection
         return None
 
 

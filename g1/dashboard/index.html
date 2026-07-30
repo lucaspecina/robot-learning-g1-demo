@@ -613,51 +613,97 @@
     }
 
     function createImageFeed(imageId,path,delay,placeholderId){
-      const image = document.getElementById(imageId);
+      let image = document.getElementById(imageId);
       const placeholder = document.getElementById(placeholderId);
       let available = false;
       let loading = false;
       let timer = null;
-      let lastAttempt = 0;
+      let requestId = 0;
+      let currentObjectUrl = null;
 
-      const load = () => {
-        timer = null;
-        if(!available || loading) return;
-        loading = true;
-        lastAttempt = Date.now();
-        image.src = `${path}?${Date.now()}`;
-      };
-      image.onload = () => {
-        loading = false;
-        if(!available) return;
-        image.hidden = false;
-        placeholder.hidden = true;
-        timer = setTimeout(load,delay);
-      };
-      image.onerror = () => {
-        loading = false;
+      const releaseImage = () => {
+        if(currentObjectUrl){
+          URL.revokeObjectURL(currentObjectUrl);
+          currentObjectUrl = null;
+        }
         image.hidden = true;
         image.removeAttribute('src');
         placeholder.hidden = false;
       };
+      const scheduleNext = () => {
+        if(available && !timer){
+          timer = setTimeout(load,delay);
+        }
+      };
+      const load = async () => {
+        timer = null;
+        if(!available || loading) return;
+        loading = true;
+        const thisRequestId = ++requestId;
+        let candidateObjectUrl = null;
+        try{
+          const response = await fetch(
+            `${path}?${Date.now()}`,
+            {cache:'no-store'}
+          );
+          const mediaType = (
+            response.headers.get('content-type') || ''
+          ).split(';')[0];
+          if(!response.ok || mediaType !== 'image/jpeg'){
+            throw new Error('La imagen todavía no está disponible.');
+          }
+          const blob = await response.blob();
+          if(!blob.size){
+            throw new Error('La imagen recibida está vacía.');
+          }
+          candidateObjectUrl = URL.createObjectURL(blob);
+          const candidate = new Image();
+          candidate.id = imageId;
+          candidate.alt = image.alt;
+          candidate.decoding = 'async';
+          candidate.src = candidateObjectUrl;
+
+          // Decodificar fuera de pantalla evita que el navegador muestre el
+          // ícono roto durante los intervalos normales sin cámara o modelo.
+          await candidate.decode();
+          if(!available || thisRequestId !== requestId) return;
+
+          const previousObjectUrl = currentObjectUrl;
+          image.replaceWith(candidate);
+          image = candidate;
+          currentObjectUrl = candidateObjectUrl;
+          candidateObjectUrl = null;
+          image.hidden = false;
+          placeholder.hidden = true;
+          if(previousObjectUrl){
+            URL.revokeObjectURL(previousObjectUrl);
+          }
+        }catch(_error){
+          if(!currentObjectUrl){
+            image.hidden = true;
+            placeholder.hidden = false;
+          }
+        }finally{
+          if(candidateObjectUrl){
+            URL.revokeObjectURL(candidateObjectUrl);
+          }
+          loading = false;
+          scheduleNext();
+        }
+      };
       return {
         setAvailable(nextAvailable){
-          available = Boolean(nextAvailable);
-          if(!available){
+          const shouldBeAvailable = Boolean(nextAvailable);
+          if(!shouldBeAvailable){
+            available = false;
+            requestId += 1;
             if(timer) clearTimeout(timer);
             timer = null;
-            loading = false;
-            image.hidden = true;
-            image.removeAttribute('src');
-            placeholder.hidden = false;
+            releaseImage();
             return;
           }
-          if(
-            !loading &&
-            !timer &&
-            (image.hidden || !image.getAttribute('src')) &&
-            Date.now() - lastAttempt > 1000
-          ){
+          available = true;
+          if(!loading && !timer){
             load();
           }
         }

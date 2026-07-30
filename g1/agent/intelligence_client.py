@@ -8,6 +8,11 @@ import urllib.error
 import urllib.request
 import uuid
 
+try:
+    from visual_evidence import validate_jpeg
+except ImportError:
+    from g1.visual_evidence import validate_jpeg
+
 
 DEFAULT_SERVER_URL = "http://172.30.0.20:8000"
 DEFAULT_TIMEOUT_S = 15.0
@@ -23,6 +28,46 @@ REVIEW_DECISIONS = {
     "ask_human",
     "stop",
 }
+
+
+def serialize_visual_evidence(evidence: dict) -> dict:
+    """Codifica una sola imagen y evita aceptar evidencia ambigua."""
+    if not isinstance(evidence, dict):
+        raise RemoteIntelligenceError("la evidencia visual no es un objeto")
+    if set(evidence) != {"purpose", "image", "input_ref", "detail"}:
+        raise RemoteIntelligenceError(
+            "la evidencia visual no tiene el contrato esperado"
+        )
+    purpose = evidence["purpose"]
+    image = evidence["image"]
+    detail = evidence["detail"]
+    if (
+        not isinstance(purpose, str)
+        or not purpose.strip()
+        or len(purpose) > 240
+    ):
+        raise RemoteIntelligenceError(
+            "la evidencia visual no explica para qué se usa"
+        )
+    try:
+        validate_jpeg(image)
+    except ValueError as error:
+        raise RemoteIntelligenceError(
+            str(error)
+        ) from error
+    if not isinstance(evidence["input_ref"], dict):
+        raise RemoteIntelligenceError(
+            "la evidencia visual no tiene referencia local"
+        )
+    if detail not in {"low", "high", "auto"}:
+        raise RemoteIntelligenceError(
+            "la evidencia visual tiene un detalle inválido"
+        )
+    return {
+        "purpose": purpose.strip(),
+        "image_base64": base64.b64encode(image).decode("ascii"),
+        "detail": detail,
+    }
 
 
 class RemoteIntelligenceError(RuntimeError):
@@ -70,7 +115,17 @@ def validate_reading(reading: dict) -> dict:
     return reading
 
 
-def validate_review(review: dict, outcome_state: str) -> dict:
+def validate_review(
+    review: dict,
+    outcome,
+    skill_catalog: list[dict] = None,
+) -> dict:
+    outcome_state = (
+        outcome.get("state")
+        if isinstance(outcome, dict)
+        else outcome
+    )
+    blocker = outcome.get("blocker") if isinstance(outcome, dict) else None
     required = {"decision", "reason", "revised_steps", "question"}
     if not isinstance(review, dict) or set(review) != required:
         raise RemoteIntelligenceError(
@@ -113,6 +168,18 @@ def validate_review(review: dict, outcome_state: str) -> dict:
         raise RemoteIntelligenceError(
             "el modelo agregó una pregunta fuera de ask_human"
         )
+    if isinstance(blocker, dict) and blocker.get("type") == "missing_skill":
+        missing_skill = blocker.get("skill")
+        available = any(
+            item.get("name") == missing_skill
+            and item.get("availability") == "ready"
+            for item in (skill_catalog or [])
+            if isinstance(item, dict)
+        )
+        if not available and decision not in {"ask_human", "stop"}:
+            raise RemoteIntelligenceError(
+                "el modelo intentó continuar sin la skill faltante"
+            )
     return review
 
 
@@ -278,6 +345,7 @@ class IntelligenceClient:
         outcome: dict,
         pending_steps: list[dict],
         review_count: int,
+        visual_evidence: dict = None,
     ) -> dict:
         timeout_s = float(
             os.environ.get(
@@ -285,18 +353,23 @@ class IntelligenceClient:
                 DEFAULT_REVIEW_TIMEOUT_S,
             )
         )
+        request_payload = {
+            "command": command,
+            "skill_catalog": skill_catalog,
+            "world_facts": world_facts,
+            "completed_steps": completed_steps,
+            "last_step": last_step,
+            "outcome": outcome,
+            "pending_steps": pending_steps,
+            "review_count": review_count,
+        }
+        if visual_evidence is not None:
+            request_payload["visual_evidence"] = (
+                serialize_visual_evidence(visual_evidence)
+            )
         payload, request_id, _response_text = self._post(
             "/v1/review-step",
-            {
-                "command": command,
-                "skill_catalog": skill_catalog,
-                "world_facts": world_facts,
-                "completed_steps": completed_steps,
-                "last_step": last_step,
-                "outcome": outcome,
-                "pending_steps": pending_steps,
-                "review_count": review_count,
-            },
+            request_payload,
             timeout_s,
         )
         review = payload.get("review")
@@ -312,7 +385,11 @@ class IntelligenceClient:
                 request_id=request_id,
             )
         try:
-            validated = validate_review(review, outcome.get("state"))
+            validated = validate_review(
+                review,
+                outcome,
+                skill_catalog,
+            )
         except RemoteIntelligenceError:
             self._record_failure()
             raise

@@ -1,3 +1,4 @@
+import base64
 import json
 import unittest
 import urllib.error
@@ -271,6 +272,91 @@ class IntelligenceClientTests(unittest.TestCase):
         self.assertEqual(review["decision"], "continue")
         self.assertEqual(review["model"], "planner-test")
 
+    def test_attaches_one_declared_visual_evidence_to_review(self):
+        jpeg = b"\xff\xd8" + b"visual" * 20 + b"\xff\xd9"
+
+        def opener(request, timeout):
+            sent = json.loads(request.data)
+            evidence = sent["visual_evidence"]
+            self.assertEqual(evidence["purpose"], "confirmar el reloj")
+            self.assertEqual(evidence["detail"], "high")
+            self.assertEqual(
+                base64.b64decode(evidence["image_base64"]),
+                jpeg,
+            )
+            self.assertNotIn("input_ref", evidence)
+            request_id = request.headers["X-request-id"]
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "review": {
+                        "decision": "continue",
+                        "reason": "La imagen coincide.",
+                        "revised_steps": [],
+                        "question": None,
+                    },
+                    "raw_output": '{"decision":"continue"}',
+                    "model_input": {"messages": []},
+                }
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=opener,
+        )
+        review = client.review_step(
+            command="Mirá el reloj",
+            skill_catalog=[],
+            world_facts=["clock_confirmed"],
+            completed_steps=[],
+            last_step={"id": "look_at_clock"},
+            outcome={"state": "succeeded", "message": "confirmado"},
+            pending_steps=[],
+            review_count=1,
+            visual_evidence={
+                "purpose": "confirmar el reloj",
+                "image": jpeg,
+                "input_ref": {
+                    "topic": "/g1/perception/evidence/compressed",
+                    "sec": 1,
+                    "nanosec": 2,
+                },
+                "detail": "high",
+            },
+        )
+
+        self.assertEqual(review["decision"], "continue")
+
+    def test_rejects_truncated_visual_evidence_before_network(self):
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=lambda *_args, **_kwargs: self.fail(
+                "no debía abrir la red"
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            RemoteIntelligenceError,
+            "JPEG completo",
+        ):
+            client.review_step(
+                command="Mirá",
+                skill_catalog=[],
+                world_facts=[],
+                completed_steps=[],
+                last_step={"id": "look"},
+                outcome={"state": "succeeded", "message": "ok"},
+                pending_steps=[],
+                review_count=1,
+                visual_evidence={
+                    "purpose": "cuadro",
+                    "image": b"\xff\xd8" + b"x" * 120,
+                    "input_ref": {"sec": 1, "nanosec": 2},
+                    "detail": "low",
+                },
+            )
+
     def test_rejects_continue_after_failed_step(self):
         with self.assertRaises(RemoteIntelligenceError):
             validate_review(
@@ -281,6 +367,29 @@ class IntelligenceClientTests(unittest.TestCase):
                     "question": None,
                 },
                 "failed",
+            )
+
+    def test_rejects_repair_without_the_missing_skill(self):
+        with self.assertRaisesRegex(
+            RemoteIntelligenceError,
+            "skill faltante",
+        ):
+            validate_review(
+                {
+                    "decision": "retry",
+                    "reason": "Intentar nuevamente.",
+                    "revised_steps": [],
+                    "question": None,
+                },
+                {
+                    "state": "blocked",
+                    "message": "falta barrer la habitación",
+                    "blocker": {
+                        "type": "missing_skill",
+                        "skill": "scan_for_table",
+                    },
+                },
+                [],
             )
 
 

@@ -96,6 +96,8 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/perception/search_status` | String (JSON) | búsqueda puntual |
 | `/g1/detections` | String (JSON) | el adaptador de la demo |
 | `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
+| `/g1/perception/evidence/compressed` | CompressedImage | cuadro exacto enlazado a una detección |
+| `/g1/model_input/compressed` | CompressedImage | agente; sólo la imagen realmente enviada al modelo |
 | `/g1/arm_pose` | String | el agente |
 | `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
@@ -228,20 +230,17 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Adjuntar imágenes puntuales a la revisión adaptable** para que
-   `look_at`, `read_clock` y `search_table` entreguen evidencia visual exacta.
-   Diseño y criterios en [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
-2. **Agregar el barrido visual activo** para buscar la mesa correcta sin
+1. **Agregar el barrido visual activo** para buscar la mesa correcta sin
    pasarle una coordenada.
-3. **Convertir la superficie encontrada en una pose segura de aproximación.**
-4. **Guardar `home` y regresar** sin carga dentro de la misión completa.
-5. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
+2. **Convertir la superficie encontrada en una pose segura de aproximación.**
+3. **Guardar `home` y regresar** sin carga dentro de la misión completa.
+4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
-6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
+5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
    verificador; hasta entonces la profundidad de cámara mide objetos, no crea
    una falsa localización perfecta.
-7. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+6. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-8. **El agarre** con un VLA entrenado por nosotros.
-9. **Voz** para reemplazar la publicación manual de texto; el planificador
+7. **El agarre** con un VLA entrenado por nosotros.
+8. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

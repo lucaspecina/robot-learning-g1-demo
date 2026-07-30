@@ -26,6 +26,12 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 from scene_layout import DASHBOARD_SCENE  # noqa: E402
+from visual_evidence import (  # noqa: E402
+    MODEL_INPUT_TOPIC,
+    image_ref,
+    image_ref_key,
+    is_complete_jpeg,
+)
 
 import numpy as np
 import rclpy
@@ -189,7 +195,7 @@ class DashboardNode(Node):
         )
         self.create_subscription(
             CompressedImage,
-            "/g1/clock_crop/compressed",
+            MODEL_INPUT_TOPIC,
             self.on_model_input,
             qos_profile_sensor_data,
         )
@@ -279,9 +285,10 @@ class DashboardNode(Node):
 
     def on_model_input(self, message: CompressedImage):
         data = bytes(message.data)
-        if not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
+        if not is_complete_jpeg(data):
             return
-        key = (message.header.stamp.sec, message.header.stamp.nanosec)
+        reference = image_ref(MODEL_INPUT_TOPIC, message.header)
+        key = image_ref_key(reference)
         self.model_input_cache[key] = data
         while len(self.model_input_cache) > MODEL_INPUT_MAX:
             self.model_input_cache.popitem(last=False)
@@ -300,7 +307,13 @@ class DashboardNode(Node):
                 state["model_input_time"] = 0.0
                 state["model_input_event_id"] = None
                 return
-            key = (input_ref.get("sec"), input_ref.get("nanosec"))
+            try:
+                key = image_ref_key(input_ref)
+            except ValueError:
+                state["model_input_jpeg"] = None
+                state["model_input_time"] = 0.0
+                state["model_input_event_id"] = None
+                return
             jpeg = self.model_input_cache.get(key)
             if jpeg is None:
                 state["model_input_jpeg"] = None

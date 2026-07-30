@@ -18,12 +18,13 @@ from agent.intelligence_client import (  # noqa: E402
     RemoteIntelligenceError,
 )
 from open_vocabulary_core import parse_search_request  # noqa: E402
+from visual_evidence import VISUAL_EVIDENCE_TOPIC, image_ref  # noqa: E402
 
 import rclpy  # noqa: E402
 from rclpy.executors import ExternalShutdownException  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.qos import qos_profile_sensor_data  # noqa: E402
-from sensor_msgs.msg import Image  # noqa: E402
+from sensor_msgs.msg import CompressedImage, Image  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from vision_msgs.msg import (  # noqa: E402
     Detection2D,
@@ -48,6 +49,11 @@ class OpenVocabularyDetector(Node):
             Detection2DArray,
             "/g1/open_vocabulary_detections",
             qos_profile_sensor_data,
+        )
+        self.evidence_pub = self.create_publisher(
+            CompressedImage,
+            VISUAL_EVIDENCE_TOPIC,
+            2,
         )
         self.status_pub = self.create_publisher(
             String,
@@ -136,6 +142,7 @@ class OpenVocabularyDetector(Node):
 
     def run_search(self, request_id, target, labels):
         started_at = time.monotonic()
+        frame_reference = None
         self.publish_status(
             "running",
             request_id=request_id,
@@ -146,7 +153,14 @@ class OpenVocabularyDetector(Node):
             header, rgb = self.wait_for_fresh_image()
             buffer = io.BytesIO()
             PILImage.fromarray(rgb).save(buffer, format="JPEG", quality=90)
-            result = self.client.detect_objects(buffer.getvalue(), labels)
+            jpeg = buffer.getvalue()
+            frame_reference = image_ref(VISUAL_EVIDENCE_TOPIC, header)
+            evidence = CompressedImage()
+            evidence.header = header
+            evidence.format = "jpeg"
+            evidence.data = jpeg
+            self.evidence_pub.publish(evidence)
+            result = self.client.detect_objects(jpeg, labels)
             if (
                 result["image_width"] != rgb.shape[1]
                 or result["image_height"] != rgb.shape[0]
@@ -166,6 +180,7 @@ class OpenVocabularyDetector(Node):
                 "complete",
                 request_id=request_id,
                 target=target,
+                frame_ref=frame_reference,
                 count=len(message.detections),
                 elapsed_s=round(time.monotonic() - started_at, 3),
                 inference_s=result.get("inference_s"),
@@ -173,13 +188,15 @@ class OpenVocabularyDetector(Node):
                 model=result.get("model"),
             )
         except (RemoteIntelligenceError, OSError, ValueError) as error:
-            self.publish_status(
-                "failed",
-                request_id=request_id,
-                target=target,
-                elapsed_s=round(time.monotonic() - started_at, 3),
-                error=str(error),
-            )
+            fields = {
+                "request_id": request_id,
+                "target": target,
+                "elapsed_s": round(time.monotonic() - started_at, 3),
+                "error": str(error),
+            }
+            if frame_reference is not None:
+                fields["frame_ref"] = frame_reference
+            self.publish_status("failed", **fields)
         finally:
             self.busy = False
 

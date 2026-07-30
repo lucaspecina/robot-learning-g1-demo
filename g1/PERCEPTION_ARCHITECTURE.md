@@ -29,6 +29,13 @@ cámara frontal
                                 |
                                 v
                     modelo visual remoto, al leer la hora
+
+      +--> cuadro enlazado en `/g1/perception/evidence/compressed`
+                                |
+                 sólo si una revisión visual lo necesita
+                                v
+                    `/g1/model_input/compressed`
+                    + pedido remoto de revisión
 ```
 
 RT-DETR es un modelo liviano que encuentra objetos conocidos y devuelve un
@@ -57,6 +64,9 @@ No se graba video infinito:
   instante exacto, rechaza la medición.
 - El agente conserva sólo el último recorte del reloj y lo considera vencido
   después de 10 segundos.
+- El agente conserva hasta 24 cuadros de evidencia en RAM. Cuando una
+  revisión realmente necesita uno, exige la misma fecha del sensor, lo envía
+  una sola vez y republica ese JPEG exacto para el tablero.
 - El tablero usa otro historial acotado de 180 cuadros para dibujar las cajas
   sobre el cuadro correcto. Conserva el último resultado puntual durante un
   minuto para que el operador alcance a inspeccionarlo. No escribe esas
@@ -82,6 +92,11 @@ Esto permite distinguir cuatro casos diferentes: el objeto no entró en la
 cámara, entró pero el detector no lo reconoció, fue reconocido pero la tarea
 no reaccionó, o falló el modelo remoto. También deja visible una quinta falla:
 que el texto del modelo sea correcto pero nuestro validador lo interprete mal.
+
+Las revisiones generales usan detalle bajo para limitar demora y costo. El
+reloj usa detalle alto porque sus dígitos son pequeños; es la recomendación
+oficial para lectura de texto y objetos pequeños. No se envía una imagen al
+revisar navegación, guardado de `home` ni decisiones puramente numéricas.
 
 ## Coincidencia con los flujos oficiales
 

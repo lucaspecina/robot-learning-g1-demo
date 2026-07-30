@@ -47,6 +47,8 @@ Ya funciona:
   el servidor y nuevamente en la Jetson;
 - un único reintento por paso, impuesto localmente aunque el modelo pida más;
 - reemplazo exclusivo de pasos pendientes sin borrar el historial;
+- imágenes puntuales enlazadas por la fecha exacta del sensor para
+  `look_at`, `read_clock` y `search_table`;
 - tablero con plan inicial, última revisión e intercambio literal del modelo.
 
 La prueba real original produjo los 11 pasos correctos en 4,3 segundos. La
@@ -54,14 +56,13 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
-Las 61 pruebas locales de `g1` y las 12 del servicio externo pasan juntas.
+Las 71 pruebas locales de `g1` y las 17 del servicio externo pasan juntas.
 El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
 servidor y mantiene un estado vacío estable.
 
 Todavía no funciona:
 
 - migrar al contrato cancelable las capacidades distintas de navegación;
-- adjuntar una imagen pertinente a la revisión;
 - presentar y responder la pregunta del operador cuando la decisión sea
   `ask_human`;
 - validar visualmente con Lucas el nuevo tablero.
@@ -88,6 +89,19 @@ La imagen estable de ROS 2 Jazzy todavía no incluye los códigos numéricos
 `TIMEOUT` y `UNKNOWN` que aparecen en versiones posteriores de Nav2. Por eso
 se usa el estado estándar `ABORTED` junto con `error_msg`; no se inventaron
 códigos locales incompatibles.
+
+La evidencia visual puntual se verificó también contra el sistema real. La
+revisión posterior a `look_at` recibió el cuadro completo exacto, reconoció el
+reloj y leyó visualmente `09:00`. `read_clock` recibió sólo el recorte,
+devolvió `09:00` y la revisión siguiente continuó el plan. El JPEG enviado se
+republica en `/g1/model_input/compressed` sólo para observación; nunca entra al
+control del cuerpo.
+
+La misma corrida encontró un límite útil: al faltar el barrido visual, el
+modelo intentó sustituirlo por navegación entre puntos conocidos. Era un plan
+formalmente válido pero físicamente inútil. Las fallas ahora pueden declarar
+una `missing_skill`; si esa capacidad no figura como lista, las dos
+validaciones sólo aceptan pedir ayuda o detener la misión.
 
 ## Arquitectura objetivo de este tramo
 
@@ -212,7 +226,8 @@ La Jetson rechaza cualquier revisión que:
    imagen.~~
 5. ~~Validar de nuevo los pasos pendientes y conservar el plan anterior si la
    revisión es inválida.~~
-6. Adjuntar imágenes puntuales a `look_at`, `read_clock` y `search_table`.
+6. ~~Adjuntar imágenes puntuales a `look_at`, `read_clock` y
+   `search_table`.~~
 7. Migrar brazos y demás capacidades listas al mismo contrato.
 8. ~~Mostrar en el tablero plan original, revisión, evidencia, cancelación y
    plan vigente.~~ Falta la aprobación visual de Lucas.
@@ -264,6 +279,8 @@ segura y puede corregir la parte ejecutable de su plan.
 - OpenTelemetry, contenido completo opcional de pedidos y respuestas de
   modelos generativos:
   https://opentelemetry.io/blog/2026/genai-observability/
+- OpenAI, imágenes por URL Base64 y nivel de detalle para OCR:
+  https://developers.openai.com/api/docs/guides/images-vision
 
 ## Qué es oficial y qué es adaptación propia
 
