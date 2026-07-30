@@ -13,6 +13,7 @@ from navigation_core import (
     NavigationGoal,
     NavigationPose,
     ProgressChecker,
+    SpinController,
 )
 
 
@@ -82,6 +83,41 @@ class ProgressCheckerTest(unittest.TestCase):
                 9.0,
             )
         )
+
+
+class SpinControllerTest(unittest.TestCase):
+    def test_keeps_positive_direction_across_angle_wrap(self):
+        controller = SpinController(math.radians(270.0))
+        controller.reset(math.radians(170.0))
+
+        first = controller.step(math.radians(-170.0))
+        second = controller.step(math.radians(-80.0))
+
+        self.assertGreater(first.angular_distance_traveled, 0.0)
+        self.assertAlmostEqual(
+            math.degrees(second.angular_distance_traveled),
+            110.0,
+            places=5,
+        )
+        self.assertGreater(second.angular_z, 0.0)
+
+    def test_respects_negative_requested_direction(self):
+        controller = SpinController(-math.pi / 2.0)
+        controller.reset(0.0)
+
+        command = controller.step(0.0)
+
+        self.assertLess(command.angular_z, 0.0)
+        self.assertFalse(command.goal_reached)
+
+    def test_finishes_inside_biped_tolerance(self):
+        controller = SpinController(math.pi / 2.0)
+        controller.reset(0.0)
+
+        command = controller.step(math.radians(86.0))
+
+        self.assertTrue(command.goal_reached)
+        self.assertEqual(command.angular_z, 0.0)
 
 
 if __name__ == "__main__":

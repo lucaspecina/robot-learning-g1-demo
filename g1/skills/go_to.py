@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Navegación simple detrás del contrato estándar de Nav2.
 
-La misión usa `/g1/navigate_to_pose`, una Action ROS 2 de tipo
-`nav2_msgs/NavigateToPose`. Una Action es una tarea larga con objetivo,
-progreso, resultado y cancelación. Por ahora este nodo calcula movimiento
-directo en una habitación despejada; más adelante Nav2 podrá reemplazarlo sin
-cambiar al agente.
+La misión usa `/g1/navigate_to_pose` y `/g1/spin`, Actions ROS 2 estándar de
+Nav2. Una Action es una tarea larga con objetivo, progreso, resultado y
+cancelación. Por ahora este nodo calcula movimiento directo en una habitación
+despejada; más adelante Nav2 podrá reemplazarlo sin cambiar al agente.
 
 Canales de control:
 
   recibe:  /g1/navigate_to_pose       objetivo cancelable de la misión
+           /g1/spin                   giro relativo cancelable
            /g1/goal                   compatibilidad temporal con pruebas viejas
            /g1/odom                   posición medida
            /g1/mobility/status        dueño actual del movimiento
@@ -21,6 +21,10 @@ Canales de control:
 El nodo nunca publica en `/cmd_vel`: el árbitro sigue siendo el único dueño de
 esa salida. Antes de devolver cualquier éxito, falla o cancelación, publica
 cero y entrega el movimiento a `STAND`.
+
+Esta adaptación conserva las interfaces de Nav2, pero todavía no tiene su
+mapa local para anticipar colisiones durante un giro. Por eso sólo se usa en
+la habitación despejada de la demo; esa garantía llegará con LiDAR + Nav2.
 """
 
 import json
@@ -36,7 +40,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateToPose, Spin
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -49,6 +53,8 @@ from navigation_core import (
     NavigationGoal,
     NavigationPose,
     ProgressChecker,
+    SpinController,
+    normalize_angle,
 )
 
 
@@ -178,8 +184,17 @@ class GoTo(Node):
             cancel_callback=self.handle_cancel,
             callback_group=self.callback_group,
         )
+        self.spin_action_server = ActionServer(
+            self,
+            Spin,
+            "/g1/spin",
+            execute_callback=self.execute_spin_action,
+            goal_callback=self.handle_spin_goal,
+            cancel_callback=self.handle_cancel,
+            callback_group=self.callback_group,
+        )
         self.get_logger().info(
-            "navegación lista en /g1/navigate_to_pose; "
+            "navegación lista en /g1/navigate_to_pose y /g1/spin; "
             "/g1/goal queda sólo para compatibilidad"
         )
 
@@ -263,6 +278,19 @@ class GoTo(Node):
         self.get_logger().info("cancelación de navegación aceptada")
         return CancelResponse.ACCEPT
 
+    def handle_spin_goal(self, request: Spin.Goal):
+        if not math.isfinite(float(request.target_yaw)):
+            self.get_logger().warn("giro rechazado: ángulo inválido")
+            return GoalResponse.REJECT
+        with self.state_lock:
+            if self.goal_reserved or self.navigation_active:
+                self.get_logger().warn(
+                    "giro rechazado: ya existe un movimiento activo"
+                )
+                return GoalResponse.REJECT
+            self.goal_reserved = True
+        return GoalResponse.ACCEPT
+
     def on_legacy_goal(self, message: PoseStamped):
         """Puente transitorio para las herramientas que aún publican un topic."""
         with self.state_lock:
@@ -286,16 +314,80 @@ class GoTo(Node):
             goal_handle=goal_handle,
         )
 
-    def _run_navigation(self, goal_message: PoseStamped, goal_handle):
+    def execute_spin_action(self, goal_handle):
+        deadline = time.monotonic() + ODOM_WAIT_TIMEOUT_S
+        pose = None
+        while rclpy.ok() and time.monotonic() < deadline:
+            with self.state_lock:
+                pose = self.pose
+            if pose is not None:
+                break
+            time.sleep(0.05)
+        if pose is None:
+            with self.state_lock:
+                self.goal_reserved = False
+            result = Spin.Result()
+            result.error_code = Spin.Result.TF_ERROR
+            result.error_msg = "no llegó la posición del robot"
+            goal_handle.abort()
+            return result
+
+        target_yaw = normalize_angle(
+            pose.yaw + float(goal_handle.request.target_yaw)
+        )
+        target = PoseStamped()
+        target.header.stamp = self.get_clock().now().to_msg()
+        target.header.frame_id = "odom"
+        target.pose.position.x = pose.x
+        target.pose.position.y = pose.y
+        target.pose.orientation.z = math.sin(target_yaw / 2.0)
+        target.pose.orientation.w = math.cos(target_yaw / 2.0)
+        allowance = (
+            float(goal_handle.request.time_allowance.sec)
+            + float(goal_handle.request.time_allowance.nanosec) / 1e9
+        )
+        return self._run_navigation(
+            target,
+            goal_handle=goal_handle,
+            action_kind="spin",
+            spin_start_yaw=pose.yaw,
+            spin_target_yaw=float(goal_handle.request.target_yaw),
+            execution_timeout_s=(
+                allowance if allowance > 0.0 else EXECUTION_TIMEOUT_S
+            ),
+        )
+
+    def _run_navigation(
+        self,
+        goal_message: PoseStamped,
+        goal_handle,
+        *,
+        action_kind: str = "navigate",
+        spin_start_yaw: float = None,
+        spin_target_yaw: float = None,
+        execution_timeout_s: float = EXECUTION_TIMEOUT_S,
+    ):
         goal = goal_from_pose(goal_message)
-        controller = NavigationController()
+        controller = (
+            SpinController(spin_target_yaw)
+            if action_kind == "spin"
+            else NavigationController()
+        )
         progress = ProgressChecker(
             movement_radius_m=PROGRESS_RADIUS_M,
             movement_angle_rad=PROGRESS_ANGLE_RAD,
             allowance_s=PROGRESS_TIMEOUT_S,
         )
-        result = NavigateToPose.Result()
-        result.error_code = NavigateToPose.Result.NONE
+        result = (
+            Spin.Result()
+            if action_kind == "spin"
+            else NavigateToPose.Result()
+        )
+        result.error_code = (
+            Spin.Result.NONE
+            if action_kind == "spin"
+            else NavigateToPose.Result.NONE
+        )
         result.error_msg = ""
         started_at = time.monotonic()
         authority_deadline = started_at + AUTHORITY_WAIT_TIMEOUT_S
@@ -307,18 +399,27 @@ class GoTo(Node):
             self.had_authority = False
             self.finishing = False
             self.interrupt_reason = None
-        controller.reset()
+        if action_kind == "spin":
+            controller.reset(spin_start_yaw)
+        else:
+            controller.reset()
         progress.reset()
         self.pub_goal.publish(goal_message)
-        yaw_text = (
-            "libre"
-            if goal.yaw is None
-            else f"{math.degrees(goal.yaw):.1f}°"
-        )
-        self.get_logger().info(
-            f"objetivo aceptado: ({goal.x:.2f}, {goal.y:.2f}), "
-            f"orientación final {yaw_text}"
-        )
+        if action_kind == "spin":
+            self.get_logger().info(
+                "giro relativo aceptado: "
+                f"{math.degrees(spin_target_yaw):.1f}°"
+            )
+        else:
+            yaw_text = (
+                "libre"
+                if goal.yaw is None
+                else f"{math.degrees(goal.yaw):.1f}°"
+            )
+            self.get_logger().info(
+                f"objetivo aceptado: ({goal.x:.2f}, {goal.y:.2f}), "
+                f"orientación final {yaw_text}"
+            )
         self.publish_status("esperando_control")
         self.claim_mobility(force=True)
 
@@ -340,7 +441,7 @@ class GoTo(Node):
                     terminal = "failed"
                     message = interrupt_reason
                     break
-                if now - started_at > EXECUTION_TIMEOUT_S:
+                if now - started_at > execution_timeout_s:
                     terminal = "timed_out"
                     message = "venció el plazo total de navegación"
                     break
@@ -352,11 +453,20 @@ class GoTo(Node):
                     time.sleep(1.0 / RATE_HZ)
                     continue
 
-                command = controller.step(pose, goal)
+                if action_kind == "spin":
+                    command = controller.step(pose.yaw)
+                    angular_distance_traveled = (
+                        command.angular_distance_traveled
+                    )
+                else:
+                    command = controller.step(pose, goal)
+                    angular_distance_traveled = 0.0
                 self.publish_feedback(
                     goal_handle,
                     command,
                     started_at,
+                    action_kind=action_kind,
+                    angular_distance_traveled=angular_distance_traveled,
                 )
 
                 if owner != "navigation":
@@ -372,10 +482,17 @@ class GoTo(Node):
 
                 if command.goal_reached:
                     terminal = "succeeded"
-                    message = (
-                        f"objetivo alcanzado a "
-                        f"{command.distance_remaining:.3f} m"
-                    )
+                    if action_kind == "spin":
+                        message = (
+                            "giro completado: "
+                            f"{math.degrees(angular_distance_traveled):.1f}° "
+                            "medidos"
+                        )
+                    else:
+                        message = (
+                            f"objetivo alcanzado a "
+                            f"{command.distance_remaining:.3f} m"
+                        )
                     break
 
                 if not progress.update(pose, now):
@@ -389,10 +506,16 @@ class GoTo(Node):
                     break
 
                 velocity = Twist()
-                velocity.linear.x = command.linear_x
+                velocity.linear.x = (
+                    0.0
+                    if action_kind == "spin"
+                    else command.linear_x
+                )
                 velocity.angular.z = command.angular_z
                 self.pub_cmd.publish(velocity)
-                self.publish_status("moviendo")
+                self.publish_status(
+                    "girando" if action_kind == "spin" else "moviendo"
+                )
                 time.sleep(1.0 / RATE_HZ)
         except Exception as error:  # noqa: BLE001
             terminal = "failed"
@@ -412,7 +535,11 @@ class GoTo(Node):
             message += "; no se confirmó el regreso a STAND"
 
         if terminal == "succeeded":
-            self.publish_status("llegue")
+            self.publish_status(
+                "giro_completado"
+                if action_kind == "spin"
+                else "llegue"
+            )
             self.get_logger().info(message)
             if goal_handle is not None:
                 goal_handle.succeed()
@@ -428,14 +555,40 @@ class GoTo(Node):
             # define los códigos TIMEOUT/UNKNOWN agregados después en Nav2.
             # El estado ABORTED y este texto son el contrato portable; inventar
             # números locales haría incompatible al futuro servidor oficial.
-            result.error_code = NavigateToPose.Result.NONE
+            if action_kind == "spin":
+                result.error_code = (
+                    Spin.Result.TIMEOUT
+                    if terminal == "timed_out"
+                    else Spin.Result.UNKNOWN
+                )
+            else:
+                result.error_code = NavigateToPose.Result.NONE
             result.error_msg = message
             if goal_handle is not None:
                 goal_handle.abort()
+        if action_kind == "spin":
+            result.total_elapsed_time = duration_message(
+                time.monotonic() - started_at
+            )
         return result
 
-    def publish_feedback(self, goal_handle, command, started_at: float):
+    def publish_feedback(
+        self,
+        goal_handle,
+        command,
+        started_at: float,
+        *,
+        action_kind: str = "navigate",
+        angular_distance_traveled: float = 0.0,
+    ):
         if goal_handle is None:
+            return
+        if action_kind == "spin":
+            feedback = Spin.Feedback()
+            feedback.angular_distance_traveled = float(
+                angular_distance_traveled
+            )
+            goal_handle.publish_feedback(feedback)
             return
         feedback = NavigateToPose.Feedback()
         with self.state_lock:

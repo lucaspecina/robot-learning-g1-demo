@@ -30,9 +30,96 @@ class NavigationCommand:
     phase: str
 
 
+@dataclass(frozen=True)
+class SpinCommand:
+    angular_z: float
+    angular_distance_traveled: float
+    angle_remaining: float
+    goal_reached: bool
+    phase: str
+
+
 def normalize_angle(angle: float) -> float:
     """Lleva un ángulo a [-pi, pi] para elegir siempre el giro más corto."""
     return math.atan2(math.sin(angle), math.cos(angle))
+
+
+class SpinController:
+    """Controla un giro relativo sin perder vueltas al cruzar ±pi.
+
+    Sigue el criterio de la Action Spin oficial de Nav2: acumula el cambio
+    entre mediciones consecutivas, frena según el ángulo restante y conserva
+    el signo pedido. La tolerancia no es la microscópica del robot con ruedas:
+    cinco grados es el valor ya medido por nuestro navegador para este bípedo.
+    """
+
+    def __init__(
+        self,
+        target_yaw: float,
+        tolerance_rad: float = math.radians(5.0),
+        minimum_velocity: float = 0.10,
+        maximum_velocity: float = 0.50,
+        acceleration_limit: float = 1.0,
+    ):
+        if not math.isfinite(target_yaw):
+            raise ValueError("el ángulo pedido debe ser finito")
+        if tolerance_rad <= 0.0:
+            raise ValueError("la tolerancia angular debe ser positiva")
+        if minimum_velocity <= 0.0:
+            raise ValueError("la velocidad angular mínima debe ser positiva")
+        if maximum_velocity < minimum_velocity:
+            raise ValueError(
+                "la velocidad angular máxima no puede ser menor que la mínima"
+            )
+        if acceleration_limit <= 0.0:
+            raise ValueError("la aceleración angular debe ser positiva")
+        self.target_yaw = float(target_yaw)
+        self.tolerance_rad = float(tolerance_rad)
+        self.minimum_velocity = float(minimum_velocity)
+        self.maximum_velocity = float(maximum_velocity)
+        self.acceleration_limit = float(acceleration_limit)
+        self.previous_yaw: Optional[float] = None
+        self.angular_distance_traveled = 0.0
+
+    def reset(self, initial_yaw: Optional[float] = None):
+        self.previous_yaw = initial_yaw
+        self.angular_distance_traveled = 0.0
+
+    def step(self, current_yaw: float) -> SpinCommand:
+        if self.previous_yaw is None:
+            self.previous_yaw = float(current_yaw)
+        else:
+            self.angular_distance_traveled += normalize_angle(
+                float(current_yaw) - self.previous_yaw
+            )
+            self.previous_yaw = float(current_yaw)
+
+        remaining = max(
+            0.0,
+            abs(self.target_yaw)
+            - abs(self.angular_distance_traveled),
+        )
+        if remaining <= self.tolerance_rad:
+            return SpinCommand(
+                angular_z=0.0,
+                angular_distance_traveled=self.angular_distance_traveled,
+                angle_remaining=remaining,
+                goal_reached=True,
+                phase="done",
+            )
+
+        speed = math.sqrt(2.0 * self.acceleration_limit * remaining)
+        speed = min(
+            self.maximum_velocity,
+            max(self.minimum_velocity, speed),
+        )
+        return SpinCommand(
+            angular_z=math.copysign(speed, self.target_yaw),
+            angular_distance_traveled=self.angular_distance_traveled,
+            angle_remaining=remaining,
+            goal_reached=False,
+            phase="spinning",
+        )
 
 
 class NavigationController:
