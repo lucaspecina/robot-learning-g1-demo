@@ -1,6 +1,6 @@
 # Los dos problemas abiertos, y por dónde seguir
 
-Estado al 29-jul. Punto de retorno seguro: etiqueta de git `known-good`
+Estado al 30-jul. Punto de retorno seguro: etiqueta de git `known-good`
 (commit 86f8082) — de pie a 0.72 m, caminó 5.85 m, ciclo congelar/soltar
 funcionando.
 
@@ -281,10 +281,14 @@ ocho esferas de los pies contra MuJoCo.
   elige mesa roja/azul y publica cada paso y decisión con estado explícito. La
   búsqueda se bloquea de forma honesta si la mesa no está en la vista actual:
   falta implementar el barrido visual activo antes de acercarse.
-- **El planificador sigue siendo de reglas**: el proveedor visual ya está
-  integrado para leer el reloj. Si más adelante un modelo de lenguaje propone
-  el plan, el tablero conservará su texto literal separado del plan validado;
-  el modelo no mandará velocidades al cuerpo.
+- **Planificador semántico integrado; ejecución adaptable pendiente**:
+  `gpt-4.1-mini` ya recibe un catálogo explicado, propone el plan en JSON y el
+  servidor y la Jetson lo validan independientemente. El tablero conserva la
+  entrada exacta, la respuesta literal y el plan aceptado. La siguiente etapa
+  es ejecutar una capacidad, medirla, cancelarla localmente si se traba y
+  permitir que el modelo modifique sólo los pasos pendientes. La decisión,
+  límites y orden de implementación están en
+  [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
 - **Reloj simulado** (`/clock` + `use_sim_time`): sin él, los plazos medidos en
   tiempo de pared no significan nada con el simulador al 20 %. Ya nos rompió un
   timeout de navegación.

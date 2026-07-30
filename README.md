@@ -16,12 +16,17 @@ El código que se desarrolla acá debe correr en el robot real sin cambios.
 |---|---|---|
 | 1 | Laboratorio local: Go2 en MuJoCo, control por DDS crudo, policies RL | hecha (base de aprendizaje; docs abajo) |
 | 2 | Laboratorio cloud: Isaac Sim en Azure, ROS 2, sistemas simulados | funcionando |
-| 3 | G1: locomoción, navegación, percepción, agente, manipulación, la demo | arrancando |
+| 3 | G1: locomoción, navegación, percepción, agente, manipulación, la demo | en integración |
 
 Contexto de fondo: [docs/00_mapa_simuladores.md](docs/00_mapa_simuladores.md),
 [docs/01_unitree_ecosistema_datos.md](docs/01_unitree_ecosistema_datos.md),
 [docs/02_arquitectura_inteligencia.md](docs/02_arquitectura_inteligencia.md),
 [docs/GLOSARIO.md](docs/GLOSARIO.md).
+
+Estado y próximo tramo del G1:
+[g1/README.md](g1/README.md),
+[g1/DEMO_TARGET.md](g1/DEMO_TARGET.md) y
+[g1/AGENT_EXECUTION_PLAN.md](g1/AGENT_EXECUTION_PLAN.md).
 
 ## Fase 2: laboratorio cloud (Isaac Sim + ROS 2 + sistemas simulados)
 

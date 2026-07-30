@@ -142,6 +142,7 @@ ejecución honestamente al llegar a ellas.
 | `skill_catalog.py` | catálogo explicado y contratos que recibe el planificador |
 | `model_trace.py` | contrato de trazabilidad de modelos, incluido el texto literal |
 | `agent/agent.py` | valida y ejecuta localmente el plan; nunca entrega motores al LLM |
+| `AGENT_EXECUTION_PLAN.md` | próximo tramo: ejecutar, medir, cancelar y revisar paso por paso |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
 
@@ -221,16 +222,19 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Agregar el barrido visual activo** para buscar la mesa correcta sin pasarle una coordenada.
-2. **Convertir la superficie encontrada en una pose segura de aproximación.**
-3. **Guardar `home` y regresar** sin carga.
-4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
+1. **Ejecución adaptable**: ejecutar una capacidad, medir progreso, permitir
+   cancelación segura y revisar sólo el plan pendiente. Diseño y criterios en
+   [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
+2. **Agregar el barrido visual activo** para buscar la mesa correcta sin pasarle una coordenada.
+3. **Convertir la superficie encontrada en una pose segura de aproximación.**
+4. **Guardar `home` y regresar** sin carga.
+5. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
-5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
+6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
    verificador; hasta entonces la profundidad de cámara mide objetos, no crea
    una falsa localización perfecta.
-6. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+7. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-7. **El agarre** con un VLA entrenado por nosotros.
-8. **Voz** para reemplazar la publicación manual de texto; el planificador
+8. **El agarre** con un VLA entrenado por nosotros.
+9. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

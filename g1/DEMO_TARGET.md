@@ -37,6 +37,21 @@ aislar navegación y cámara. En la versión completa, el robot debe encontrarlo
 o usar una anotación obtenida durante la preparación real del lugar. Cualquier
 atajo de simulación debe estar marcado y tener un reemplazo previsto.
 
+## Cómo se ejecutará la misión
+
+El modelo propone un plan inicial usando solamente el catálogo declarado. La
+Jetson valida el plan y ejecuta una capacidad por vez. Después de cada
+capacidad recoge el resultado medido y, si la decisión es visual, una imagen
+puntual. El modelo puede conservar o modificar sólo los pasos pendientes.
+
+Si una capacidad deja de progresar, la Jetson la cancela localmente, devuelve
+la movilidad a `STAND` y recién entonces consulta al modelo. La seguridad y el
+equilibrio no dependen de la red.
+
+El contrato completo y el orden de implementación están en
+[`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md). Nav2, SLAM, video
+continuo y una VLA de cuerpo completo quedan fuera de este tramo.
+
 ## Preparación del lugar real
 
 El mapeo no se repite obligatoriamente antes de cada misión:
