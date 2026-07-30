@@ -219,7 +219,12 @@ class DashboardNode(Node):
             self.on_mobility,
             10,
         )
-        self.create_subscription(PoseStamped, "/g1/goal", self.on_goal, 10)
+        self.create_subscription(
+            PoseStamped,
+            "/g1/navigation/goal",
+            self.on_goal,
+            10,
+        )
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
         self.create_subscription(
             String,

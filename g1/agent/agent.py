@@ -7,14 +7,15 @@ robot y conserva, por separado, tres tipos de evidencia:
   recibe:  /g1/mission                    orden original en castellano
            /g1/detections                 objetos vistos por la cámara
            /g1/clock_crop/compressed      recorte exacto del reloj
-           /g1/nav_status                 resultado de navegación
            /g1/odom                       ubicación medida del cuerpo
+           /g1/mobility/status            confirmación de espera segura
            /g1/arm_status                 medición real de los brazos
            /g1/perception/search_status   resultado de búsqueda puntual
            /g1/table_detections_3d        mesa ubicada desde sensores
 
-  publica: /g1/goal                       objetivo de navegación
-           /g1/arm_pose                   postura pedida a los brazos
+  usa:     /g1/navigate_to_pose           tarea de navegación cancelable
+
+  publica: /g1/arm_pose                   postura pedida a los brazos
            /g1/perception/search_request  categoría visual acotada
            /g1/mission_status             relato humano, sólo para el historial
            /g1/mission_state              estado estructurado de cada paso
@@ -37,8 +38,11 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
+from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -54,6 +58,7 @@ from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
 )
+from execution_core import FeedbackWatchdog
 from mission_contract import MissionTracker, build_demo_plan, validate_plan
 from model_trace import build_model_event
 from open_vocabulary_core import make_search_request
@@ -91,12 +96,18 @@ ARM_POSES = {
     "transport": "transporte",
 }
 
-def succeeded(message: str) -> dict:
-    return {"state": "succeeded", "message": message}
+def succeeded(message: str, measurements: dict = None) -> dict:
+    outcome = {"state": "succeeded", "message": message}
+    if measurements:
+        outcome["measurements"] = measurements
+    return outcome
 
 
-def failed(message: str) -> dict:
-    return {"state": "failed", "message": message}
+def failed(message: str, measurements: dict = None) -> dict:
+    outcome = {"state": "failed", "message": message}
+    if measurements:
+        outcome["measurements"] = measurements
+    return outcome
 
 
 def blocked(message: str) -> dict:
@@ -107,8 +118,8 @@ class Agent(Node):
     def __init__(self):
         super().__init__("agent")
         self.detections = {}
-        self.nav_status = None
         self.current_pose = None
+        self.mobility_owner = None
         self.arm_status = None
         self.search_status = None
         self.localized_tables = {}
@@ -119,7 +130,11 @@ class Agent(Node):
         self.mission_context = {}
         self.intelligence = IntelligenceClient()
 
-        self.goal_pub = self.create_publisher(PoseStamped, "/g1/goal", 10)
+        self.navigation_client = ActionClient(
+            self,
+            NavigateToPose,
+            "/g1/navigate_to_pose",
+        )
         self.arms_pub = self.create_publisher(String, "/g1/arm_pose", 10)
         self.search_pub = self.create_publisher(
             String,
@@ -158,13 +173,13 @@ class Agent(Node):
             self.on_clock_crop,
             2,
         )
+        self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(
             String,
-            "/g1/nav_status",
-            self.on_nav_status,
+            "/g1/mobility/status",
+            self.on_mobility_status,
             10,
         )
-        self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(
             String,
             "/g1/arm_status",
@@ -197,8 +212,11 @@ class Agent(Node):
         except json.JSONDecodeError:
             pass
 
-    def on_nav_status(self, message: String):
-        self.nav_status = message.data
+    def on_mobility_status(self, message: String):
+        try:
+            self.mobility_owner = str(json.loads(message.data)["owner"])
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
 
     def on_clock_crop(self, message: CompressedImage):
         self.clock_crop = bytes(message.data)
@@ -462,6 +480,7 @@ class Agent(Node):
                 self.mission_tracker.finish_step(
                     step["id"],
                     outcome["message"],
+                    outcome.get("measurements"),
                 )
                 self.report(f"completado: {outcome['message']}")
                 continue
@@ -470,6 +489,7 @@ class Agent(Node):
                 step["id"],
                 outcome["message"],
                 blocked=is_blocked,
+                measurements=outcome.get("measurements"),
             )
             prefix = "BLOQUEADO" if is_blocked else "FALLO"
             self.report(f"{prefix}: {outcome['message']}")
@@ -536,11 +556,130 @@ class Agent(Node):
         goal.pose.position.y = float(y)
         goal.pose.orientation.z = math.sin(yaw / 2.0)
         goal.pose.orientation.w = math.cos(yaw / 2.0)
-        self.nav_status = None
-        self.goal_pub.publish(goal)
-        if not self.wait_for_arrival():
-            return failed(f"la navegación hacia {target} no llegó a tiempo")
-        return succeeded(f"llegó a {target}")
+
+        server_wait_s = float(
+            os.environ.get("NAV_ACTION_SERVER_WAIT_S", "5")
+        )
+        if not self.navigation_client.wait_for_server(
+            timeout_sec=server_wait_s
+        ):
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                "el servidor local de navegación no está disponible" + suffix
+            )
+
+        request = NavigateToPose.Goal()
+        request.pose = goal
+        watchdog = FeedbackWatchdog(
+            deadline_s=float(os.environ.get("NAV_TIMEOUT_S", "600")),
+            silence_timeout_s=float(
+                os.environ.get("NAV_FEEDBACK_TIMEOUT_S", "6")
+            ),
+        )
+        watchdog.start(time.monotonic())
+        measurements = {}
+
+        def on_feedback(message):
+            feedback = message.feedback
+            watchdog.record_feedback(time.monotonic())
+            measurements.update(
+                {
+                    "distance_remaining_m": round(
+                        float(feedback.distance_remaining),
+                        4,
+                    ),
+                    "navigation_time_s": round(
+                        self.duration_seconds(feedback.navigation_time),
+                        3,
+                    ),
+                }
+            )
+            if hasattr(feedback, "position_tracking_error"):
+                measurements["position_tracking_error_m"] = round(
+                    float(feedback.position_tracking_error),
+                    4,
+                )
+            if hasattr(feedback, "heading_tracking_error"):
+                measurements["heading_tracking_error_rad"] = round(
+                    float(feedback.heading_tracking_error),
+                    4,
+                )
+
+        try:
+            send_future = self.navigation_client.send_goal_async(
+                request,
+                feedback_callback=on_feedback,
+            )
+            if not self.wait_for_future(send_future, timeout_s=server_wait_s):
+                safe = self.wait_for_stand(timeout_s=3.0)
+                suffix = "" if safe else "; no se confirmó STAND"
+                return failed(
+                    "la navegación no confirmó si aceptó el objetivo" + suffix
+                )
+            goal_handle = send_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"falló el envío del objetivo: {error}{suffix}",
+                measurements,
+            )
+
+        if goal_handle is None or not goal_handle.accepted:
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                "el navegador rechazó el objetivo" + suffix,
+                measurements,
+            )
+
+        result_future = goal_handle.get_result_async()
+        while not result_future.done():
+            decision = watchdog.check(time.monotonic())
+            if decision is not None:
+                cancel_confirmed = self.cancel_navigation(goal_handle)
+                safe = self.wait_for_stand(timeout_s=3.0)
+                details = [decision.reason]
+                if not cancel_confirmed:
+                    details.append("el servidor no confirmó la cancelación")
+                if not safe:
+                    details.append("no se confirmó STAND")
+                return failed("; ".join(details), measurements)
+            time.sleep(0.05)
+
+        try:
+            wrapped = result_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"el navegador perdió el resultado: {error}{suffix}",
+                measurements,
+            )
+
+        safe = self.wait_for_stand(timeout_s=3.0)
+        if not safe:
+            return failed(
+                "la navegación terminó pero no devolvió la movilidad a STAND",
+                measurements,
+            )
+        if wrapped.status == GoalStatus.STATUS_SUCCEEDED:
+            return succeeded(f"llegó a {target}", measurements)
+
+        error_message = str(
+            getattr(wrapped.result, "error_msg", "")
+        ).strip()
+        if not error_message:
+            if wrapped.status == GoalStatus.STATUS_CANCELED:
+                error_message = "la navegación fue cancelada"
+            elif wrapped.status == GoalStatus.STATUS_ABORTED:
+                error_message = "la navegación fue abortada"
+            else:
+                error_message = (
+                    f"la navegación terminó con estado {wrapped.status}"
+                )
+        return failed(error_message, measurements)
 
     def look_at(self, target: str) -> dict:
         detection_name = DETECTION_NAMES.get(target)
@@ -715,18 +854,39 @@ class Agent(Node):
 
     # ---------- esperas ----------
 
-    def wait_for_arrival(self, timeout_s: float = None) -> bool:
-        """Usa tiempo de pared hasta integrar `/clock` en todos los nodos."""
-        if timeout_s is None:
-            timeout_s = float(os.environ.get("NAV_TIMEOUT_S", "600"))
-        end = time.monotonic() + timeout_s
-        while time.monotonic() < end:
-            time.sleep(0.2)
-            if self.nav_status == "llegue":
+    @staticmethod
+    def duration_seconds(duration) -> float:
+        return float(duration.sec) + float(duration.nanosec) / 1_000_000_000.0
+
+    @staticmethod
+    def wait_for_future(future, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while not future.done() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return future.done()
+
+    def cancel_navigation(self, goal_handle) -> bool:
+        """Pide cancelar; la seguridad final se confirma aparte con STAND."""
+        try:
+            future = goal_handle.cancel_goal_async()
+        except Exception:  # noqa: BLE001
+            return False
+        if not self.wait_for_future(future, timeout_s=2.0):
+            return False
+        try:
+            response = future.result()
+        except Exception:  # noqa: BLE001
+            return False
+        return bool(response and response.goals_canceling)
+
+    def wait_for_stand(self, timeout_s: float) -> bool:
+        """Confirma que ninguna autonomía conserva el movimiento del cuerpo."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self.mobility_owner == "stand":
                 return True
-            if self.nav_status and self.nav_status.startswith("fallo"):
-                return False
-        return False
+            time.sleep(0.05)
+        return self.mobility_owner == "stand"
 
     def wait_for_detection(self, target: str, timeout_s: float):
         end = time.monotonic() + timeout_s

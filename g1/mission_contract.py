@@ -181,6 +181,7 @@ def validate_plan(
                 "finished_at": None,
                 "result": None,
                 "error": None,
+                "measurements": None,
             }
         )
     return normalized
@@ -306,7 +307,12 @@ class MissionTracker:
 
         return self._update(mutate)
 
-    def finish_step(self, step_id: str, result: str = None) -> dict:
+    def finish_step(
+        self,
+        step_id: str,
+        result: str = None,
+        measurements: dict = None,
+    ) -> dict:
         now = self.clock()
 
         def mutate(state):
@@ -316,6 +322,7 @@ class MissionTracker:
             step["state"] = "succeeded"
             step["finished_at"] = now
             step["result"] = result
+            step["measurements"] = deepcopy(measurements)
             state["active_step_id"] = None
 
         return self._update(mutate)
@@ -326,6 +333,7 @@ class MissionTracker:
         error: str,
         *,
         blocked: bool = False,
+        measurements: dict = None,
     ) -> dict:
         now = self.clock()
         terminal_state = "blocked" if blocked else "failed"
@@ -337,6 +345,7 @@ class MissionTracker:
             step["state"] = terminal_state
             step["finished_at"] = now
             step["error"] = error
+            step["measurements"] = deepcopy(measurements)
             state["active_step_id"] = None
             state["state"] = terminal_state
             state["error"] = error

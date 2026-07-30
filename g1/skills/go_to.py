@@ -1,178 +1,463 @@
 #!/usr/bin/env python3
-"""Skill go_to: llevar el robot a un punto del mapa.
+"""Navegación simple detrás del contrato estándar de Nav2.
 
-Es la primera skill de verdad del sistema, y el ejemplo del patron que van a
-seguir todas: recibe un pedido de alto nivel ("anda a este punto"), lo cumple
-usando las capas de abajo, y reporta si lo logro.
+La misión usa `/g1/navigate_to_pose`, una Action ROS 2 de tipo
+`nav2_msgs/NavigateToPose`. Una Action es una tarea larga con objetivo,
+progreso, resultado y cancelación. Por ahora este nodo calcula movimiento
+directo en una habitación despejada; más adelante Nav2 podrá reemplazarlo sin
+cambiar al agente.
 
-Corre en la Jetson (fuera del robot), y solo habla los canales publicos:
+Canales de control:
 
-  recibe:  /g1/goal        (geometry_msgs/PoseStamped — a donde ir)
-           /g1/odom        (nav_msgs/Odometry — donde esta)
-           /g1/mobility/status (quien tiene permiso para mover la base)
-  publica: /g1/cmd_vel/navigation (geometry_msgs/Twist — como moverse)
-           /g1/mobility/request (adquirir o liberar la movilidad)
-           /g1/nav_status  (std_msgs/String — moviendo | llegue | cancelado)
+  recibe:  /g1/navigate_to_pose       objetivo cancelable de la misión
+           /g1/goal                   compatibilidad temporal con pruebas viejas
+           /g1/odom                   posición medida
+           /g1/mobility/status        dueño actual del movimiento
+  publica: /g1/cmd_vel/navigation     pedido de movimiento al árbitro
+           /g1/mobility/request       adquirir o liberar el movimiento
+           /g1/navigation/goal        copia observable para el tablero
+           /g1/nav_status             compatibilidad y relato humano
 
-Como decide: primero se orienta hacia el objetivo girando en el lugar, despues
-avanza mientras corrige el heading. Es navegacion "a la vista", sin mapa ni
-esquive de obstaculos — suficiente para una habitacion despejada. Cuando haga
-falta esquivar, este nodo se reemplaza por Nav2 hablando los mismos canales, y
-el resto del sistema no se entera.
-
-Uso (dentro del contenedor jetson):
-    python3 go_to.py
-    # y desde otra terminal:
-    ros2 topic pub --once /g1/goal geometry_msgs/msg/PoseStamped \
-        "{pose: {position: {x: 2.0, y: 1.0}}}"
+El nodo nunca publica en `/cmd_vel`: el árbitro sigue siendo el único dueño de
+esa salida. Antes de devolver cualquier éxito, falla o cancelación, publica
+cero y entrega el movimiento a `STAND`.
 """
+
 import json
 import math
+import os
+import sys
+import threading
 import time
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
-from rclpy.executors import ExternalShutdownException
-from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Twist
+from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+from rclpy.node import Node
 from std_msgs.msg import String
 
-# --- parametros de navegacion ---
-# Nav2 usa 10 cm como tolerancia fina y reserva 25 cm para una salida
-# adaptativa cuando el robot deja de progresar. Primero medimos la condición
-# fina sola; 35 cm declaraba éxito demasiado lejos para nuestra demo.
-TOLERANCE_M = 0.10        # a esta distancia del objetivo damos por llegado
-# Nav2 conserva el logro de posición mientras termina la orientación. Sin ese
-# margen, el balanceo del bípedo cruza 10 cm y alterna eternamente entre
-# corregir posición y corregir rumbo.
-POSITION_LATCH_BUFFER_M = 0.10
-FINAL_YAW_TOLERANCE_RAD = math.radians(5.0)
-FINAL_YAW_GAIN = 1.5
-MIN_FINAL_ANGULAR_VEL = 0.10
-SALTO_M = 1.0              # un salto mayor a esto entre dos lecturas solo puede
-                           # ser un teletransporte (reinicio o freeze), no un paso
-TOLERANCE_RAD = 0.25      # error de heading tolerado antes de empezar a avanzar
-LINEAR_VEL = 0.3           # m/s de crucero
-MIN_APPROACH_VEL = 0.10    # por debajo, la medición mostró que no progresa
-ANGULAR_VEL = 0.5          # rad/s al girar
-RATE_HZ = 10.0            # cada cuanto recalculamos y publicamos
-CLAIM_RETRY_S = 0.5       # si otro dueño se retira, volver a pedir sin inundar ROS
+from navigation_core import (
+    NavigationController,
+    NavigationGoal,
+    NavigationPose,
+    ProgressChecker,
+)
 
 
-def yaw_from_quaternion(w, x, y, z) -> float:
-    """Angulo de giro sobre el eje vertical, en radianes."""
-    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+RATE_HZ = 10.0
+CLAIM_RETRY_S = 0.5
+ODOM_JUMP_M = 1.0
+ODOM_WAIT_TIMEOUT_S = 5.0
+AUTHORITY_WAIT_TIMEOUT_S = 10.0
+SAFE_STAND_TIMEOUT_S = 3.0
+
+# Estos plazos usan tiempo de pared porque también deben actuar si Isaac se
+# pausa. Son guardas iniciales; las tolerancias físicas siguen siendo las que
+# ya fueron medidas en las regresiones de navegación.
+EXECUTION_TIMEOUT_S = float(os.environ.get("NAV_EXECUTION_TIMEOUT_S", "600"))
+PROGRESS_TIMEOUT_S = float(os.environ.get("NAV_PROGRESS_TIMEOUT_S", "30"))
+PROGRESS_RADIUS_M = float(os.environ.get("NAV_PROGRESS_RADIUS_M", "0.05"))
+PROGRESS_ANGLE_RAD = math.radians(
+    float(os.environ.get("NAV_PROGRESS_ANGLE_DEG", "5"))
+)
 
 
-def normalize_angle(angle: float) -> float:
-    """Lleva un angle al rango [-pi, pi] — asi el robot gira para el lado corto."""
-    return math.atan2(math.sin(angle), math.cos(angle))
+def yaw_from_quaternion(w: float, x: float, y: float, z: float) -> float:
+    """Obtiene el giro horizontal de una orientación."""
+    return math.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+
+
+def duration_message(seconds: float):
+    """Convierte segundos de pared al mensaje que exige la interfaz estándar."""
+    from builtin_interfaces.msg import Duration
+
+    seconds = max(0.0, float(seconds))
+    whole = int(seconds)
+    return Duration(
+        sec=whole,
+        nanosec=int((seconds - whole) * 1_000_000_000),
+    )
+
+
+def goal_from_pose(message: PoseStamped) -> NavigationGoal:
+    orientation = message.pose.orientation
+    norm = math.sqrt(
+        orientation.w * orientation.w
+        + orientation.x * orientation.x
+        + orientation.y * orientation.y
+        + orientation.z * orientation.z
+    )
+    yaw = None
+    if norm > 0.5:
+        yaw = yaw_from_quaternion(
+            orientation.w,
+            orientation.x,
+            orientation.y,
+            orientation.z,
+        )
+    return NavigationGoal(
+        x=float(message.pose.position.x),
+        y=float(message.pose.position.y),
+        yaw=yaw,
+    )
 
 
 class GoTo(Node):
     def __init__(self):
         super().__init__("go_to")
-        self.pose = None            # (x, y, yaw) del robot
-        self.goal = None            # (x, y, yaw opcional) objetivo
-        self.position_reached = False
+        self.callback_group = ReentrantCallbackGroup()
+        self.state_lock = threading.RLock()
+        self.pose = None
+        self.pose_message = None
         self.mobility_owner = None
         self.last_claim_at = float("-inf")
+        self.goal_reserved = False
+        self.navigation_active = False
+        self.had_authority = False
+        self.finishing = False
+        self.interrupt_reason = None
 
         self.pub_cmd = self.create_publisher(
-            Twist, "/g1/cmd_vel/navigation", 10
+            Twist,
+            "/g1/cmd_vel/navigation",
+            10,
         )
         self.pub_mobility = self.create_publisher(
-            String, "/g1/mobility/request", 10
+            String,
+            "/g1/mobility/request",
+            10,
         )
-        self.pub_status = self.create_publisher(String, "/g1/nav_status", 10)
-        self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
-        self.create_subscription(PoseStamped, "/g1/goal", self.on_goal, 10)
+        self.pub_status = self.create_publisher(
+            String,
+            "/g1/nav_status",
+            10,
+        )
+        self.pub_goal = self.create_publisher(
+            PoseStamped,
+            "/g1/navigation/goal",
+            10,
+        )
+        self.create_subscription(
+            Odometry,
+            "/g1/odom",
+            self.on_odom,
+            10,
+            callback_group=self.callback_group,
+        )
         self.create_subscription(
             String,
             "/g1/mobility/status",
             self.on_mobility_status,
             10,
+            callback_group=self.callback_group,
         )
-        self.create_timer(1.0 / RATE_HZ, self.tick)
-
-        self.get_logger().info("go_to listo. Esperando objetivos en /g1/goal")
-
-    def on_odom(self, msg: Odometry):
-        p, o = msg.pose.pose.position, msg.pose.pose.orientation
-        anterior = self.pose
-        self.pose = (p.x, p.y, yaw_from_quaternion(o.w, o.x, o.y, o.z))
-
-        # Detectar que el robot se TELETRANSPORTO: un reinicio o un freeze lo
-        # devuelven al origen de un salto. Caminando nunca se mueve un metro
-        # entre dos lecturas consecutivas, asi que un salto asi solo puede ser
-        # eso. Cuando pasa hay que olvidar todo: el objetivo y el anclaje son
-        # de un episodio que ya no existe. (Sin esto, la navegacion arrastraba
-        # un anclaje viejo y hacia caminar al robot recien nacido hasta la
-        # posicion donde habia estado la corrida anterior.)
-        if anterior is not None:
-            if math.hypot(p.x - anterior[0], p.y - anterior[1]) > SALTO_M:
-                had_goal = self.goal is not None
-                self.goal = None
-                self.position_reached = False
-                self.get_logger().warn(
-                    f"el robot se teletransporto a ({p.x:.2f}, {p.y:.2f}): "
-                    "cancelo el objetivo")
-                if had_goal:
-                    self.stop()
-                    self.publish_status("cancelado")
-                    self.request_mobility(
-                        "release", "salto de odometría durante navegación"
-                    )
-                return
-
-    def on_mobility_status(self, msg: String):
-        try:
-            owner = json.loads(msg.data)["owner"]
-        except (json.JSONDecodeError, KeyError, TypeError):
-            return
-        previous = self.mobility_owner
-        self.mobility_owner = owner
-        if owner == "navigation" and previous != "navigation":
-            self.get_logger().info("autoridad de navegación concedida")
-            if self.goal is not None:
-                self.publish_status("moviendo")
-        elif previous == "navigation" and owner != "navigation":
-            self.get_logger().warn(
-                f"perdí la autoridad de navegación; dueño actual: {owner}"
-            )
-            if self.goal is not None:
-                # Una orden manual o una falla de la concesión invalida el
-                # objetivo vigente. Reanudarlo al liberar el joystick haría
-                # que una intención vieja mueva el robot sin una orden nueva.
-                self.goal = None
-                self.position_reached = False
-                self.publish_status("cancelado")
-
-    def on_goal(self, msg: PoseStamped):
-        orientation = msg.pose.orientation
-        quaternion_norm = math.sqrt(
-            orientation.w * orientation.w
-            + orientation.x * orientation.x
-            + orientation.y * orientation.y
-            + orientation.z * orientation.z
+        self.create_subscription(
+            PoseStamped,
+            "/g1/goal",
+            self.on_legacy_goal,
+            10,
+            callback_group=self.callback_group,
         )
-        goal_yaw = None
-        if quaternion_norm > 0.5:
-            goal_yaw = yaw_from_quaternion(
+        self.action_server = ActionServer(
+            self,
+            NavigateToPose,
+            "/g1/navigate_to_pose",
+            execute_callback=self.execute_action,
+            goal_callback=self.handle_goal,
+            cancel_callback=self.handle_cancel,
+            callback_group=self.callback_group,
+        )
+        self.get_logger().info(
+            "navegación lista en /g1/navigate_to_pose; "
+            "/g1/goal queda sólo para compatibilidad"
+        )
+
+    def on_odom(self, message: Odometry):
+        position = message.pose.pose.position
+        orientation = message.pose.pose.orientation
+        new_pose = NavigationPose(
+            x=float(position.x),
+            y=float(position.y),
+            yaw=yaw_from_quaternion(
                 orientation.w,
                 orientation.x,
                 orientation.y,
                 orientation.z,
+            ),
+        )
+        with self.state_lock:
+            previous = self.pose
+            self.pose = new_pose
+            observed = PoseStamped()
+            observed.header = message.header
+            observed.pose = message.pose.pose
+            self.pose_message = observed
+            if (
+                previous is not None
+                and math.hypot(
+                    new_pose.x - previous.x,
+                    new_pose.y - previous.y,
+                )
+                > ODOM_JUMP_M
+                and self.navigation_active
+            ):
+                self.interrupt_reason = (
+                    "salto de odometría durante navegación"
+                )
+
+    def on_mobility_status(self, message: String):
+        try:
+            owner = str(json.loads(message.data)["owner"])
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return
+        with self.state_lock:
+            previous = self.mobility_owner
+            self.mobility_owner = owner
+            if owner == "navigation":
+                self.had_authority = True
+            elif (
+                previous == "navigation"
+                and self.navigation_active
+                and self.had_authority
+                and not self.finishing
+            ):
+                self.interrupt_reason = (
+                    f"se perdió la autoridad; dueño actual: {owner}"
+                )
+
+    def handle_goal(self, request: NavigateToPose.Goal):
+        pose = request.pose
+        if pose.header.frame_id not in ("", "odom"):
+            self.get_logger().warn(
+                f"objetivo rechazado: marco {pose.header.frame_id!r}; "
+                "este navegador simple sólo conoce odom"
             )
-        self.goal = (msg.pose.position.x, msg.pose.position.y, goal_yaw)
-        self.position_reached = False
-        yaw_text = "libre" if goal_yaw is None else f"{math.degrees(goal_yaw):.1f}°"
+            return GoalResponse.REJECT
+        if not all(
+            math.isfinite(value)
+            for value in (pose.pose.position.x, pose.pose.position.y)
+        ):
+            self.get_logger().warn("objetivo rechazado: coordenadas inválidas")
+            return GoalResponse.REJECT
+        with self.state_lock:
+            if self.goal_reserved or self.navigation_active:
+                self.get_logger().warn(
+                    "objetivo rechazado: ya existe una navegación activa"
+                )
+                return GoalResponse.REJECT
+            self.goal_reserved = True
+        return GoalResponse.ACCEPT
+
+    def handle_cancel(self, _goal_handle):
+        self.get_logger().info("cancelación de navegación aceptada")
+        return CancelResponse.ACCEPT
+
+    def on_legacy_goal(self, message: PoseStamped):
+        """Puente transitorio para las herramientas que aún publican un topic."""
+        with self.state_lock:
+            if self.goal_reserved or self.navigation_active:
+                self.publish_status("fallo: ya existe una navegación activa")
+                return
+            self.goal_reserved = True
+        thread = threading.Thread(
+            target=self.execute_legacy,
+            args=(message,),
+            daemon=True,
+        )
+        thread.start()
+
+    def execute_legacy(self, message: PoseStamped):
+        self._run_navigation(message, goal_handle=None)
+
+    def execute_action(self, goal_handle):
+        return self._run_navigation(
+            goal_handle.request.pose,
+            goal_handle=goal_handle,
+        )
+
+    def _run_navigation(self, goal_message: PoseStamped, goal_handle):
+        goal = goal_from_pose(goal_message)
+        controller = NavigationController()
+        progress = ProgressChecker(
+            movement_radius_m=PROGRESS_RADIUS_M,
+            movement_angle_rad=PROGRESS_ANGLE_RAD,
+            allowance_s=PROGRESS_TIMEOUT_S,
+        )
+        result = NavigateToPose.Result()
+        result.error_code = NavigateToPose.Result.NONE
+        result.error_msg = ""
+        started_at = time.monotonic()
+        authority_deadline = started_at + AUTHORITY_WAIT_TIMEOUT_S
+        odom_deadline = started_at + ODOM_WAIT_TIMEOUT_S
+
+        with self.state_lock:
+            self.goal_reserved = False
+            self.navigation_active = True
+            self.had_authority = False
+            self.finishing = False
+            self.interrupt_reason = None
+        controller.reset()
+        progress.reset()
+        self.pub_goal.publish(goal_message)
+        yaw_text = (
+            "libre"
+            if goal.yaw is None
+            else f"{math.degrees(goal.yaw):.1f}°"
+        )
         self.get_logger().info(
-            f"objetivo nuevo: ({self.goal[0]:.2f}, {self.goal[1]:.2f}), "
+            f"objetivo aceptado: ({goal.x:.2f}, {goal.y:.2f}), "
             f"orientación final {yaw_text}"
         )
         self.publish_status("esperando_control")
         self.claim_mobility(force=True)
+
+        terminal = "failed"
+        message = "la navegación terminó sin resultado"
+        try:
+            while rclpy.ok():
+                now = time.monotonic()
+                with self.state_lock:
+                    pose = self.pose
+                    owner = self.mobility_owner
+                    interrupt_reason = self.interrupt_reason
+
+                if goal_handle is not None and goal_handle.is_cancel_requested:
+                    terminal = "canceled"
+                    message = "navegación cancelada por el solicitante"
+                    break
+                if interrupt_reason is not None:
+                    terminal = "failed"
+                    message = interrupt_reason
+                    break
+                if now - started_at > EXECUTION_TIMEOUT_S:
+                    terminal = "timed_out"
+                    message = "venció el plazo total de navegación"
+                    break
+                if pose is None:
+                    if now > odom_deadline:
+                        terminal = "failed"
+                        message = "no llegó la posición del robot"
+                        break
+                    time.sleep(1.0 / RATE_HZ)
+                    continue
+
+                command = controller.step(pose, goal)
+                self.publish_feedback(
+                    goal_handle,
+                    command,
+                    started_at,
+                )
+
+                if owner != "navigation":
+                    if now > authority_deadline:
+                        terminal = "failed"
+                        message = (
+                            "no se obtuvo la autoridad de movilidad a tiempo"
+                        )
+                        break
+                    self.claim_mobility()
+                    time.sleep(1.0 / RATE_HZ)
+                    continue
+
+                if command.goal_reached:
+                    terminal = "succeeded"
+                    message = (
+                        f"objetivo alcanzado a "
+                        f"{command.distance_remaining:.3f} m"
+                    )
+                    break
+
+                if not progress.update(pose, now):
+                    terminal = "stalled"
+                    message = (
+                        "navegación sin progreso: no avanzó "
+                        f"{PROGRESS_RADIUS_M:.2f} m ni giró "
+                        f"{math.degrees(PROGRESS_ANGLE_RAD):.1f}° durante "
+                        f"{PROGRESS_TIMEOUT_S:.1f} s"
+                    )
+                    break
+
+                velocity = Twist()
+                velocity.linear.x = command.linear_x
+                velocity.angular.z = command.angular_z
+                self.pub_cmd.publish(velocity)
+                self.publish_status("moviendo")
+                time.sleep(1.0 / RATE_HZ)
+        except Exception as error:  # noqa: BLE001
+            terminal = "failed"
+            message = f"error interno de navegación: {error}"
+            self.get_logger().error(message)
+        finally:
+            safe = self.return_to_safe_state(message)
+            with self.state_lock:
+                self.navigation_active = False
+                self.goal_reserved = False
+                self.had_authority = False
+                self.finishing = False
+                self.interrupt_reason = None
+
+        if not safe and terminal != "canceled":
+            terminal = "failed"
+            message += "; no se confirmó el regreso a STAND"
+
+        if terminal == "succeeded":
+            self.publish_status("llegue")
+            self.get_logger().info(message)
+            if goal_handle is not None:
+                goal_handle.succeed()
+        elif terminal == "canceled":
+            self.publish_status("cancelado")
+            self.get_logger().warn(message)
+            if goal_handle is not None:
+                goal_handle.canceled()
+        else:
+            self.publish_status(f"fallo: {message}")
+            self.get_logger().error(message)
+            # Jazzy publica `error_msg`, pero su paquete estable todavía no
+            # define los códigos TIMEOUT/UNKNOWN agregados después en Nav2.
+            # El estado ABORTED y este texto son el contrato portable; inventar
+            # números locales haría incompatible al futuro servidor oficial.
+            result.error_code = NavigateToPose.Result.NONE
+            result.error_msg = message
+            if goal_handle is not None:
+                goal_handle.abort()
+        return result
+
+    def publish_feedback(self, goal_handle, command, started_at: float):
+        if goal_handle is None:
+            return
+        feedback = NavigateToPose.Feedback()
+        with self.state_lock:
+            if self.pose_message is not None:
+                feedback.current_pose = self.pose_message
+        feedback.navigation_time = duration_message(
+            time.monotonic() - started_at
+        )
+        estimate = (
+            command.distance_remaining / max(0.01, 0.30)
+            + abs(command.heading_error) / max(0.01, 0.50)
+        )
+        feedback.estimated_time_remaining = duration_message(estimate)
+        feedback.number_of_recoveries = 0
+        feedback.distance_remaining = float(command.distance_remaining)
+        if hasattr(feedback, "position_tracking_error"):
+            feedback.position_tracking_error = float(
+                command.distance_remaining
+            )
+        if hasattr(feedback, "heading_tracking_error"):
+            feedback.heading_tracking_error = float(command.heading_error)
+        goal_handle.publish_feedback(feedback)
 
     def publish_status(self, text: str):
         self.pub_status.publish(String(data=text))
@@ -185,7 +470,9 @@ class GoTo(Node):
         }
         if reason is not None:
             request["reason"] = reason
-        self.pub_mobility.publish(String(data=json.dumps(request)))
+        self.pub_mobility.publish(
+            String(data=json.dumps(request, ensure_ascii=False))
+        )
 
     def claim_mobility(self, force: bool = False):
         now = time.monotonic()
@@ -196,104 +483,47 @@ class GoTo(Node):
     def stop(self):
         self.pub_cmd.publish(Twist())
 
-    def tick(self):
-        """Un ciclo de navegacion: mirar donde estoy, decidir, mandar velocidad."""
-        if self.pose is None or self.goal is None:
-            return
+    def return_to_safe_state(self, reason: str) -> bool:
+        """Publica cero, libera la movilidad y espera confirmación de STAND."""
+        with self.state_lock:
+            self.finishing = True
+            owner = self.mobility_owner
+        self.stop()
+        if owner == "navigation":
+            self.request_mobility("release", reason)
+        elif owner not in (None, "stand"):
+            # Si el operador tomó el control, no debemos arrebatárselo para
+            # satisfacer artificialmente una poscondición de la autonomía.
+            return True
 
-        # La navegación puede calcular todo lo que quiera, pero no publica
-        # movimiento hasta que el árbitro confirme que posee la movilidad.
-        if self.mobility_owner != "navigation":
-            self.claim_mobility()
-            return
-
-        x, y, yaw = self.pose
-        gx, gy, goal_yaw = self.goal
-        dx, dy = gx - x, gy - y
-        distance = math.hypot(dx, dy)
-
-        # Llegar a un sensor o una mesa incluye terminar mirando hacia ellos.
-        # Un objetivo sin cuaternión conserva el comportamiento anterior y
-        # acepta cualquier orientación final.
-        if distance < TOLERANCE_M:
-            self.position_reached = True
-        elif (
-            self.position_reached
-            and distance > TOLERANCE_M + POSITION_LATCH_BUFFER_M
-        ):
-            self.position_reached = False
-
-        if self.position_reached:
-            if goal_yaw is not None:
-                final_yaw_error = normalize_angle(goal_yaw - yaw)
-                if abs(final_yaw_error) > FINAL_YAW_TOLERANCE_RAD:
-                    cmd = Twist()
-                    # A velocidad fija el G1 cruzaba el objetivo y volvía a
-                    # cruzarlo indefinidamente. Reducir la orden junto con el
-                    # error conserva el giro rápido lejos y permite cerrar los
-                    # últimos grados sin rebotar de un lado al otro.
-                    requested_speed = max(
-                        MIN_FINAL_ANGULAR_VEL,
-                        min(
-                            ANGULAR_VEL,
-                            FINAL_YAW_GAIN * abs(final_yaw_error),
-                        ),
-                    )
-                    cmd.angular.z = math.copysign(
-                        requested_speed,
-                        final_yaw_error,
-                    )
-                    self.pub_cmd.publish(cmd)
-                    return
-
+        deadline = time.monotonic() + SAFE_STAND_TIMEOUT_S
+        while rclpy.ok() and time.monotonic() < deadline:
             self.stop()
-            self.get_logger().info(
-                f"llegue: quedé a {distance:.2f} m del objetivo"
-            )
-            self.publish_status("llegue")
-            self.goal = None
-            self.position_reached = False
-            self.request_mobility("release", "objetivo de navegación terminado")
-            return
-
-        # Error de heading: cuanto tengo que girar para apuntar al objetivo.
-        heading_error = normalize_angle(math.atan2(dy, dx) - yaw)
-
-        cmd = Twist()
-        if abs(heading_error) > TOLERANCE_RAD:
-            # Muy desalineado: girar en el lugar antes de avanzar. Caminar de
-            # costado hacia el objetivo seria mas rapido, pero girar primero es
-            # mas estable en un bipedo y mas facil de mirar.
-            cmd.angular.z = ANGULAR_VEL * (1.0 if heading_error > 0 else -1.0)
-        else:
-            # Alineado: avanzar corrigiendo el heading sobre la marcha. Cerca del
-            # objetivo, bajar la velocidad para no pasarse de largo.
-            # Con 14 cm restantes la fórmula anterior pidió 0,04 m/s y la
-            # posición no cambió durante más de un minuto. Nav2 usa una
-            # velocidad mínima de aproximación; 0,10 m/s es el primer valor
-            # medido para este bípedo, no un ajuste copiado de otro robot.
-            cmd.linear.x = max(
-                MIN_APPROACH_VEL,
-                LINEAR_VEL * min(1.0, distance / 1.0),
-            )
-            cmd.angular.z = 1.0 * heading_error
-
-        self.pub_cmd.publish(cmd)
+            with self.state_lock:
+                if self.mobility_owner == "stand":
+                    return True
+            time.sleep(0.05)
+        with self.state_lock:
+            return self.mobility_owner == "stand"
 
 
 def main():
     rclpy.init()
     node = GoTo()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        # ExternalShutdownException significa que el contexto ya murió;
-        # publicar en ese punto sólo genera una traza roja engañosa.
         if rclpy.ok():
             node.stop()
-            node.request_mobility("release", "nodo de navegación detenido")
+            node.request_mobility(
+                "release",
+                "nodo de navegación detenido",
+            )
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

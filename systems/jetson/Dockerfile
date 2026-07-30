@@ -16,6 +16,7 @@ FROM ros:jazzy-ros-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-nav2-msgs \
     ros-jazzy-vision-msgs \
     iproute2 \
     iputils-ping \

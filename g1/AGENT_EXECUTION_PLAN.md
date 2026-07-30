@@ -50,10 +50,32 @@ Todavía no funciona:
 
 - revisar el resultado después de cada paso;
 - modificar los pasos pendientes;
-- detectar de manera general que una capacidad dejó de progresar;
-- cancelar todas las capacidades mediante un contrato común;
+- migrar al contrato cancelable las capacidades distintas de navegación;
 - adjuntar una imagen pertinente a la revisión;
 - pedir ayuda al operador desde el plan.
+
+## Avance verificado del 30-jul-2026
+
+La navegación ya usa la Action estándar `nav2_msgs/NavigateToPose` bajo el
+nombre `/g1/navigate_to_pose`. El cálculo del movimiento sigue siendo nuestro
+navegador simple, pero el agente ya no depende de un texto suelto para saber si
+terminó.
+
+Quedó medido:
+
+- éxito sin desplazamiento: dos mensajes de progreso y dueño final `STAND`;
+- cancelación durante movimiento: 11 mensajes y dueño final `STAND`;
+- robot sin progresar: abortó tras 3 segundos y 32 mensajes;
+- plazo total vencido: abortó con 20 mensajes;
+- proceso de navegación muerto: la concesión venció y volvió a `STAND`;
+- prueba física: 7,3 cm de error final, altura 0,73 m y 788 mensajes;
+- regresión física: quietud con 2 cm de error, caminata de 2,43 m y frenado en
+  4 cm.
+
+La imagen estable de ROS 2 Jazzy todavía no incluye los códigos numéricos
+`TIMEOUT` y `UNKNOWN` que aparecen en versiones posteriores de Nav2. Por eso
+se usa el estado estándar `ABORTED` junto con `error_msg`; no se inventaron
+códigos locales incompatibles.
 
 ## Arquitectura objetivo de este tramo
 
@@ -170,10 +192,10 @@ La Jetson rechaza cualquier revisión que:
 
 ## Orden de implementación
 
-1. Crear el contrato común de ejecución y los estados de cancelación.
-2. Migrar `navigate_to` y medir distancia, progreso, éxito y bloqueo.
-3. Probar tres fallas inducidas: falta de progreso, proceso muerto y plazo
-   vencido; en las tres debe terminar en `STAND`.
+1. ~~Crear el contrato común de ejecución y los estados de cancelación.~~
+2. ~~Migrar `navigate_to` y medir distancia, progreso, éxito y bloqueo.~~
+3. ~~Probar tres fallas inducidas: falta de progreso, proceso muerto y plazo
+   vencido; en las tres debe terminar en `STAND`.~~
 4. Agregar la revisión remota después de cada paso, inicialmente sin imagen.
 5. Validar de nuevo los pasos pendientes y conservar el plan anterior si la
    revisión es inválida.

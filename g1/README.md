@@ -43,7 +43,7 @@ hasta volver a pasar las pruebas físicas.
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
-| Navegación a un punto | funciona — `/g1/goal` → `/g1/nav_status` |
+| Navegación a un punto | funciona — Action cancelable `/g1/navigate_to_pose`, con progreso y regreso a `STAND` |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
 | Ejecutor de misión | integrado hasta la búsqueda; se bloquea explícitamente porque falta el barrido visual activo |
 | Agarrar | pendiente (lo hará un VLA) |
@@ -60,7 +60,7 @@ versión anterior quedaron fuera del alcance actual.
  [ intelligence_service.py ] <---HTTP--- [ agent/agent.py ]
        modelos visuales                    ejecuta la misión
               ^                                  |
-              | recorte/cuadro JPEG        /g1/goal /g1/arm_pose
+              | recorte/cuadro JPEG  /g1/navigate_to_pose /g1/arm_pose
               |                                  |
               +-- [ open_vocabulary_detector.py ] [ object_detector.py ]
                          |                 \             /
@@ -85,8 +85,10 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/mission` | String | vos (o el reconocimiento de voz, más adelante) |
 | `/g1/mission_state` | String (JSON transitorio) | estado, pasos y decisiones verificables de la misión |
 | `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
-| `/g1/goal` | PoseStamped | el agente |
-| `/g1/nav_status` | String | la navegación |
+| `/g1/navigate_to_pose` | Action NavigateToPose | objetivo, progreso, resultado y cancelación de navegación |
+| `/g1/navigation/goal` | PoseStamped | copia observable del objetivo para el tablero |
+| `/g1/goal` | PoseStamped | compatibilidad temporal con verificadores anteriores |
+| `/g1/nav_status` | String | relato temporal para verificadores anteriores |
 | `/g1/object_detections` | Detection2DArray | el detector neuronal |
 | `/g1/perception/search_request` | String (JSON) | agente o verificador |
 | `/g1/open_vocabulary_detections` | Detection2DArray | búsqueda puntual |
@@ -131,7 +133,9 @@ ejecución honestamente al llegar a ellas.
 | `lidar.py` | integración RTX experimental, apagada por defecto |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
-| `skills/go_to.py` | navegación a un punto |
+| `navigation_core.py` | cálculo puro de movimiento y verificación de progreso |
+| `execution_core.py` | vigilancia común de plazo y pérdida de respuesta |
+| `skills/go_to.py` | servidor cancelable de navegación con contrato de Nav2 |
 | `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
@@ -222,8 +226,9 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Ejecución adaptable**: ejecutar una capacidad, medir progreso, permitir
-   cancelación segura y revisar sólo el plan pendiente. Diseño y criterios en
+1. **Revisión adaptable**: navegación ya mide progreso, se cancela y vuelve a
+   `STAND`; falta que el modelo revise el resultado y pueda modificar sólo el
+   plan pendiente. Diseño y criterios en
    [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
 2. **Agregar el barrido visual activo** para buscar la mesa correcta sin pasarle una coordenada.
 3. **Convertir la superficie encontrada en una pose segura de aproximación.**

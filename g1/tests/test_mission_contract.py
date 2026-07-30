@@ -45,6 +45,26 @@ class MissionContractTest(unittest.TestCase):
         self.assertEqual(step["result"], "home guardado en (0.00, 0.00)")
         self.assertGreaterEqual(len(self.published), 4)
 
+    def test_preserves_measured_evidence_from_a_step(self):
+        self.tracker.begin("Traé el objeto", "rules")
+        self.tracker.set_plan(build_demo_plan())
+        self.tracker.start_step("navigate_to_clock")
+        state = self.tracker.finish_step(
+            "navigate_to_clock",
+            "llegó al reloj",
+            {"distance_remaining_m": 0.073},
+        )
+
+        step = next(
+            item
+            for item in state["steps"]
+            if item["id"] == "navigate_to_clock"
+        )
+        self.assertEqual(
+            step["measurements"],
+            {"distance_remaining_m": 0.073},
+        )
+
     def test_blocked_step_stops_the_mission_honestly(self):
         self.tracker.begin("Traé el objeto", "rules")
         self.tracker.set_plan(build_demo_plan())
