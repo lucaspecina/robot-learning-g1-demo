@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Convierte una mesa detectada en imagen en un punto 3D del mapa.
+"""Convierte detecciones 2D en puntos 3D del mapa.
 
 Corre en la Jetson y sólo usa interfaces transferibles al G1 real: color,
 profundidad, calibración, la relación temporal entre cámara y mapa, y la
 detección 2D. No consulta posiciones internas de Isaac ni conoce la escena.
+
+Las mesas se miden por su color para no mezclar fondo. Los objetos pequeños se
+miden dentro de su caja. En ambos casos la salida es una superficie visible:
+no inventa el centro oculto ni una orientación completa para agarrar.
 """
 import json
 import sys
@@ -41,8 +45,12 @@ from camera_stream import (  # noqa: E402
     color_array,
     depth_array,
 )
-from depth_geometry import colored_table_point  # noqa: E402
-from perception_core import bounded_box  # noqa: E402
+from depth_geometry import colored_table_point, visible_object_point  # noqa: E402
+from perception_core import (  # noqa: E402
+    TABLE_CLASS_NAMES,
+    TRANSPORT_OBJECT_CLASS_NAMES,
+    bounded_box,
+)
 
 MAX_CAMERA_FRAMES = 120
 TF_HISTORY_S = 120.0
@@ -56,9 +64,9 @@ EXACT_CAMERA_QOS = QoSProfile(
 )
 
 
-class TableLocalizer(Node):
+class SpatialLocalizer(Node):
     def __init__(self):
-        super().__init__("table_localizer")
+        super().__init__("spatial_localizer")
         self.frames = SynchronizedCameraFrames(MAX_CAMERA_FRAMES)
         # Grounding DINO vive en el servidor y puede responder mucho después
         # del cuadro. Conservar el historial evita usar la pose actual para
@@ -71,9 +79,14 @@ class TableLocalizer(Node):
             self,
             spin_thread=False,
         )
-        self.detections_pub = self.create_publisher(
+        self.table_detections_pub = self.create_publisher(
             Detection3DArray,
             "/g1/table_detections_3d",
+            qos_profile_sensor_data,
+        )
+        self.object_detections_pub = self.create_publisher(
+            Detection3DArray,
+            "/g1/object_detections_3d",
             qos_profile_sensor_data,
         )
         self.status_pub = self.create_publisher(
@@ -102,11 +115,17 @@ class TableLocalizer(Node):
         self.create_subscription(
             Detection2DArray,
             "/g1/open_vocabulary_detections",
-            self.on_detections,
+            self.on_table_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection2DArray,
+            "/g1/object_detections",
+            self.on_object_detections,
             qos_profile_sensor_data,
         )
         self.get_logger().info(
-            "localizador de mesas listo; espera detecciones visuales"
+            "localizador 3D listo; espera mesas y objetos detectados"
         )
 
     def publish_status(self, state: str, **fields):
@@ -119,26 +138,75 @@ class TableLocalizer(Node):
             )
         )
 
-    def on_detections(self, message: Detection2DArray):
+    @staticmethod
+    def class_name(detection) -> str | None:
+        if not detection.results:
+            return None
+        best = max(
+            detection.results,
+            key=lambda result: result.hypothesis.score,
+        )
+        return best.hypothesis.class_id
+
+    def on_table_detections(self, message: Detection2DArray):
+        selected = [
+            detection
+            for detection in message.detections
+            if self.class_name(detection) in TABLE_CLASS_NAMES
+        ]
+        self.localize_message(
+            message,
+            selected,
+            self.localize_table,
+            self.table_detections_pub,
+            "mesa",
+        )
+
+    def on_object_detections(self, message: Detection2DArray):
+        selected = [
+            detection
+            for detection in message.detections
+            if self.class_name(detection) in TRANSPORT_OBJECT_CLASS_NAMES
+        ]
+        self.localize_message(
+            message,
+            selected,
+            self.localize_object,
+            self.object_detections_pub,
+            "objeto",
+        )
+
+    def localize_message(
+        self,
+        message: Detection2DArray,
+        detections,
+        localizer,
+        publisher,
+        target_kind: str,
+    ):
+        if not detections:
+            return
         frame = self.frames.complete(message.header)
         if frame is None:
             self.publish_status(
                 "failed",
+                target_kind=target_kind,
                 error="no se conservó el cuadro sincronizado",
             )
             self.get_logger().warning(
-                "descarto detección: no se conservó su cuadro sincronizado"
+                f"descarto {target_kind}: no se conservó su cuadro sincronizado"
             )
             return
         output = Detection3DArray()
         output.header.stamp = message.header.stamp
         output.header.frame_id = "map"
-        for detection in message.detections:
+        for detection in detections:
             try:
-                localized = self.localize(detection, message.header, frame)
+                localized = localizer(detection, message.header, frame)
             except (ValueError, TransformException) as error:
                 self.publish_status(
                     "failed",
+                    target_kind=target_kind,
                     detection_id=detection.id,
                     error=str(error),
                 )
@@ -151,6 +219,7 @@ class TableLocalizer(Node):
             class_id = localized.results[0].hypothesis.class_id
             self.publish_status(
                 "localized",
+                target_kind=target_kind,
                 detection_id=detection.id,
                 class_id=class_id,
                 x=round(point.x, 3),
@@ -158,13 +227,14 @@ class TableLocalizer(Node):
                 z=round(point.z, 3),
             )
             self.get_logger().info(
-                f"{class_id} ubicada en "
+                f"{class_id} ubicado en "
                 f"({point.x:.2f}, {point.y:.2f}, {point.z:.2f})"
             )
         if output.detections:
-            self.detections_pub.publish(output)
+            publisher.publish(output)
 
-    def localize(self, detection, header, frame) -> Detection3D:
+    @staticmethod
+    def measurement_inputs(detection, frame):
         color_message = frame["color"]
         depth_message = frame["depth"]
         info = frame["info"]
@@ -184,47 +254,87 @@ class TableLocalizer(Node):
             color_message.width,
             color_message.height,
         )
-        camera_point = colored_table_point(
-            color_array(color_message),
-            depth_array(depth_message),
-            np.asarray(info.k, dtype=np.float64).reshape(3, 3),
-            box,
-        )
+        return color_message, depth_message, info, box
+
+    def map_point(self, camera_point, header):
         stamped_point = PointStamped()
         stamped_point.header = header
         stamped_point.point.x = camera_point.right_m
         stamped_point.point.y = camera_point.down_m
         stamped_point.point.z = camera_point.forward_m
-        map_point = self.tf_buffer.transform(
+        return self.tf_buffer.transform(
             stamped_point,
             "map",
             timeout=Duration(seconds=2.0),
         )
 
+    @staticmethod
+    def make_detection(
+        detection,
+        header,
+        map_point,
+        class_id: str,
+    ) -> Detection3D:
         result = Detection3D()
         result.header.stamp = header.stamp
         result.header.frame_id = "map"
         result.id = detection.id
         result.bbox.center.position = map_point.point
         result.bbox.center.orientation.w = 1.0
-        # La profundidad produce un punto observado de la superficie, no el
-        # volumen entero de la mesa. Un tamaño cero evita inventar dimensiones
-        # que el sensor todavía no midió.
         hypothesis = ObjectHypothesisWithPose()
-        hypothesis.hypothesis.class_id = f"{camera_point.color}_table"
+        hypothesis.hypothesis.class_id = class_id
         if detection.results:
-            hypothesis.hypothesis.score = (
-                detection.results[0].hypothesis.score
+            hypothesis.hypothesis.score = max(
+                item.hypothesis.score
+                for item in detection.results
             )
         hypothesis.pose.pose.position = map_point.point
         hypothesis.pose.pose.orientation.w = 1.0
         result.results.append(hypothesis)
         return result
 
+    def localize_table(self, detection, header, frame) -> Detection3D:
+        color_message, depth_message, info, box = self.measurement_inputs(
+            detection,
+            frame,
+        )
+        camera_point = colored_table_point(
+            color_array(color_message),
+            depth_array(depth_message),
+            np.asarray(info.k, dtype=np.float64).reshape(3, 3),
+            box,
+        )
+        return self.make_detection(
+            detection,
+            header,
+            self.map_point(camera_point, header),
+            f"{camera_point.color}_table",
+        )
+
+    def localize_object(self, detection, header, frame) -> Detection3D:
+        _color_message, depth_message, info, box = self.measurement_inputs(
+            detection,
+            frame,
+        )
+        camera_point = visible_object_point(
+            depth_array(depth_message),
+            np.asarray(info.k, dtype=np.float64).reshape(3, 3),
+            box,
+        )
+        # Una caja 2D más profundidad sólo mide la cara visible. El tamaño cero
+        # y la orientación identidad evitan presentar eso como la pose completa
+        # que FoundationPose deberá aportar para el agarre real.
+        return self.make_detection(
+            detection,
+            header,
+            self.map_point(camera_point, header),
+            "transport_object",
+        )
+
 
 def main():
     rclpy.init()
-    node = TableLocalizer()
+    node = SpatialLocalizer()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):

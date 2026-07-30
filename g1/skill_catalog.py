@@ -190,6 +190,24 @@ SKILL_CATALOG = [
         ],
     },
     {
+        "name": "find_object",
+        "description": (
+            "Espera una detección nueva del objeto transportable, combina su "
+            "caja con profundidad y calibración, y verifica que el punto 3D "
+            "esté sobre la mesa elegida. Entrega sólo la superficie visible; "
+            "no afirma conocer todavía la orientación completa de agarre."
+        ),
+        "availability": "ready",
+        "variants": [
+            {
+                "argument": None,
+                "argument_description": "No recibe argumento.",
+                "preconditions": ["at_table_staging", "arms_ready"],
+                "effects": ["object_location_known"],
+            }
+        ],
+    },
+    {
         "name": "align_with_table",
         "description": (
             "Ajusta finamente la base usando nuevas mediciones de la mesa y "
@@ -204,7 +222,11 @@ SKILL_CATALOG = [
                 "argument_description": (
                     "Mesa elegida y confirmada desde la preaproximación."
                 ),
-                "preconditions": ["at_table_staging", "arms_ready"],
+                "preconditions": [
+                    "at_table_staging",
+                    "arms_ready",
+                    "object_location_known",
+                ],
                 "effects": ["at_selected_table"],
             }
         ],

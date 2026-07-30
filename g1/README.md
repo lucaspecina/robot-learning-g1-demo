@@ -97,6 +97,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/perception/search_request` | String (JSON) | agente o verificador |
 | `/g1/open_vocabulary_detections` | Detection2DArray | búsqueda puntual |
 | `/g1/table_detections_3d` | Detection3DArray | localizador de mesas |
+| `/g1/object_detections_3d` | Detection3DArray | superficie visible del objeto transportable |
 | `/g1/perception/search_status` | String (JSON) | búsqueda puntual |
 | `/g1/detections` | String (JSON) | el adaptador de la demo |
 | `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
@@ -146,7 +147,7 @@ ejecución honestamente al llegar a ellas.
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
 | `skills/open_vocabulary_detector.py` | manda un cuadro al detector remoto sólo por pedido |
-| `skills/table_localizer.py` | une caja, profundidad y pose histórica; publica el punto en el mapa |
+| `skills/table_localizer.py` | une cajas, profundidad y pose histórica para mesas y objetos |
 | `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
 | `mission_contract.py` | contrato de misión, pasos, estados y decisiones |
 | `skill_catalog.py` | catálogo explicado y contratos que recibe el planificador |
@@ -196,6 +197,15 @@ cámara. La pose gruesa quedó por eso a 2,2 m del punto de superficie medido.
 La validación integral la confirmó a 1,968 m, con 9,8 cm de error de
 navegación, confianza 0,94 y cuerpo a 0,737 m. Esta etapa no autoriza el
 agarre; `align_with_table` sigue separado y pendiente.
+
+**Una caja y profundidad no son una pose de agarre.** El objeto simulado es
+un cilindro liso que RT-DETR reconoce de forma estable como `cup`, no como
+`bottle`. El contrato acepta ambos como `transport_object`, mide su superficie
+visible y verifica que esté sobre la mesa elegida. La posición y orientación
+completas seguirán el flujo de NVIDIA con FoundationPose o la policy/VLA de
+agarre; la etapa actual no inventa esos datos faltantes. Tres mediciones 3D
+quedaron a 3,2 cm en horizontal y 5–6 mm en altura de la referencia física;
+el control del detector dio 6/6 positivos y 0/5 falsos.
 
 **Los plazos medidos en tiempo real no sirven** con el simulador corriendo al
 20 %: recorrer 8 m lleva más de dos minutos de reloj de pared. La solución de
@@ -254,19 +264,21 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Implementar `align_with_table`**, el control visual fino posterior a la
+1. **Ejecutar la misión integral con `find_object`**, cuya detección y posición
+   3D ya pasaron por separado.
+2. **Implementar `align_with_table`**, el control visual fino posterior a la
    preaproximación ya validada. Debe medir base, mesa y objeto continuamente;
    no puede convertir una tolerancia gruesa en permiso para agarrar.
-2. **Guardar `home` y regresar** sin carga dentro de la misión completa.
-3. **Migrar el barrido completo a una Action cancelable**, conservando el
+3. **Guardar `home` y regresar** sin carga dentro de la misión completa.
+4. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
-4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
+5. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
-5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
+6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
    verificador; hasta entonces la profundidad de cámara mide objetos, no crea
    una falsa localización perfecta.
-6. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+7. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-7. **El agarre** con un VLA entrenado por nosotros.
-8. **Voz** para reemplazar la publicación manual de texto; el planificador
+8. **El agarre** con un VLA entrenado por nosotros.
+9. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

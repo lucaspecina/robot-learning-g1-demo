@@ -34,7 +34,13 @@ DEFAULT_REVISION = "df939e661d8c52e80608d1ec566561aabd25a4e7"
 # cuadros de pared no produjeron ninguna mesa ni siquiera a 0,15. El 0,25
 # conserva 6/6 positivos medidos sin agregar falsos positivos en 5 controles.
 DEFAULT_CONFIDENCE = 0.25
-TARGET_CLASSES = {"clock", "bottle", "diningtable", "dining table"}
+TARGET_CLASSES = {
+    "clock",
+    "bottle",
+    "cup",
+    "diningtable",
+    "dining table",
+}
 
 
 class ObjectDetector(Node):

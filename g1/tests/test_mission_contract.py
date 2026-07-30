@@ -24,6 +24,7 @@ class MissionContractTest(unittest.TestCase):
 
         self.assertIn("choose_table", ids)
         self.assertIn("scan_for_table", ids)
+        self.assertIn("find_object", ids)
         self.assertIn("align_with_table", ids)
         self.assertIn("return_home", ids)
         self.assertNotIn("search_person", ids)

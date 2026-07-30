@@ -29,7 +29,15 @@ class SkillCatalogTest(unittest.TestCase):
             initial_facts=INITIAL_WORLD_FACTS,
         )
 
-        self.assertEqual(len(validated), 12)
+        self.assertEqual(len(validated), 13)
+        self.assertEqual(
+            next(
+                step
+                for step in validated
+                if step["id"] == "find_object"
+            )["availability"],
+            "ready",
+        )
         self.assertEqual(
             next(
                 step

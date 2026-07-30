@@ -6,6 +6,7 @@ import numpy as np
 from perception_core import (
     CLASS_NAMES,
     TABLE_CLASS_NAMES,
+    TRANSPORT_OBJECT_CLASS_NAMES,
     ImageBox,
     bounded_box,
     classify_table_color,
@@ -24,6 +25,11 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertIn("dining table", TABLE_CLASS_NAMES)
         self.assertIn("a red table", TABLE_CLASS_NAMES)
         self.assertIn("a table", TABLE_CLASS_NAMES)
+
+    def test_cup_and_bottle_share_the_transport_role(self):
+        self.assertEqual(CLASS_NAMES["cup"], "objeto")
+        self.assertIn("cup", TRANSPORT_OBJECT_CLASS_NAMES)
+        self.assertIn("bottle", TRANSPORT_OBJECT_CLASS_NAMES)
 
     def test_box_is_clipped_to_image(self):
         self.assertEqual(

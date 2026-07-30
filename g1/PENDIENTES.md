@@ -291,6 +291,14 @@ ocho esferas de los pies contra MuJoCo.
   con `9,8 cm` de error, reconfirmó la mesa a `1,968 m`, confianza `0,94`,
   cuerpo a `0,737 m` y brazos listos con `0,0254 rad` de error. Falta
   `align_with_table`; esa etapa deberá exigir los `2–3 cm` definidos arriba.
+- **Objeto sobre la mesa, localizado en 3D**: el cilindro liso de la escena se
+  reconoce como `cup`, no como `bottle`. Con el umbral general sin cambios,
+  seis cuadros positivos dieron `0,49–0,62` y cinco controles sin objeto
+  `0,03–0,04`. Tres posiciones publicadas en `Detection3DArray` quedaron a
+  `3,2 cm` en horizontal y `5–6 mm` en altura de la referencia física, con
+  cuerpo a `0,739 m` y dueño `STAND`. Es una superficie visible para búsqueda
+  y aproximación, no la orientación completa que exige el agarre. Falta la
+  corrida integral del nuevo paso `find_object`.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso

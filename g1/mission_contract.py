@@ -81,6 +81,12 @@ def build_demo_plan() -> list[dict]:
             "label": "Preparar los brazos",
         },
         {
+            "id": "find_object",
+            "skill": "find_object",
+            "argument": None,
+            "label": "Ubicar el objeto sobre la mesa",
+        },
+        {
             "id": "align_with_table",
             "skill": "align_with_table",
             "argument": "$selected_table",

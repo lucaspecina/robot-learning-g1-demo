@@ -55,7 +55,7 @@ start_layers() {
     launch "navegacion"           goto.log              skills/go_to.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
-    launch "posición de mesas"    table_localizer.log   skills/table_localizer.py
+    launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
 }
@@ -259,7 +259,7 @@ reset)
     launch "navegacion"           goto.log              skills/go_to.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
-    launch "posición de mesas"    table_localizer.log   skills/table_localizer.py
+    launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"

@@ -26,6 +26,10 @@ class ImageBox:
 CLASS_NAMES = {
     "clock": "reloj",
     "bottle": "botella",
+    # El objeto de la demo es un cilindro liso: en seis cuadros RT-DETR lo
+    # clasificó de forma estable como cup (0,49--0,62), no como bottle
+    # (0,15--0,17). Ambos nombres representan el mismo rol físico transportable.
+    "cup": "objeto",
     # El checkpoint fijado usa la etiqueta de Pascal VOC sin espacio. El
     # paquete acelerado puede usar la variante de COCO; aceptar ambas mantiene
     # estable el contrato ROS al cambiar el backend.
@@ -34,6 +38,10 @@ CLASS_NAMES = {
     "a red table": "mesa",
     "a blue table": "mesa",
     "a table": "mesa",
+}
+TRANSPORT_OBJECT_CLASS_NAMES = {
+    "bottle",
+    "cup",
 }
 TABLE_CLASS_NAMES = {
     "diningtable",

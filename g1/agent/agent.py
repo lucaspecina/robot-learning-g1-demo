@@ -16,6 +16,7 @@ robot y conserva, por separado, tres tipos de evidencia:
                                           resultado nuevo del detector local
            /g1/perception/search_status   resultado de búsqueda puntual
            /g1/table_detections_3d        mesa ubicada desde sensores
+           /g1/object_detections_3d       superficie visible del objeto
 
   usa:     /g1/navigate_to_pose           tarea de navegación cancelable
            /g1/spin                       giro relativo cancelable
@@ -72,6 +73,7 @@ from execution_core import FeedbackWatchdog
 from mission_contract import MissionTracker, build_demo_plan, validate_plan
 from model_trace import build_model_event
 from navigation_core import normalize_angle
+from object_localization import select_object_near_table
 from open_vocabulary_core import make_search_request
 from scene_layout import NAVIGATION_TARGETS, WORLD_BOUNDS
 from skill_catalog import (
@@ -146,6 +148,7 @@ TABLE_STAGING_MAX_SURFACE_DISTANCE_M = 2.80
 # alineación de agarre tendrá un límite propio y mucho más estricto.
 TABLE_STAGING_MAX_YAW_ERROR_DEG = 20.0
 MAX_TABLE_APPROACH_ATTEMPTS_PER_MISSION = 2
+OBJECT_LOCALIZATION_TIMEOUT_S = 12.0
 MIN_SAFE_BODY_HEIGHT_M = 0.65
 
 
@@ -188,6 +191,7 @@ class Agent(Node):
         self.arm_status = None
         self.search_status = None
         self.localized_tables = {}
+        self.localized_objects = []
         self.mission_thread = None
         self.clock_crop = None
         self.clock_crop_ref = None
@@ -286,6 +290,12 @@ class Agent(Node):
             Detection3DArray,
             "/g1/table_detections_3d",
             self.on_table_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection3DArray,
+            "/g1/object_detections_3d",
+            self.on_object_detections,
             qos_profile_sensor_data,
         )
 
@@ -402,6 +412,35 @@ class Agent(Node):
                     "frame_ref": frame_reference,
                 }
             )
+
+    def on_object_detections(self, message: Detection3DArray):
+        frame_reference = image_ref(
+            VISUAL_EVIDENCE_TOPIC,
+            message.header,
+        )
+        received_at = time.monotonic()
+        for detection in message.detections:
+            if not detection.results:
+                continue
+            hypothesis = detection.results[0].hypothesis
+            point = detection.bbox.center.position
+            detector_class = detection.id.split("-", 1)[0]
+            self.localized_objects.append(
+                {
+                    "class_id": hypothesis.class_id,
+                    "detector_class": detector_class,
+                    "confidence": float(hypothesis.score),
+                    "x": float(point.x),
+                    "y": float(point.y),
+                    "z": float(point.z),
+                    "coordinate_frame": message.header.frame_id or "map",
+                    "frame_ref": frame_reference,
+                    "received_at": received_at,
+                }
+            )
+        # El detector corre continuamente. Conservar una ventana acotada evita
+        # que una misión posterior reutilice una observación vieja por error.
+        self.localized_objects = self.localized_objects[-60:]
 
     def on_mission(self, message: String):
         """Ejecuta en otro hilo para no bloquear las entradas de sensores."""
@@ -945,6 +984,8 @@ class Agent(Node):
             return self.approach_table(argument)
         if skill == "set_arm_pose":
             return self.set_arm_pose(str(argument))
+        if skill == "find_object":
+            return self.find_object()
         if skill == "align_with_table":
             return blocked(
                 "falta la alineación visual fina de la base con la mesa",
@@ -1821,6 +1862,56 @@ class Agent(Node):
                 )
             time.sleep(0.1)
         return failed(f"los brazos no confirmaron la postura {ros_pose}")
+
+    def find_object(self) -> dict:
+        """Espera una medición nueva y la asocia con la mesa seleccionada."""
+        table_point = self.mission_context.get("table_point")
+        if not isinstance(table_point, dict):
+            return failed("falta la posición 3D de la mesa elegida")
+        started_at = time.monotonic()
+        deadline = started_at + OBJECT_LOCALIZATION_TIMEOUT_S
+        while time.monotonic() < deadline:
+            fresh = [
+                candidate
+                for candidate in self.localized_objects
+                if candidate.get("received_at", 0.0) >= started_at
+            ]
+            selected = select_object_near_table(fresh, table_point)
+            if selected is None:
+                time.sleep(0.1)
+                continue
+            self.mission_context["object_point"] = selected
+            if not self.set_review_evidence(
+                "cuadro exacto que ubicó el objeto sobre la mesa elegida",
+                selected["frame_ref"],
+            ):
+                return failed(
+                    "el objeto fue ubicado, pero no se conservó el cuadro "
+                    "exacto que originó la medición"
+                )
+            horizontal_error = math.hypot(
+                selected["x"] - table_point["x"],
+                selected["y"] - table_point["y"],
+            )
+            return succeeded(
+                "ubicó el objeto transportable sobre la mesa elegida",
+                {
+                    "detector_class": selected["detector_class"],
+                    "confidence": round(selected["confidence"], 3),
+                    "x_m": round(selected["x"], 3),
+                    "y_m": round(selected["y"], 3),
+                    "z_m": round(selected["z"], 3),
+                    "distance_to_table_point_m": round(
+                        horizontal_error,
+                        3,
+                    ),
+                    "pose_quality": "visible_surface_only",
+                },
+            )
+        return failed(
+            "no apareció un objeto transportable sobre la mesa elegida",
+            {"timeout_s": OBJECT_LOCALIZATION_TIMEOUT_S},
+        )
 
     # ---------- esperas ----------
 

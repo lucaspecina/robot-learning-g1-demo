@@ -232,6 +232,49 @@ refinado. No es el servidor Docking de Nav2 ni una alineación de agarre: el
 navegador actual sólo funciona en la habitación despejada y todavía no tiene
 mapa local de obstáculos.
 
+## Del objeto visible a una posición 3D: validado el 30 de julio de 2026
+
+El flujo oficial de manipulación de NVIDIA separa dos datos que no deben
+confundirse:
+
+1. RT-DETR o Grounding DINO entrega una caja 2D del objeto;
+2. FoundationPose combina esa evidencia con color, profundidad y una malla 3D
+   para estimar la posición y orientación completas del objeto;
+3. publica `vision_msgs/Detection3DArray` para que planificación y agarre no
+   dependan del detector concreto.
+
+La VM T4 actual no ejecuta el paquete acelerado de Isaac ROS que usará la
+Jetson real. Como peldaño compatible, el mismo localizador que mide mesas ahora
+puede medir la **superficie visible** dentro de una caja RT-DETR y publicar
+`/g1/object_detections_3d`. El tamaño queda en cero y la orientación identidad:
+son marcas explícitas de que todavía no existe una pose completa de agarre.
+`find_object` sólo acepta ese punto si está a menos de 0,75 m del punto de la
+mesa elegida.
+
+El objeto simulado actual es un cilindro liso sin cuello. En seis cuadros
+consecutivos desde la preaproximación, RT-DETR colocó la misma caja y lo llamó
+`cup` con 0,49–0,62, `vase` con 0,21–0,26 y `bottle` con 0,15–0,17. En cinco
+cuadros sin objeto, `cup` quedó en 0,03–0,04. Por eso el contrato interno se
+llama `transport_object` y acepta `cup` o `bottle`; el umbral general permaneció
+en 0,25 y dio 6/6 positivos y 0/5 falsos en este control.
+
+Desde la pose de observación roja, tres cuadros independientes produjeron:
+
+| Confianza | Punto medido `(x, y, z)` m | Error horizontal | Error vertical |
+|---:|---|---:|---:|
+| 0,655 | `(3,968; 2,604; 0,885)` | 3,2 cm | 5,5 mm |
+| 0,657 | `(3,968; 2,604; 0,884)` | 3,2 cm | 5,6 mm |
+| 0,716 | `(3,968; 2,604; 0,884)` | 3,2 cm | 5,6 mm |
+
+La referencia física era `(4,0; 2,6; 0,89)` m y sólo la usó el verificador.
+El robot terminó a 0,739 m de altura y con `STAND` como único dueño. Falta
+ejecutar la misión integral con el nuevo paso `find_object`; la medición y su
+asociación geométrica ya están cerradas.
+
+Esto habilita búsqueda y aproximación. No habilita el agarre: para eso se
+integrará FoundationPose o la policy/VLA de manipulación prevista, con la malla
+del objeto, y se medirá su pose completa.
+
 Referencias oficiales:
 
 - Unitree G1, sensores: https://www.unitree.com/mobile/g1/
@@ -255,3 +298,7 @@ Referencias oficiales:
   https://docs.nav2.org/tutorials/docs/using_docking.html
 - Configuración y tolerancias de Nav2 Docking:
   https://docs.nav2.org/configuration/packages/configuring-docking-server.html
+- Flujo oficial de manipulación de NVIDIA:
+  https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_manipulation/packages/isaac_ros_manipulation_bringup/index.html
+- FoundationPose y su salida `Detection3DArray`:
+  https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_pose_estimation/isaac_ros_foundationpose/
