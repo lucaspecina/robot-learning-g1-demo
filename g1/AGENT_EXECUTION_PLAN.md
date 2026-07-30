@@ -1,7 +1,7 @@
 # Plan de ejecución adaptable del agente
 
-Estado de esta decisión: **ejecución adaptable sin imágenes implementada y
-verificada**, 30-jul-2026.
+Estado de esta decisión: **ejecución adaptable con evidencia visual puntual y
+búsqueda activa implementada y verificada**, 30-jul-2026.
 
 Este documento existe para poder retomar el trabajo en una sesión nueva sin
 reconstruir decisiones desde el chat. Describe el estado actual, el diseño que
@@ -43,12 +43,14 @@ Ya funciona:
 - trazabilidad de entrada exacta, salida literal y plan aceptado;
 - ejecución secuencial del plan;
 - revisión remota después de cada paso y después de cada falla;
-- decisiones `continue`, `retry`, `revise`, `ask_human` y `stop` validadas en
-  el servidor y nuevamente en la Jetson;
+- decisiones `continue`, `complete`, `retry`, `revise`, `ask_human` y `stop`
+  validadas en el servidor y nuevamente en la Jetson;
 - un único reintento por paso, impuesto localmente aunque el modelo pida más;
 - reemplazo exclusivo de pasos pendientes sin borrar el historial;
 - imágenes puntuales enlazadas por la fecha exacta del sensor para
-  `look_at`, `read_clock` y `search_table`;
+  `look_at`, `read_clock`, `search_table` y `scan_for_table`;
+- barrido activo de cinco vistas superpuestas con giro cancelable, detector
+  local como filtro y Grounding DINO como confirmación;
 - tablero con plan inicial, última revisión e intercambio literal del modelo.
 
 La prueba real original produjo los 11 pasos correctos en 4,3 segundos. La
@@ -56,9 +58,23 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
-Las 71 pruebas locales de `g1` y las 17 del servicio externo pasan juntas.
+Las 81 pruebas locales de `g1` y las 18 del servicio externo pasan juntas.
 El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
 servidor y mantiene un estado vacío estable.
+
+La misión completa hasta localizar la mesa pasó dos veces. En la primera
+corrida llegó al reloj con 11,7 cm de error, confirmó el reloj con 0,949, leyó
+`09:00` y encontró la mesa roja en la cuarta vista. Hubo un solo candidato,
+una sola llamada remota y la superficie medida cayó en `(3,674; 2,370; 0,671)`
+m; el barrido desplazó la base 17,1 cm y terminó en `STAND`. La segunda corrida
+volvió a encontrarla en la cuarta vista, en `(3,65; 2,78)` m, y enlazó el JPEG
+exacto de 25.320 bytes a la revisión final.
+
+Esa segunda corrida descubrió una ambigüedad del contrato: el modelo escribió
+que la misión estaba cumplida pero sólo podía elegir `continue` o `stop`, y
+eligió `stop`. Se agregó `complete` como cierre exitoso explícito. Una llamada
+real posterior con `gpt-4.1-mini` devolvió `complete`; servidor y Jetson
+rechazan usarlo después de una falla o si todavía quedan pasos.
 
 Todavía no funciona:
 
@@ -118,7 +134,7 @@ resultado + progreso + mediciones + imagen opcional
         ↓
 primero dejar el robot en un estado local seguro
         ↓
-modelo: continuar / repetir / modificar / pedir ayuda / terminar
+modelo: continuar / completar / repetir / modificar / pedir ayuda / detener
         ↓
 validar otra vez solamente la parte pendiente
         ↓
@@ -169,6 +185,8 @@ Habrá límites duros para evitar ciclos infinitos:
 
 - máximo 20 decisiones por misión en la primera versión;
 - un reintento automático del mismo paso ante el mismo error;
+- máximo dos barridos completos por misión; otro exige cambiar el punto de
+  observación o pedir ayuda;
 - una respuesta inválida del modelo no reemplaza el plan validado;
 - un corte de red nunca impide cancelar localmente ni mantener `STAND`.
 
@@ -202,6 +220,8 @@ una pregunta visual.
 La respuesta tendrá formato estricto y una de estas decisiones:
 
 - `continue`: conservar el plan pendiente;
+- `complete`: cerrar con éxito sólo si el último paso tuvo éxito y no queda
+  ningún paso pendiente;
 - `retry`: repetir la capacidad recién fallada, dentro del límite local;
 - `revise`: reemplazar únicamente los pasos todavía no ejecutados;
 - `ask_human`: pasar a `STAND` y mostrar una pregunta concreta;
@@ -229,7 +249,7 @@ La Jetson rechaza cualquier revisión que:
 6. ~~Adjuntar imágenes puntuales a `look_at`, `read_clock` y
    `search_table`.~~
 7. ~~Agregar `scan_for_table` con giro cancelable, vistas nuevas y
-   confirmación remota sólo ante candidatos.~~
+   confirmación remota sólo ante candidatos.~~ Dos corridas físicas pasaron.
 8. Migrar brazos y demás capacidades listas al mismo contrato.
 9. ~~Mostrar en el tablero plan original, revisión, evidencia, cancelación y
    plan vigente.~~ Falta la aprobación visual de Lucas.
@@ -252,7 +272,8 @@ armará el plan inicial y el tablero lo mostrará. El robot:
 5. elegirá la mesa roja o azul mediante la regla determinista;
 6. buscará la mesa alrededor con cinco vistas superpuestas y sólo llamará al
    detector remoto ante un candidato local;
-7. revisará después de cada paso si debe continuar o cambiar el plan;
+7. revisará después de cada paso, incluido el último, si debe continuar,
+   cambiar el plan o declarar la misión completada;
 8. cancelará cualquier paso trabado y quedará activamente en `STAND`;
 9. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
 

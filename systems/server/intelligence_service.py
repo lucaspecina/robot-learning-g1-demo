@@ -26,6 +26,7 @@ MODEL_MAX_RETRIES = 1
 MAX_PLAN_STEPS = 20
 STEP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 REVIEW_DECISIONS = {
+    "complete",
     "continue",
     "retry",
     "revise",
@@ -289,6 +290,7 @@ def validate_generated_review(
     world_facts: list[str],
     outcome,
     reserved_step_ids: set[str] = None,
+    pending_steps: list[dict] = None,
 ) -> dict:
     outcome_state = (
         outcome.get("state")
@@ -318,6 +320,15 @@ def validate_generated_review(
         raise InvalidModelResponseError(
             "no se puede continuar después de una falla"
         )
+    if decision == "complete":
+        if outcome_state != "succeeded":
+            raise InvalidModelResponseError(
+                "no se puede completar después de una falla"
+            )
+        if pending_steps:
+            raise InvalidModelResponseError(
+                "no se puede completar con pasos pendientes"
+            )
     if decision == "retry" and outcome_state not in {"failed", "blocked"}:
         raise InvalidModelResponseError(
             "sólo se puede repetir un paso fallido o bloqueado"
@@ -859,6 +870,8 @@ class MissionPlanner:
                     "pero no controlás motores. Revisá el resultado medido de "
                     "UN paso. Elegí exactamente una decisión: continue si el "
                     "paso tuvo éxito y el plan pendiente sigue siendo válido; "
+                    "complete si el paso tuvo éxito y ya no quedan pasos "
+                    "pendientes porque la misión quedó cumplida; "
                     "retry sólo ante una falla posiblemente transitoria; "
                     "revise para reemplazar únicamente los pasos pendientes; "
                     "ask_human si falta una decisión de la persona; stop si "
@@ -944,6 +957,7 @@ class MissionPlanner:
                 world_facts,
                 outcome,
                 reserved_step_ids,
+                pending_steps,
             )
         except InvalidModelResponseError as error:
             raise InvalidModelResponseError(

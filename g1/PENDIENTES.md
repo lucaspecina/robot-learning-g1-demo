@@ -279,16 +279,19 @@ ocho esferas de los pies contra MuJoCo.
   detector visual y profundidad, no por rangos de color.
 - **Barrido visual activo, validado**: el robot cubre 360° con cinco vistas,
   usa RT-DETR o color sólo para filtrar candidatos y confirma con Grounding
-  DINO más profundidad. La misión completa hasta ese punto encontró la mesa
-  roja en la cuarta vista con una llamada remota y terminó en `STAND`. La base
-  se desplazó 17,1 cm durante el barrido: es aceptable en sala abierta, no para
-  manipular. Falta la pose de aproximación y la alineación fina.
+  DINO más profundidad. Dos misiones completas hasta ese punto encontraron la
+  mesa roja en la cuarta vista con una llamada remota y terminaron en `STAND`.
+  La primera base se desplazó 17,1 cm durante el barrido: es aceptable en sala
+  abierta, no para manipular. El JPEG exacto de Grounding DINO, su pedido y su
+  respuesta literal ya aparecen en el tablero. Falta la pose de aproximación
+  y la alineación fina.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso
-  puede continuar, reintentar o cambiar sólo lo pendiente. El tablero conserva
-  la entrada exacta, la respuesta literal, la evidencia y el plan aceptado.
-  Queda mostrar también el cuadro exacto usado por Grounding DINO.
+  puede continuar, cerrar con `complete`, reintentar o cambiar sólo lo
+  pendiente. El tablero conserva la entrada exacta, la respuesta literal, la
+  evidencia y el plan aceptado. La revisión final también recibe su evidencia;
+  `complete` se rechaza si hubo una falla o aún quedan pasos.
 - **Reloj simulado** (`/clock` + `use_sim_time`): sin él, los plazos medidos en
   tiempo de pared no significan nada con el simulador al 20 %. Ya nos rompió un
   timeout de navegación.

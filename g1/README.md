@@ -200,9 +200,10 @@ descripciones completas, no sólo nombres de capacidades, pero su salida sigue
 siendo datos no confiables. Dos validaciones independientes rechazan skills
 inventadas, argumentos desconocidos y pasos ordenados antes de cumplir sus
 condiciones. Después de cada resultado, el modelo puede continuar, pedir un
-único reintento, modificar sólo lo pendiente, pedir ayuda o detenerse. El
-tablero conserva el plan inicial, la revisión, el pedido exacto, la respuesta
-literal y el resultado aceptado.
+único reintento, modificar sólo lo pendiente, pedir ayuda, completar con éxito
+o detenerse. `complete` sólo es válido si el último paso pasó y no queda
+ninguno pendiente. El tablero conserva el plan inicial, la revisión, el pedido
+exacto, la respuesta literal y el resultado aceptado.
 
 **Llegar tiene memoria.** El balanceo del bípedo hacía que la posición cruzara
 el límite de 10 cm mientras terminaba de orientar el cuerpo, alternando para
@@ -216,9 +217,9 @@ La cámara cubre 108,1° horizontalmente. Cinco vistas separadas 72° dejan
 36,1° de superposición y cubren la vuelta completa. En cada vista el detector
 local y una señal amplia de color sólo proponen candidatos; Grounding DINO,
 el color dentro de su caja y la profundidad son quienes confirman y ubican la
-mesa. En la corrida completa la mesa roja apareció en la cuarta vista y sólo
-se hizo una llamada remota. El giro acumuló 17,1 cm de desplazamiento: sirve
-en la habitación abierta, pero no para alinear un agarre.
+mesa. En dos corridas completas la mesa roja apareció en la cuarta vista y
+sólo se hizo una llamada remota por corrida. El primer giro acumuló 17,1 cm de
+desplazamiento: sirve en la habitación abierta, pero no para alinear un agarre.
 
 **La pose de brazos cambia lo que ve la cámara.** En `reposo` las manos ocupan
 las esquinas superiores. `listo` y `transporte` dejan libre todo el cuadro.
@@ -245,8 +246,8 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 1. **Convertir la superficie encontrada en una pose segura de aproximación**,
    con una llegada gruesa y una alineación visual fina separadas.
 2. **Guardar `home` y regresar** sin carga dentro de la misión completa.
-3. **Mostrar en el tablero el cuadro exacto de Grounding DINO y su llamada**,
-   no sólo la caja posterior.
+3. **Migrar el barrido completo a una Action cancelable**, conservando el
+   giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
 4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
 5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el

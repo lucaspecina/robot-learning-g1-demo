@@ -369,6 +369,32 @@ class IntelligenceClientTests(unittest.TestCase):
                 "failed",
             )
 
+    def test_accepts_complete_only_after_terminal_success(self):
+        review = {
+            "decision": "complete",
+            "reason": "La misión quedó cumplida.",
+            "revised_steps": [],
+            "question": None,
+        }
+
+        self.assertEqual(
+            validate_review(
+                review,
+                "succeeded",
+                pending_steps=[],
+            ),
+            review,
+        )
+        with self.assertRaisesRegex(
+            RemoteIntelligenceError,
+            "pasos pendientes",
+        ):
+            validate_review(
+                review,
+                "succeeded",
+                pending_steps=[{"id": "pending"}],
+            )
+
     def test_rejects_repair_without_the_missing_skill(self):
         with self.assertRaisesRegex(
             RemoteIntelligenceError,

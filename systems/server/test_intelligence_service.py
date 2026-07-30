@@ -183,6 +183,36 @@ class IntelligenceServiceTests(unittest.TestCase):
             "robot_step_review",
         )
 
+    def test_step_reviewer_can_complete_only_without_pending_steps(self):
+        completed = {
+            "decision": "complete",
+            "reason": "La última medición confirma la misión.",
+            "revised_steps": [],
+            "question": None,
+        }
+
+        self.assertEqual(
+            validate_generated_review(
+                completed,
+                [],
+                [],
+                "succeeded",
+                pending_steps=[],
+            ),
+            completed,
+        )
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "pasos pendientes",
+        ):
+            validate_generated_review(
+                completed,
+                [],
+                [],
+                "succeeded",
+                pending_steps=[{"id": "pending"}],
+            )
+
     def test_step_reviewer_attaches_image_without_copying_base64_to_trace(self):
         catalog = [
             {

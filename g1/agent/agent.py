@@ -649,6 +649,18 @@ class Agent(Node):
             decision = review["decision"]
             reason = review["reason"]
             self.report(f"revisión: {decision} — {reason}")
+            if decision == "complete":
+                if pending or outcome["state"] != "succeeded":
+                    message = (
+                        "el servidor intentó completar una misión que "
+                        "todavía no satisface su contrato"
+                    )
+                    self.mission_tracker.stop(message)
+                    self.report(f"FALLO: {message}")
+                    return
+                self.mission_tracker.complete(reason)
+                self.report(f"misión completada: {reason}")
+                return
             if decision == "continue":
                 continue
             if decision == "retry":

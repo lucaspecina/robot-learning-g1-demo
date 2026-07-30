@@ -22,6 +22,7 @@ DEFAULT_REVIEW_TIMEOUT_S = 20.0
 FAILURE_THRESHOLD = 3
 OPEN_INTERVAL_S = 30.0
 REVIEW_DECISIONS = {
+    "complete",
     "continue",
     "retry",
     "revise",
@@ -119,6 +120,7 @@ def validate_review(
     review: dict,
     outcome,
     skill_catalog: list[dict] = None,
+    pending_steps: list[dict] = None,
 ) -> dict:
     outcome_state = (
         outcome.get("state")
@@ -147,6 +149,15 @@ def validate_review(
         raise RemoteIntelligenceError(
             "el modelo intentó continuar después de una falla"
         )
+    if decision == "complete":
+        if outcome_state != "succeeded":
+            raise RemoteIntelligenceError(
+                "el modelo intentó completar después de una falla"
+            )
+        if pending_steps:
+            raise RemoteIntelligenceError(
+                "el modelo intentó completar con pasos pendientes"
+            )
     if decision == "retry" and outcome_state not in {"failed", "blocked"}:
         raise RemoteIntelligenceError(
             "el modelo intentó repetir un paso exitoso"
@@ -389,6 +400,7 @@ class IntelligenceClient:
                 review,
                 outcome,
                 skill_catalog,
+                pending_steps,
             )
         except RemoteIntelligenceError:
             self._record_failure()
