@@ -277,18 +277,18 @@ ocho esferas de los pies contra MuJoCo.
   detecciones frente al display, centro `0,528` y cero confusiones con botella.
   Es válida para la escena controlada; en el robot real se reemplazará por un
   detector visual y profundidad, no por rangos de color.
-- **Ejecutor migrado a la misión actual**: ya guarda `home`, lee el reloj,
-  elige mesa roja/azul y publica cada paso y decisión con estado explícito. La
-  búsqueda se bloquea de forma honesta si la mesa no está en la vista actual:
-  falta implementar el barrido visual activo antes de acercarse.
-- **Planificador semántico integrado; ejecución adaptable pendiente**:
-  `gpt-4.1-mini` ya recibe un catálogo explicado, propone el plan en JSON y el
-  servidor y la Jetson lo validan independientemente. El tablero conserva la
-  entrada exacta, la respuesta literal y el plan aceptado. La siguiente etapa
-  es ejecutar una capacidad, medirla, cancelarla localmente si se traba y
-  permitir que el modelo modifique sólo los pasos pendientes. La decisión,
-  límites y orden de implementación están en
-  [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
+- **Barrido visual activo, validado**: el robot cubre 360° con cinco vistas,
+  usa RT-DETR o color sólo para filtrar candidatos y confirma con Grounding
+  DINO más profundidad. La misión completa hasta ese punto encontró la mesa
+  roja en la cuarta vista con una llamada remota y terminó en `STAND`. La base
+  se desplazó 17,1 cm durante el barrido: es aceptable en sala abierta, no para
+  manipular. Falta la pose de aproximación y la alineación fina.
+- **Planificador semántico y ejecución adaptable integrados**:
+  `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
+  servidor y la Jetson lo validan independientemente. Después de cada paso
+  puede continuar, reintentar o cambiar sólo lo pendiente. El tablero conserva
+  la entrada exacta, la respuesta literal, la evidencia y el plan aceptado.
+  Queda mostrar también el cuadro exacto usado por Grounding DINO.
 - **Reloj simulado** (`/clock` + `use_sim_time`): sin él, los plazos medidos en
   tiempo de pared no significan nada con el simulador al 20 %. Ya nos rompió un
   timeout de navegación.

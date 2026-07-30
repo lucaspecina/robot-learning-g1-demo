@@ -28,6 +28,12 @@ from vision_msgs.msg import (
 
 DEFAULT_MODEL = "PekingU/rtdetr_r50vd"
 DEFAULT_REVISION = "df939e661d8c52e80608d1ec566561aabd25a4e7"
+# El 0,70 del flujo oficial de manipulación de NVIDIA corresponde a otro
+# checkpoint, especializado en un objeto conocido. Con este modelo general,
+# seis cuadros reales de la demo dieron 0,285--0,408 para la mesa; cinco
+# cuadros de pared no produjeron ninguna mesa ni siquiera a 0,15. El 0,25
+# conserva 6/6 positivos medidos sin agregar falsos positivos en 5 controles.
+DEFAULT_CONFIDENCE = 0.25
 TARGET_CLASSES = {"clock", "bottle", "diningtable", "dining table"}
 
 
@@ -39,7 +45,12 @@ class ObjectDetector(Node):
             "G1_OBJECT_DETECTOR_REVISION",
             DEFAULT_REVISION,
         )
-        self.confidence = float(os.environ.get("G1_DETECTOR_CONFIDENCE", "0.70"))
+        self.confidence = float(
+            os.environ.get(
+                "G1_DETECTOR_CONFIDENCE",
+                str(DEFAULT_CONFIDENCE),
+            )
+        )
         self.minimum_interval_s = float(
             os.environ.get("G1_DETECTOR_INTERVAL_S", "0.75")
         )
@@ -163,6 +174,7 @@ class ObjectDetector(Node):
                         {
                             "backend": "rtdetr_cpu_compatibility",
                             "model": self.model_name,
+                            "confidence_threshold": self.confidence,
                             "latency_ms": round(elapsed_ms, 1),
                             "received_frames": self.received_frames,
                             "processed_frames": self.processed_frames,

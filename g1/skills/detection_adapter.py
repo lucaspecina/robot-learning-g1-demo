@@ -22,6 +22,7 @@ from perception_core import (  # noqa: E402
     TABLE_CLASS_NAMES,
     bounded_box,
     classify_table_color,
+    color_pixel_counts,
     legacy_detection,
     merge_source_detections,
     padded_box,
@@ -66,6 +67,11 @@ class DetectionAdapter(Node):
             CompressedImage,
             VISUAL_EVIDENCE_TOPIC,
             2,
+        )
+        self.local_status_pub = self.create_publisher(
+            String,
+            "/g1/perception/local_detection_status",
+            10,
         )
         self.create_subscription(
             Image,
@@ -158,6 +164,24 @@ class DetectionAdapter(Node):
         self.detections_pub.publish(
             String(data=json.dumps(merged, ensure_ascii=False))
         )
+        if source == "rtdetr":
+            # El barrido necesita distinguir un resultado nuevo y vacío de
+            # una detección vieja. Publicar este estado evita temporizadores
+            # adivinados y mantiene la imagen exacta enlazada por su fecha.
+            self.local_status_pub.publish(
+                String(
+                    data=json.dumps(
+                        {
+                            "state": "complete",
+                            "frame_ref": frame_reference,
+                            "detections": sorted(output),
+                            "count": len(output),
+                            "color_pixels": color_pixel_counts(rgb),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            )
 
     def publish_clock_crop(self, header, rgb: np.ndarray, box):
         crop_box = padded_box(box, rgb.shape[1], rgb.shape[0])

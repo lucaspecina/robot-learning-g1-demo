@@ -39,13 +39,15 @@ hasta volver a pasar las pruebas físicas.
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
 | LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
-| Detector local RT-DETR | integrado; reloj 3/3, mesa visible pero debajo del umbral |
+| Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
 | Navegación a un punto | funciona — Action cancelable `/g1/navigate_to_pose`, con progreso y regreso a `STAND` |
+| Giro relativo | funciona — Action estándar `/g1/spin`, cancelable y con distancia angular |
+| Barrido visual activo | funciona — cinco vistas superpuestas, confirmación remota sólo ante candidato |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
-| Ejecutor de misión | integrado hasta la búsqueda; se bloquea explícitamente porque falta el barrido visual activo |
+| Ejecutor de misión | integrado hasta localizar la mesa; se bloquea explícitamente antes de acercarse |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
@@ -86,6 +88,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/mission_state` | String (JSON transitorio) | estado, pasos y decisiones verificables de la misión |
 | `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
 | `/g1/navigate_to_pose` | Action NavigateToPose | objetivo, progreso, resultado y cancelación de navegación |
+| `/g1/spin` | Action Spin | giro relativo, progreso angular, resultado y cancelación |
 | `/g1/navigation/goal` | PoseStamped | copia observable del objetivo para el tablero |
 | `/g1/goal` | PoseStamped | compatibilidad temporal con verificadores anteriores |
 | `/g1/nav_status` | String | relato temporal para verificadores anteriores |
@@ -97,7 +100,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/detections` | String (JSON) | el adaptador de la demo |
 | `/g1/clock_crop/compressed` | CompressedImage | el adaptador local |
 | `/g1/perception/evidence/compressed` | CompressedImage | cuadro exacto enlazado a una detección |
-| `/g1/model_input/compressed` | CompressedImage | agente; sólo la imagen realmente enviada al modelo |
+| `/g1/model_input/compressed` | CompressedImage | agente o detector puntual; sólo la imagen realmente enviada al modelo |
 | `/g1/arm_pose` | String | el agente |
 | `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
@@ -208,6 +211,15 @@ navegación recuerda que ya alcanzó la posición y usa un margen de 10 cm
 mientras cierra el ángulo. Las pruebas de mesa terminaron a 10,4 y 11,5 cm;
 eso sirve como pose de observación, no como alineación de agarre.
 
+**Buscar no es girar a ciegas ni ejecutar el modelo caro todo el tiempo.**
+La cámara cubre 108,1° horizontalmente. Cinco vistas separadas 72° dejan
+36,1° de superposición y cubren la vuelta completa. En cada vista el detector
+local y una señal amplia de color sólo proponen candidatos; Grounding DINO,
+el color dentro de su caja y la profundidad son quienes confirman y ubican la
+mesa. En la corrida completa la mesa roja apareció en la cuarta vista y sólo
+se hizo una llamada remota. El giro acumuló 17,1 cm de desplazamiento: sirve
+en la habitación abierta, pero no para alinear un agarre.
+
 **La pose de brazos cambia lo que ve la cámara.** En `reposo` las manos ocupan
 las esquinas superiores. `listo` y `transporte` dejan libre todo el cuadro.
 Las tres poses fueron verificadas con ángulos reales y con altura,
@@ -230,10 +242,11 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Agregar el barrido visual activo** para buscar la mesa correcta sin
-   pasarle una coordenada.
-2. **Convertir la superficie encontrada en una pose segura de aproximación.**
-3. **Guardar `home` y regresar** sin carga dentro de la misión completa.
+1. **Convertir la superficie encontrada en una pose segura de aproximación**,
+   con una llegada gruesa y una alineación visual fina separadas.
+2. **Guardar `home` y regresar** sin carga dentro de la misión completa.
+3. **Mostrar en el tablero el cuadro exacto de Grounding DINO y su llamada**,
+   no sólo la caja posterior.
 4. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
 5. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el

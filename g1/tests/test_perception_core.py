@@ -9,6 +9,7 @@ from perception_core import (
     ImageBox,
     bounded_box,
     classify_table_color,
+    color_pixel_counts,
     legacy_detection,
     merge_source_detections,
     padded_box,
@@ -45,6 +46,16 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertEqual(
             classify_table_color(image, ImageBox(20, 0, 40, 20)),
             "mesa_azul",
+        )
+
+    def test_counts_global_color_cues_without_claiming_an_object(self):
+        image = np.zeros((10, 10, 3), dtype=np.uint8)
+        image[:2, :, 0] = 160
+        image[2:3, :, 2] = 160
+
+        self.assertEqual(
+            color_pixel_counts(image),
+            {"red": 20, "blue": 10},
         )
 
     def test_legacy_detection_uses_normalized_geometry(self):

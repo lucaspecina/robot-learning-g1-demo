@@ -106,8 +106,31 @@ SKILL_CATALOG = [
         "name": "search_table",
         "description": (
             "Pide detectar la mesa elegida, verifica su color y usa "
-            "profundidad para ubicarla. Hoy sólo analiza la vista actual; "
-            "si no aparece, se bloquea porque falta el barrido activo."
+            "profundidad para ubicarla. Sólo analiza la vista actual; sirve "
+            "cuando la mesa ya debería estar delante del robot."
+        ),
+        "availability": "ready",
+        "variants": [
+            {
+                "argument": "$selected_table",
+                "argument_description": (
+                    "Referencia a la mesa roja o azul elegida por choose_table."
+                ),
+                "preconditions": ["selected_table_known"],
+                "effects": ["table_location_known"],
+            }
+        ],
+    },
+    {
+        "name": "scan_for_table",
+        "description": (
+            "Busca activamente la mesa elegida alrededor del robot. Analiza "
+            "vistas superpuestas y gira el cuerpo mediante una Action "
+            "cancelable. El detector local o una señal amplia del color "
+            "filtran candidatos baratos; ninguno declara éxito. Sólo "
+            "Grounding DINO confirma la mesa y profundidad calcula su "
+            "posición. Queda en STAND entre movimientos y se detiene mirando "
+            "la mesa cuando la encuentra."
         ),
         "availability": "ready",
         "variants": [
@@ -132,7 +155,9 @@ SKILL_CATALOG = [
         "variants": [
             {
                 "argument": "$selected_table",
-                "argument_description": "La mesa localizada por search_table.",
+                "argument_description": (
+                    "La mesa localizada por search_table o scan_for_table."
+                ),
                 "preconditions": ["table_location_known"],
                 "effects": ["at_selected_table"],
             }

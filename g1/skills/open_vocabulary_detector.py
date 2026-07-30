@@ -118,16 +118,31 @@ class OpenVocabularyDetector(Node):
                 error="ya hay una búsqueda en curso",
             )
             return
+        with self.image_lock:
+            previous_frame_key = self.frame_key(
+                self.latest_image[0]
+                if self.latest_image is not None
+                else None
+            )
         self.busy = True
         self.worker = threading.Thread(
             target=self.run_search,
-            args=(request_id, target, labels),
+            args=(request_id, target, labels, previous_frame_key),
             daemon=True,
         )
         self.worker.start()
 
-    def wait_for_fresh_image(self):
-        """Espera el próximo cuadro sin bloquear el ejecutor de ROS."""
+    @staticmethod
+    def frame_key(header):
+        if header is None:
+            return None
+        return (
+            int(header.stamp.sec),
+            int(header.stamp.nanosec),
+        )
+
+    def wait_for_fresh_image(self, previous_frame_key=None):
+        """Espera un cuadro posterior al pedido sin bloquear callbacks."""
         deadline = time.monotonic() + FRAME_WAIT_TIMEOUT_S
         while time.monotonic() < deadline and not self.finished:
             with self.image_lock:
@@ -135,12 +150,19 @@ class OpenVocabularyDetector(Node):
             if (
                 image_entry is not None
                 and time.monotonic() - image_entry[2] <= MAX_FRAME_AGE_S
+                and self.frame_key(image_entry[0]) != previous_frame_key
             ):
                 return image_entry[0], image_entry[1]
             time.sleep(0.05)
         raise ValueError("no llegó una imagen reciente")
 
-    def run_search(self, request_id, target, labels):
+    def run_search(
+        self,
+        request_id,
+        target,
+        labels,
+        previous_frame_key=None,
+    ):
         started_at = time.monotonic()
         frame_reference = None
         self.publish_status(
@@ -150,7 +172,7 @@ class OpenVocabularyDetector(Node):
             labels=labels,
         )
         try:
-            header, rgb = self.wait_for_fresh_image()
+            header, rgb = self.wait_for_fresh_image(previous_frame_key)
             buffer = io.BytesIO()
             PILImage.fromarray(rgb).save(buffer, format="JPEG", quality=90)
             jpeg = buffer.getvalue()

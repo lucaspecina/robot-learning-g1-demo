@@ -228,11 +228,13 @@ La Jetson rechaza cualquier revisión que:
    revisión es inválida.~~
 6. ~~Adjuntar imágenes puntuales a `look_at`, `read_clock` y
    `search_table`.~~
-7. Migrar brazos y demás capacidades listas al mismo contrato.
-8. ~~Mostrar en el tablero plan original, revisión, evidencia, cancelación y
+7. ~~Agregar `scan_for_table` con giro cancelable, vistas nuevas y
+   confirmación remota sólo ante candidatos.~~
+8. Migrar brazos y demás capacidades listas al mismo contrato.
+9. ~~Mostrar en el tablero plan original, revisión, evidencia, cancelación y
    plan vigente.~~ Falta la aprobación visual de Lucas.
-9. Repetir la misión con red limpia, red lenta y corte total.
-10. Hacer la validación visual con Lucas.
+10. Repetir la misión con red limpia, red lenta y corte total.
+11. Hacer la validación visual con Lucas.
 
 Ningún cambio de esta lista modifica física ni locomoción. Por eso exige
 pruebas funcionales del agente y una inspección visual, pero no repetir toda la
@@ -248,15 +250,15 @@ armará el plan inicial y el tablero lo mostrará. El robot:
 3. comprobará con una imagen que realmente lo está mirando;
 4. leerá la hora desde su recorte;
 5. elegirá la mesa roja o azul mediante la regla determinista;
-6. buscará la mesa en la vista actual;
+6. buscará la mesa alrededor con cinco vistas superpuestas y sólo llamará al
+   detector remoto ante un candidato local;
 7. revisará después de cada paso si debe continuar o cambiar el plan;
 8. cancelará cualquier paso trabado y quedará activamente en `STAND`;
 9. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
 
-El sistema todavía se bloqueará honestamente si la mesa no está en la vista,
-si necesita una aproximación fina o cuando llegue al agarre. Los pasos
-inmediatamente posteriores serán el barrido visual activo, la aproximación a
-la mesa y el agarre.
+El sistema todavía se bloqueará honestamente si no encuentra la mesa después
+del barrido, si necesita una aproximación fina o cuando llegue al agarre. Los
+pasos inmediatamente posteriores serán la aproximación a la mesa y el agarre.
 
 Por lo tanto, este tramo no completa aún la entrega del objeto. Convierte la
 demo de una lista rígida en una misión observable que detecta fallas, se pone

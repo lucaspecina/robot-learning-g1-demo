@@ -23,7 +23,7 @@ class MissionContractTest(unittest.TestCase):
         ids = [step["id"] for step in steps]
 
         self.assertIn("choose_table", ids)
-        self.assertIn("search_table", ids)
+        self.assertIn("scan_for_table", ids)
         self.assertIn("return_home", ids)
         self.assertNotIn("search_person", ids)
 

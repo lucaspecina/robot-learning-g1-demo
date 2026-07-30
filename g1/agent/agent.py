@@ -12,10 +12,13 @@ robot y conserva, por separado, tres tipos de evidencia:
            /g1/odom                       ubicación medida del cuerpo
            /g1/mobility/status            confirmación de espera segura
            /g1/arm_status                 medición real de los brazos
+           /g1/perception/local_detection_status
+                                          resultado nuevo del detector local
            /g1/perception/search_status   resultado de búsqueda puntual
            /g1/table_detections_3d        mesa ubicada desde sensores
 
   usa:     /g1/navigate_to_pose           tarea de navegación cancelable
+           /g1/spin                       giro relativo cancelable
 
   publica: /g1/arm_pose                   postura pedida a los brazos
            /g1/perception/search_request  categoría visual acotada
@@ -45,7 +48,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateToPose, Spin
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -63,9 +66,12 @@ from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
 )
+from active_search import local_table_candidate, make_scan_pattern
+from camera_geometry import horizontal_field_of_view_deg
 from execution_core import FeedbackWatchdog
 from mission_contract import MissionTracker, build_demo_plan, validate_plan
 from model_trace import build_model_event
+from navigation_core import normalize_angle
 from open_vocabulary_core import make_search_request
 from scene_layout import NAVIGATION_TARGETS
 from skill_catalog import (
@@ -114,6 +120,17 @@ VISUAL_EVIDENCE_CACHE_SIZE = 24
 # Grounding DINO puede tardar cerca de un minuto. La fecha exacta evita
 # confundir cuadros aunque la memoria deba sobrevivir durante esa inferencia.
 VISUAL_EVIDENCE_MAX_AGE_S = 90.0
+# La lente actual mide 108,1°. Reservar 30° de superposición deja cinco
+# vistas con margen para no depender de una detección justo en el borde.
+SEARCH_HORIZONTAL_FOV_DEG = horizontal_field_of_view_deg(7.6, 20.955)
+SEARCH_MINIMUM_OVERLAP_DEG = 30.0
+LOCAL_UPDATES_PER_VIEW = 2
+LOCAL_VIEW_TIMEOUT_S = 12.0
+COLOR_SCOUT_MIN_PIXELS = 600
+# Un segundo barrido puede ser útil después de cambiar de lugar. Un tercero
+# sin evidencia nueva sólo acumula movimiento y deriva en un robot físico.
+MAX_ACTIVE_SCANS_PER_MISSION = 2
+
 
 def succeeded(message: str, measurements: dict = None) -> dict:
     outcome = {"state": "succeeded", "message": message}
@@ -146,6 +163,9 @@ class Agent(Node):
     def __init__(self):
         super().__init__("agent")
         self.detections = {}
+        self.local_detection_status = None
+        self.local_detection_generation = 0
+        self.local_detection_condition = threading.Condition()
         self.current_pose = None
         self.mobility_owner = None
         self.arm_status = None
@@ -165,6 +185,11 @@ class Agent(Node):
             self,
             NavigateToPose,
             "/g1/navigate_to_pose",
+        )
+        self.spin_client = ActionClient(
+            self,
+            Spin,
+            "/g1/spin",
         )
         self.arms_pub = self.create_publisher(String, "/g1/arm_pose", 10)
         self.search_pub = self.create_publisher(
@@ -201,6 +226,12 @@ class Agent(Node):
             String,
             "/g1/detections",
             self.on_detections,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/perception/local_detection_status",
+            self.on_local_detection_status,
             10,
         )
         self.create_subscription(
@@ -253,6 +284,18 @@ class Agent(Node):
             self.detections = json.loads(message.data)
         except json.JSONDecodeError:
             pass
+
+    def on_local_detection_status(self, message: String):
+        try:
+            status = json.loads(message.data)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(status, dict) or status.get("state") != "complete":
+            return
+        with self.local_detection_condition:
+            self.local_detection_status = status
+            self.local_detection_generation += 1
+            self.local_detection_condition.notify_all()
 
     def on_mobility_status(self, message: String):
         try:
@@ -551,10 +594,6 @@ class Agent(Node):
                 )
                 self.report(f"completado: {outcome['message']}")
                 world_facts.update(self.effects_of(step))
-                if not pending:
-                    self.mission_tracker.complete("misión completada")
-                    self.report("misión completada")
-                    return
             else:
                 is_blocked = outcome["state"] == "blocked"
                 self.mission_tracker.record_step_failure(
@@ -566,6 +605,8 @@ class Agent(Node):
                 prefix = "BLOQUEADO" if is_blocked else "FALLO"
                 self.report(f"{prefix}: {outcome['message']}")
 
+            # También se revisa el último paso: sin esta vuelta, una misión
+            # terminaba justo antes de que el supervisor viera su evidencia.
             review_count += 1
             if review_count > MAX_MISSION_REVIEWS:
                 error = (
@@ -868,6 +909,8 @@ class Agent(Node):
             return self.choose_table()
         if skill == "search_table":
             return self.search_table(argument)
+        if skill == "scan_for_table":
+            return self.scan_for_table(argument)
         if skill == "approach_table":
             return blocked(
                 "falta calcular una pose segura desde la mesa medida"
@@ -1166,6 +1209,23 @@ class Agent(Node):
         return succeeded(f"eligió {table_label}")
 
     def search_table(self, target: str) -> dict:
+        outcome = self.search_table_in_current_view(target)
+        if (
+            outcome["state"] == "failed"
+            and outcome.get("failure_kind") == "not_visible"
+        ):
+            return blocked(
+                "la mesa no apareció en la vista actual; hace falta barrer "
+                "visualmente la habitación",
+                outcome.get("measurements"),
+                blocker={
+                    "type": "missing_skill",
+                    "skill": "scan_for_table",
+                },
+            )
+        return outcome
+
+    def search_table_in_current_view(self, target: str) -> dict:
         if target not in ("red_table", "blue_table"):
             return failed("no hay una mesa elegida")
         request = make_search_request(target)
@@ -1234,14 +1294,333 @@ class Agent(Node):
                 f"cuadro donde no se encontró {target}",
                 reference,
             )
+        outcome = failed(
+            "la mesa no apareció en esta vista",
+            {"detection_count": 0},
+        )
+        outcome["failure_kind"] = "not_visible"
+        return outcome
+
+    def scan_for_table(self, target: str) -> dict:
+        """Barre la sala con el detector local y confirma sólo candidatos."""
+        if target not in ("red_table", "blue_table"):
+            return failed("no hay una mesa elegida")
+
+        scan_attempt = int(
+            self.mission_context.get("active_scan_attempts", 0)
+        ) + 1
+        self.mission_context["active_scan_attempts"] = scan_attempt
+        if scan_attempt > MAX_ACTIVE_SCANS_PER_MISSION:
+            return blocked(
+                "ya se hicieron dos barridos completos sin evidencia nueva; "
+                "hace falta cambiar el punto de observación o pedir ayuda",
+                {"scan_attempt": scan_attempt},
+                blocker={
+                    "type": "search_exhausted",
+                    "target": target,
+                },
+            )
+
+        pattern = make_scan_pattern(
+            SEARCH_HORIZONTAL_FOV_DEG,
+            SEARCH_MINIMUM_OVERLAP_DEG,
+        )
+        if self.current_pose is None:
+            return failed("no llegó la posición inicial del barrido")
+        start_x, start_y, _start_z, start_yaw = self.current_pose
+        views_checked = 0
+        local_candidates = 0
+        remote_checks = 0
+        last_local_status = None
+        for view_index in range(pattern.view_count):
+            with self.local_detection_condition:
+                generation = self.local_detection_generation
+            status, updates = self.wait_for_local_detection_updates(
+                generation,
+                minimum_updates=LOCAL_UPDATES_PER_VIEW,
+                timeout_s=LOCAL_VIEW_TIMEOUT_S,
+            )
+            if updates < LOCAL_UPDATES_PER_VIEW:
+                return failed(
+                    "el detector local no produjo suficientes cuadros nuevos",
+                    {
+                        "views_checked": views_checked,
+                        "local_updates": updates,
+                    },
+                )
+
+            last_local_status = status
+            views_checked += 1
+            candidate = local_table_candidate(
+                status,
+                target,
+                minimum_color_pixels=COLOR_SCOUT_MIN_PIXELS,
+            )
+            if candidate is not None:
+                local_candidates += 1
+                remote_checks += 1
+                observation = self.search_table_in_current_view(target)
+                if observation["state"] == "succeeded":
+                    measurements = dict(
+                        observation.get("measurements", {})
+                    )
+                    current_pose = self.current_pose
+                    if current_pose is None:
+                        return failed(
+                            "se perdió la posición al confirmar la mesa"
+                        )
+                    measurements.update(
+                        {
+                            "scan_attempt": scan_attempt,
+                            "views_checked": views_checked,
+                            "maximum_views": pattern.view_count,
+                            "turn_increment_deg": round(
+                                math.degrees(pattern.turn_increment_rad),
+                                2,
+                            ),
+                            "actual_overlap_deg": round(
+                                pattern.actual_overlap_deg,
+                                2,
+                            ),
+                            "local_candidates": local_candidates,
+                            "remote_checks": remote_checks,
+                            "scan_position_drift_m": round(
+                                math.hypot(
+                                    current_pose[0] - start_x,
+                                    current_pose[1] - start_y,
+                                ),
+                                3,
+                            ),
+                        }
+                    )
+                    return succeeded(
+                        observation["message"]
+                        + f" después de revisar {views_checked} vista(s)",
+                        measurements,
+                    )
+                if observation.get("failure_kind") != "not_visible":
+                    return failed(
+                        "el barrido no pudo confirmar un candidato: "
+                        + observation["message"],
+                        {
+                            "views_checked": views_checked,
+                            "local_candidates": local_candidates,
+                            "remote_checks": remote_checks,
+                            **observation.get("measurements", {}),
+                        },
+                    )
+
+            if view_index < pattern.view_count - 1:
+                turn = self.spin_relative(pattern.turn_increment_rad)
+                if turn["state"] != "succeeded":
+                    return failed(
+                        "el barrido se interrumpió antes de cubrir la sala: "
+                        + turn["message"],
+                        {
+                            "views_checked": views_checked,
+                            **turn.get("measurements", {}),
+                        },
+                    )
+
+        # Cada giro termina dentro de una tolerancia de cinco grados. Repetir
+        # simplemente el incremento acumularía ese error y no cerraría 360°.
+        # La corrección final se calcula contra la orientación realmente medida.
+        if self.current_pose is None:
+            return failed("se perdió la posición al cerrar el barrido")
+        remaining_turn = normalize_angle(start_yaw - self.current_pose[3])
+        if abs(remaining_turn) > math.radians(1.0):
+            restore = self.spin_relative(remaining_turn)
+            if restore["state"] != "succeeded":
+                return failed(
+                    "no se encontró la mesa y falló el regreso a la "
+                    "orientación inicial: " + restore["message"],
+                    {
+                        "views_checked": views_checked,
+                        **restore.get("measurements", {}),
+                    },
+                )
+        if self.current_pose is None:
+            return failed("no llegó la medición posterior al barrido")
+        final_x, final_y, _final_z, final_yaw = self.current_pose
+        orientation_error_deg = math.degrees(
+            abs(normalize_angle(start_yaw - final_yaw))
+        )
+        position_drift_m = math.hypot(final_x - start_x, final_y - start_y)
+        if orientation_error_deg > 10.0:
+            return failed(
+                "el barrido terminó seguro pero no recuperó su orientación",
+                {
+                    "views_checked": views_checked,
+                    "orientation_error_deg": round(
+                        orientation_error_deg,
+                        2,
+                    ),
+                    "position_drift_m": round(position_drift_m, 3),
+                },
+            )
+        if last_local_status is not None:
+            reference = last_local_status.get("frame_ref")
+            if reference is not None:
+                self.set_review_evidence(
+                    f"último cuadro del barrido sin {target}",
+                    reference,
+                )
+
         return blocked(
-            "la mesa no apareció en la vista actual; falta el barrido visual "
-            "activo de la habitación",
+            "no se encontró la mesa elegida después de cubrir 360 grados",
+            {
+                "scan_attempt": scan_attempt,
+                "views_checked": views_checked,
+                "maximum_views": pattern.view_count,
+                "turn_increment_deg": round(
+                    math.degrees(pattern.turn_increment_rad),
+                    2,
+                ),
+                "actual_overlap_deg": round(
+                    pattern.actual_overlap_deg,
+                    2,
+                ),
+                "local_candidates": local_candidates,
+                "remote_checks": remote_checks,
+                "returned_to_start_orientation": True,
+                "orientation_error_deg": round(
+                    orientation_error_deg,
+                    2,
+                ),
+                "position_drift_m": round(position_drift_m, 3),
+            },
             blocker={
-                "type": "missing_skill",
-                "skill": "scan_for_table",
+                "type": "unresolved_perception",
+                "target": target,
             },
         )
+
+    def wait_for_local_detection_updates(
+        self,
+        after_generation: int,
+        minimum_updates: int,
+        timeout_s: float,
+    ) -> tuple[dict, int]:
+        """Espera resultados adquiridos después de que terminó cada giro."""
+        deadline = time.monotonic() + timeout_s
+        with self.local_detection_condition:
+            while (
+                self.local_detection_generation - after_generation
+                < minimum_updates
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                self.local_detection_condition.wait(
+                    timeout=min(0.25, remaining)
+                )
+            updates = self.local_detection_generation - after_generation
+            status = deepcopy(self.local_detection_status or {})
+        return status, updates
+
+    def spin_relative(self, angle_rad: float) -> dict:
+        """Usa la Action estándar de Nav2; nunca publica velocidad directa."""
+        server_wait_s = float(
+            os.environ.get("NAV_ACTION_SERVER_WAIT_S", "5")
+        )
+        if not self.spin_client.wait_for_server(timeout_sec=server_wait_s):
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                "el servidor local de giro no está disponible" + suffix
+            )
+
+        request = Spin.Goal()
+        request.target_yaw = float(angle_rad)
+        allowance_s = float(os.environ.get("SPIN_TIMEOUT_S", "120"))
+        request.time_allowance.sec = int(allowance_s)
+        request.time_allowance.nanosec = int(
+            (allowance_s - int(allowance_s)) * 1_000_000_000
+        )
+        measurements = {
+            "requested_turn_deg": round(math.degrees(angle_rad), 2),
+        }
+        watchdog = FeedbackWatchdog(
+            deadline_s=allowance_s + 5.0,
+            silence_timeout_s=float(
+                os.environ.get("NAV_FEEDBACK_TIMEOUT_S", "6")
+            ),
+        )
+        watchdog.start(time.monotonic())
+
+        def on_feedback(message):
+            watchdog.record_feedback(time.monotonic())
+            measurements["angular_distance_traveled_deg"] = round(
+                math.degrees(
+                    float(message.feedback.angular_distance_traveled)
+                ),
+                2,
+            )
+
+        try:
+            send_future = self.spin_client.send_goal_async(
+                request,
+                feedback_callback=on_feedback,
+            )
+            if not self.wait_for_future(send_future, timeout_s=server_wait_s):
+                safe = self.wait_for_stand(timeout_s=3.0)
+                suffix = "" if safe else "; no se confirmó STAND"
+                return failed(
+                    "el giro no confirmó si aceptó el objetivo" + suffix,
+                    measurements,
+                )
+            goal_handle = send_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"falló el envío del giro: {error}{suffix}",
+                measurements,
+            )
+
+        if goal_handle is None or not goal_handle.accepted:
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed("el navegador rechazó el giro" + suffix)
+
+        result_future = goal_handle.get_result_async()
+        while not result_future.done():
+            decision = watchdog.check(time.monotonic())
+            if decision is not None:
+                cancel_confirmed = self.cancel_navigation(goal_handle)
+                safe = self.wait_for_stand(timeout_s=3.0)
+                details = [decision.reason]
+                if not cancel_confirmed:
+                    details.append("el servidor no confirmó la cancelación")
+                if not safe:
+                    details.append("no se confirmó STAND")
+                return failed("; ".join(details), measurements)
+            time.sleep(0.05)
+
+        try:
+            wrapped = result_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"el navegador perdió el resultado del giro: {error}{suffix}",
+                measurements,
+            )
+
+        safe = self.wait_for_stand(timeout_s=3.0)
+        if not safe:
+            return failed(
+                "el giro terminó pero no devolvió la movilidad a STAND",
+                measurements,
+            )
+        if wrapped.status == GoalStatus.STATUS_SUCCEEDED:
+            return succeeded("giro completado", measurements)
+        error_message = str(
+            getattr(wrapped.result, "error_msg", "")
+        ).strip()
+        if not error_message:
+            error_message = f"el giro terminó con estado {wrapped.status}"
+        return failed(error_message, measurements)
 
     def set_arm_pose(self, target: str) -> dict:
         ros_pose = ARM_POSES.get(target)

@@ -11,6 +11,11 @@ vista más amplia que el robot use a escondidas.
 cámara frontal
       |
       +--> RT-DETR local continuo --> `/g1/object_detections` --------+
+      |          + señal amplia de color                               |
+      |                         |                                      |
+      |                    candidato barato                            |
+      |                         v                                      |
+      +--> barrido de cinco vistas con `/g1/spin`                      |
       |                                                               |
       +--> pedido puntual --> servidor Grounding DINO                 |
                               --> `/g1/open_vocabulary_detections` ----+
@@ -47,8 +52,10 @@ Grounding DINO es otro modelo remoto. Sólo se activa por un pedido interno
 acotado (`red_table` o `blue_table`) y recibe un cuadro JPEG. Encuentra la
 clase general `mesa`; no decide el color. Una prueba le pidió “mesa azul” sobre
 una mesa roja y respondió incorrectamente con confianza 0,805. Por eso el
-adaptador mide rojo o azul dentro del recuadro. Navegar y quedarse de pie no
-dependen de ninguno de estos modelos ni de la red externa.
+adaptador mide rojo o azul dentro del recuadro. El detector local y el conteo
+amplio de píxeles de color sólo deciden si vale la pena hacer esa llamada:
+nunca pueden declarar que la mesa fue encontrada. Navegar y quedarse de pie
+no dependen de ninguno de estos modelos ni de la red externa.
 
 ## Memoria de imágenes
 
@@ -133,6 +140,8 @@ cualquier Jetson.
 | enlace cortado | falla explícita en 14,30 s; `stand` conserva el control y el cuerpo queda a 0,734 m |
 | brazos en `reposo` | las manos tapan dos esquinas grandes de la cámara |
 | brazos en `listo` | manos fuera del cuadro; pose y cuerpo aprobados; mesa azul 3/3 y caja visualmente correcta |
+| umbral RT-DETR general 0,25 | mesa visible 6/6 con confianza 0,285–0,408; pared vacía 0/5 incluso probando 0,15 |
+| barrido activo de 360° | cinco vistas, 72° entre ellas, 36,1° de superposición; roja confirmada en la cuarta vista con una sola llamada remota |
 
 Una prueba numérica no cierra la cámara hasta que Lucas confirme también que
 la imagen y las cajas tienen sentido.
@@ -159,8 +168,33 @@ encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
 | nodo permanente, azul | `(3,63; -2,65; 0,52)` m, confianza 0,923 | coincidió con el verificador independiente |
 
 El punto representa la superficie vista, no el centro completo de la mesa. El
-próximo paso es producir una pose segura de aproximación y buscar por distintas
-vistas sin conocer antes la coordenada.
+próximo paso es producir una pose segura de aproximación.
+
+## Búsqueda activa validada el 30 de julio de 2026
+
+La búsqueda usa la lente realmente configurada, de 108,1° horizontales. El
+patrón mínimo con al menos 30° de superposición son cinco vistas separadas
+72°; la superposición efectiva queda en 36,1°. Cada giro usa la Action
+estándar `nav2_msgs/Spin`, por lo que tiene progreso, plazo y cancelación.
+
+La corrida completa guardó el inicio, llegó al reloj, lo confirmó, leyó
+`09:00`, eligió la mesa roja y la encontró en la cuarta vista. Grounding DINO
+dio 0,819 y profundidad ubicó la superficie en `(3,674; 2,370; 0,671)` m.
+Hubo un candidato local y una sola consulta remota. El cuerpo terminó en
+`STAND`; el barrido desplazó su base 0,171 m.
+
+La interfaz coincide con Nav2, pero nuestra implementación todavía no tiene
+el mapa local de colisiones que usa el comportamiento `Spin` completo. Por
+eso el barrido actual sólo es seguro en la sala abierta de la demo. Cuando
+LiDAR y Nav2 estén validados, el servidor oficial podrá reemplazar este
+adaptador sin cambiar el agente.
+
+El umbral 0,70 mostrado en un flujo de manipulación de NVIDIA no se copió:
+corresponde a otro modelo especializado. Para nuestro checkpoint general,
+seis cuadros reales de mesa dieron 0,285–0,408 y cinco cuadros de pared no
+produjeron mesas ni siquiera a 0,15. Se fijó 0,25 porque conservó 6/6 positivos
+y 0/5 falsos en ese control. Es una calibración local medida, no un valor
+“oficial”.
 
 Referencias oficiales:
 
@@ -175,3 +209,7 @@ Referencias oficiales:
   https://docs.ros.org/en/jazzy/p/vision_msgs/msg/Detection3D.html
 - Detección de objetos de Isaac ROS:
   https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html
+- Action de giro de Nav2:
+  https://api.nav2.org/actions/rolling/spin.html
+- Configuración del servidor de comportamientos de Nav2:
+  https://docs.nav2.org/configuration/packages/configuring-behavior-server.html

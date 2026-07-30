@@ -63,10 +63,10 @@ def build_demo_plan() -> list[dict]:
             "label": "Elegir mesa A roja o B azul",
         },
         {
-            "id": "search_table",
-            "skill": "search_table",
+            "id": "scan_for_table",
+            "skill": "scan_for_table",
             "argument": "$selected_table",
-            "label": "Buscar la mesa elegida",
+            "label": "Buscar alrededor la mesa elegida",
         },
         {
             "id": "approach_table",

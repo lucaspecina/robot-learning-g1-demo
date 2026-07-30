@@ -48,6 +48,19 @@ SOURCE_TTL_S = {
 }
 
 
+def color_pixel_counts(rgb_image: np.ndarray) -> dict[str, int]:
+    """Cuenta píxeles rojos y azules como señal barata, no como detección."""
+    if rgb_image.ndim != 3 or rgb_image.shape[2] != 3:
+        raise ValueError("la imagen de color debe tener tres canales")
+    rgb = rgb_image.astype(np.int16)
+    red = rgb[:, :, 0]
+    blue = rgb[:, :, 2]
+    return {
+        "red": int(np.count_nonzero((red > 80) & (red > blue * 1.35))),
+        "blue": int(np.count_nonzero((blue > 80) & (blue > red * 1.35))),
+    }
+
+
 def bounded_box(
     center_x: float,
     center_y: float,
