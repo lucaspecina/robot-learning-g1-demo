@@ -54,6 +54,9 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
+Las 61 pruebas locales de `g1` y las 12 del servicio externo pasan juntas.
+El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
+servidor y mantiene un estado vacío estable.
 
 Todavía no funciona:
 
