@@ -146,7 +146,7 @@ ejecución honestamente al llegar a ellas.
 | `skill_catalog.py` | catálogo explicado y contratos que recibe el planificador |
 | `model_trace.py` | contrato de trazabilidad de modelos, incluido el texto literal |
 | `agent/agent.py` | valida y ejecuta localmente el plan; nunca entrega motores al LLM |
-| `AGENT_EXECUTION_PLAN.md` | próximo tramo: ejecutar, medir, cancelar y revisar paso por paso |
+| `AGENT_EXECUTION_PLAN.md` | estado y criterios de la ejecución adaptable paso por paso |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
 
@@ -194,8 +194,10 @@ equilibrio, espera y autoridad de movilidad siguen funcionando localmente.
 descripciones completas, no sólo nombres de capacidades, pero su salida sigue
 siendo datos no confiables. Dos validaciones independientes rechazan skills
 inventadas, argumentos desconocidos y pasos ordenados antes de cumplir sus
-condiciones. El tablero conserva el pedido exacto, la respuesta literal y el
-plan aceptado.
+condiciones. Después de cada resultado, el modelo puede continuar, pedir un
+único reintento, modificar sólo lo pendiente, pedir ayuda o detenerse. El
+tablero conserva el plan inicial, la revisión, el pedido exacto, la respuesta
+literal y el resultado aceptado.
 
 **Llegar tiene memoria.** El balanceo del bípedo hacía que la posición cruzara
 el límite de 10 cm mientras terminaba de orientar el cuerpo, alternando para
@@ -226,13 +228,13 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Revisión adaptable**: navegación ya mide progreso, se cancela y vuelve a
-   `STAND`; falta que el modelo revise el resultado y pueda modificar sólo el
-   plan pendiente. Diseño y criterios en
-   [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
-2. **Agregar el barrido visual activo** para buscar la mesa correcta sin pasarle una coordenada.
+1. **Adjuntar imágenes puntuales a la revisión adaptable** para que
+   `look_at`, `read_clock` y `search_table` entreguen evidencia visual exacta.
+   Diseño y criterios en [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md).
+2. **Agregar el barrido visual activo** para buscar la mesa correcta sin
+   pasarle una coordenada.
 3. **Convertir la superficie encontrada en una pose segura de aproximación.**
-4. **Guardar `home` y regresar** sin carga.
+4. **Guardar `home` y regresar** sin carga dentro de la misión completa.
 5. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
    probar una postura más cercana a neutral y luego la escalera de cargas.
 6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el

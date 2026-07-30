@@ -25,6 +25,13 @@ MODEL_TIMEOUT_S = 10.0
 MODEL_MAX_RETRIES = 1
 MAX_PLAN_STEPS = 20
 STEP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+REVIEW_DECISIONS = {
+    "continue",
+    "retry",
+    "revise",
+    "ask_human",
+    "stop",
+}
 
 CLOCK_SCHEMA = {
     "type": "json_schema",
@@ -117,6 +124,63 @@ def build_plan_schema(skill_names: list[str]) -> dict:
     }
 
 
+def build_review_schema(skill_names: list[str]) -> dict:
+    """Restringe una revisión sin permitir texto libre como plan ejecutable."""
+    step_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "skill": {
+                "type": "string",
+                "enum": skill_names,
+            },
+            "argument": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "null"},
+                ]
+            },
+            "label": {"type": "string"},
+        },
+        "required": ["id", "skill", "argument", "label"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "robot_step_review",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "decision": {
+                        "type": "string",
+                        "enum": sorted(REVIEW_DECISIONS),
+                    },
+                    "reason": {"type": "string"},
+                    "revised_steps": {
+                        "type": "array",
+                        "items": step_schema,
+                    },
+                    "question": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "null"},
+                        ]
+                    },
+                },
+                "required": [
+                    "decision",
+                    "reason",
+                    "revised_steps",
+                    "question",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 def validate_planner_input(
     command: str,
     skill_catalog: list[dict],
@@ -154,6 +218,123 @@ def validate_planner_input(
             raise ValueError(f"faltan variantes de {name}")
         names.append(name)
     return names
+
+
+def validate_reviewer_input(
+    command: str,
+    skill_catalog: list[dict],
+    world_facts: list[str],
+    completed_steps: list[dict],
+    last_step: dict,
+    outcome: dict,
+    pending_steps: list[dict],
+    review_count: int,
+) -> list[str]:
+    skill_names = validate_planner_input(
+        command,
+        skill_catalog,
+        world_facts,
+    )
+    if not isinstance(completed_steps, list) or len(completed_steps) > 20:
+        raise ValueError("los pasos completados son inválidos")
+    if not isinstance(last_step, dict):
+        raise ValueError("falta el último paso ejecutado")
+    if not isinstance(outcome, dict):
+        raise ValueError("falta el resultado del último paso")
+    if outcome.get("state") not in {"succeeded", "failed", "blocked"}:
+        raise ValueError("el resultado tiene un estado inválido")
+    if not isinstance(outcome.get("message"), str):
+        raise ValueError("el resultado no explica qué ocurrió")
+    if not isinstance(pending_steps, list) or len(pending_steps) > MAX_PLAN_STEPS:
+        raise ValueError("el plan pendiente es inválido")
+    catalog = {skill["name"]: skill for skill in skill_catalog}
+    pending_ids = set()
+    for step in pending_steps:
+        if not isinstance(step, dict) or set(step) != {
+            "id",
+            "skill",
+            "argument",
+            "label",
+        }:
+            raise ValueError("un paso pendiente tiene forma inválida")
+        step_id = step["id"]
+        skill_name = step["skill"]
+        if (
+            not isinstance(step_id, str)
+            or not STEP_ID_PATTERN.fullmatch(step_id)
+            or step_id in pending_ids
+            or skill_name not in catalog
+        ):
+            raise ValueError("un paso pendiente no pertenece al plan validado")
+        if not any(
+            variant.get("argument") == step["argument"]
+            for variant in catalog[skill_name]["variants"]
+        ):
+            raise ValueError("un paso pendiente usa un argumento inválido")
+        if not isinstance(step["label"], str) or not step["label"].strip():
+            raise ValueError("un paso pendiente no tiene etiqueta")
+        pending_ids.add(step_id)
+    if (
+        not isinstance(review_count, int)
+        or isinstance(review_count, bool)
+        or not 0 <= review_count <= MAX_PLAN_STEPS
+    ):
+        raise ValueError("el contador de revisiones es inválido")
+    return skill_names
+
+
+def validate_generated_review(
+    review: dict,
+    skill_catalog: list[dict],
+    world_facts: list[str],
+    outcome_state: str,
+) -> dict:
+    required = {"decision", "reason", "revised_steps", "question"}
+    if not isinstance(review, dict) or set(review) != required:
+        raise InvalidModelResponseError(
+            "la revisión no tiene exactamente los campos requeridos"
+        )
+    decision = review["decision"]
+    reason = review["reason"]
+    revised_steps = review["revised_steps"]
+    question = review["question"]
+    if decision not in REVIEW_DECISIONS:
+        raise InvalidModelResponseError("decisión de revisión inválida")
+    if not isinstance(reason, str) or not reason.strip():
+        raise InvalidModelResponseError("la revisión no explica su decisión")
+    if not isinstance(revised_steps, list):
+        raise InvalidModelResponseError("revised_steps no es una lista")
+    if question is not None and not isinstance(question, str):
+        raise InvalidModelResponseError("question debe ser texto o null")
+
+    if decision == "continue" and outcome_state != "succeeded":
+        raise InvalidModelResponseError(
+            "no se puede continuar después de una falla"
+        )
+    if decision == "retry" and outcome_state not in {"failed", "blocked"}:
+        raise InvalidModelResponseError(
+            "sólo se puede repetir un paso fallido o bloqueado"
+        )
+    if decision == "revise":
+        validate_generated_plan(
+            {"steps": revised_steps},
+            skill_catalog,
+            world_facts,
+        )
+    elif revised_steps:
+        raise InvalidModelResponseError(
+            "sólo revise puede devolver pasos modificados"
+        )
+    if decision == "ask_human":
+        if not isinstance(question, str) or not question.strip():
+            raise InvalidModelResponseError(
+                "ask_human necesita una pregunta concreta"
+            )
+    elif question is not None:
+        raise InvalidModelResponseError(
+            "question sólo se usa con ask_human"
+        )
+    return review
 
 
 def validate_generated_plan(
@@ -520,6 +701,119 @@ class MissionPlanner:
             "model_input": model_input,
         }
 
+    def review(
+        self,
+        command: str,
+        skill_catalog: list[dict],
+        world_facts: list[str],
+        completed_steps: list[dict],
+        last_step: dict,
+        outcome: dict,
+        pending_steps: list[dict],
+        review_count: int,
+    ) -> dict:
+        skill_names = validate_reviewer_input(
+            command,
+            skill_catalog,
+            world_facts,
+            completed_steps,
+            last_step,
+            outcome,
+            pending_steps,
+            review_count,
+        )
+        response_format = build_review_schema(skill_names)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Supervisás una misión física de un robot humanoide, "
+                    "pero no controlás motores. Revisá el resultado medido de "
+                    "UN paso. Elegí exactamente una decisión: continue si el "
+                    "paso tuvo éxito y el plan pendiente sigue siendo válido; "
+                    "retry sólo ante una falla posiblemente transitoria; "
+                    "revise para reemplazar únicamente los pasos pendientes; "
+                    "ask_human si falta una decisión de la persona; stop si "
+                    "no existe continuación honesta. No declares cumplida "
+                    "una capacidad que falló y no inventes skills. Si usás "
+                    "revise, revised_steps debe contener el nuevo plan "
+                    "pendiente completo; en cualquier otra decisión debe ser "
+                    "una lista vacía. question sólo lleva texto con "
+                    "ask_human. Respondé en español excepto identificadores.\n\n"
+                    "CATÁLOGO DE SKILLS:\n"
+                    + json.dumps(
+                        skill_catalog,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "mission": command.strip(),
+                        "verified_world_facts": world_facts,
+                        "completed_steps": completed_steps,
+                        "last_step": last_step,
+                        "measured_outcome": outcome,
+                        "validated_pending_plan": pending_steps,
+                        "review_number": review_count,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            },
+        ]
+        model_input = {
+            "messages": messages,
+            "response_format": response_format,
+            "max_tokens": 1200,
+            "temperature": 0,
+        }
+        response = self.client.chat.completions.create(
+            model=self.deployment,
+            **model_input,
+        )
+        if not response.choices:
+            raise InvalidModelResponseError(
+                "el modelo no devolvió opciones",
+                input_payload=model_input,
+            )
+        message = response.choices[0].message.content
+        if not message:
+            raise InvalidModelResponseError(
+                "el modelo devolvió contenido vacío",
+                input_payload=model_input,
+            )
+        try:
+            review = json.loads(message)
+        except json.JSONDecodeError as error:
+            raise InvalidModelResponseError(
+                "el modelo no devolvió JSON válido",
+                raw_output=message,
+                input_payload=model_input,
+            ) from error
+        try:
+            validated = validate_generated_review(
+                review,
+                skill_catalog,
+                world_facts,
+                outcome["state"],
+            )
+        except InvalidModelResponseError as error:
+            raise InvalidModelResponseError(
+                str(error),
+                raw_output=message,
+                input_payload=model_input,
+            ) from error
+        return {
+            "review": validated,
+            "raw_output": message,
+            "model": self.deployment,
+            "model_input": model_input,
+        }
+
 
 class IntelligenceService:
     def __init__(
@@ -638,6 +932,39 @@ class IntelligenceService:
             "elapsed_s": round(time.monotonic() - started_at, 3),
         }
 
+    def review_step(
+        self,
+        command: str,
+        skill_catalog: list[dict],
+        world_facts: list[str],
+        completed_steps: list[dict],
+        last_step: dict,
+        outcome: dict,
+        pending_steps: list[dict],
+        review_count: int,
+    ) -> dict:
+        if self.mission_planner is None:
+            raise ServiceConfigurationError(
+                self.planner_configuration_error
+                or "planificador no configurado"
+            )
+        started_at = time.monotonic()
+        model_result = self.mission_planner.review(
+            command,
+            skill_catalog,
+            world_facts,
+            completed_steps,
+            last_step,
+            outcome,
+            pending_steps,
+            review_count,
+        )
+        return {
+            "ok": True,
+            **model_result,
+            "elapsed_s": round(time.monotonic() - started_at, 3),
+        }
+
 
 class Handler(BaseHTTPRequestHandler):
     service = IntelligenceService()
@@ -677,6 +1004,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/read-clock",
             "/v1/detect-objects",
             "/v1/plan-mission",
+            "/v1/review-step",
         ):
             self.send_json(
                 HTTPStatus.NOT_FOUND,
@@ -708,6 +1036,17 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("command"),
                     payload.get("skill_catalog"),
                     payload.get("initial_facts"),
+                )
+            elif self.path == "/v1/review-step":
+                result = self.service.review_step(
+                    payload.get("command"),
+                    payload.get("skill_catalog"),
+                    payload.get("world_facts"),
+                    payload.get("completed_steps"),
+                    payload.get("last_step"),
+                    payload.get("outcome"),
+                    payload.get("pending_steps"),
+                    payload.get("review_count"),
                 )
             else:
                 image = decode_image(payload.get("image_base64"))

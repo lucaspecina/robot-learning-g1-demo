@@ -178,6 +178,13 @@ tablero)
         ;;
     off)
         sudo docker exec jetson pkill -f dashboard.py 2>/dev/null
+        # Esperar evita que un "off && on" confunda al proceso viejo, todavía
+        # visible durante unos milisegundos, con el tablero recién iniciado.
+        for _ in 1 2 3 4 5; do
+            sudo docker exec jetson pgrep -f dashboard.py >/dev/null 2>&1 \
+                || break
+            sleep 1
+        done
         echo "tablero apagado"
         ;;
     esac

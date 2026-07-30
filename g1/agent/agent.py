@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -95,6 +96,8 @@ ARM_POSES = {
     "ready": "listo",
     "transport": "transporte",
 }
+MAX_MISSION_REVIEWS = 20
+MAX_SAME_STEP_RETRIES = 1
 
 def succeeded(message: str, measurements: dict = None) -> dict:
     outcome = {"state": "succeeded", "message": message}
@@ -349,7 +352,7 @@ class Agent(Node):
         self.report(
             "plan: " + " → ".join(step["label"] for step in plan)
         )
-        self.execute_plan(plan)
+        self.execute_plan(command, plan)
 
     def plan_with_model(self, command: str) -> list[dict]:
         """Pide una propuesta y la vuelve a validar dentro de la Jetson."""
@@ -467,8 +470,14 @@ class Agent(Node):
             raise ValueError("no entendí la misión")
         return build_demo_plan()
 
-    def execute_plan(self, plan: list[dict]):
-        for step in plan:
+    def execute_plan(self, command: str, plan: list[dict]):
+        pending = deepcopy(plan)
+        world_facts = set(INITIAL_WORLD_FACTS)
+        retry_counts = {}
+        review_count = 0
+
+        while pending:
+            step = pending.pop(0)
             argument = self.resolve_argument(step.get("argument"))
             self.mission_tracker.start_step(step["id"], argument)
             self.report(
@@ -483,19 +492,276 @@ class Agent(Node):
                     outcome.get("measurements"),
                 )
                 self.report(f"completado: {outcome['message']}")
+                world_facts.update(self.effects_of(step))
+                if not pending:
+                    self.mission_tracker.complete("misión completada")
+                    self.report("misión completada")
+                    return
+            else:
+                is_blocked = outcome["state"] == "blocked"
+                self.mission_tracker.record_step_failure(
+                    step["id"],
+                    outcome["message"],
+                    blocked=is_blocked,
+                    measurements=outcome.get("measurements"),
+                )
+                prefix = "BLOQUEADO" if is_blocked else "FALLO"
+                self.report(f"{prefix}: {outcome['message']}")
+
+            review_count += 1
+            if review_count > MAX_MISSION_REVIEWS:
+                error = (
+                    f"la misión superó {MAX_MISSION_REVIEWS} revisiones"
+                )
+                self.mission_tracker.stop(error)
+                self.report(f"FALLO: {error}")
+                return
+
+            try:
+                review = self.review_step_with_model(
+                    command=command,
+                    step=step,
+                    outcome=outcome,
+                    pending=pending,
+                    world_facts=sorted(world_facts),
+                    review_count=review_count,
+                )
+            except (RemoteIntelligenceError, ValueError) as error:
+                if outcome["state"] == "succeeded":
+                    # El plan pendiente ya fue validado dos veces antes de
+                    # arrancar. Una revisión remota rota no debe reemplazarlo
+                    # ni detener una misión que localmente sigue siendo válida.
+                    self.report(
+                        "revisión remota no utilizable; conservo el plan "
+                        f"validado: {error}"
+                    )
+                    continue
+                message = (
+                    f"{outcome['message']}; no hubo una revisión válida: "
+                    f"{error}"
+                )
+                self.mission_tracker.stop(
+                    message,
+                    blocked=outcome["state"] == "blocked",
+                )
+                self.report(f"FALLO: {message}")
+                return
+
+            decision = review["decision"]
+            reason = review["reason"]
+            self.report(f"revisión: {decision} — {reason}")
+            if decision == "continue":
                 continue
-            is_blocked = outcome["state"] == "blocked"
-            self.mission_tracker.stop_step(
-                step["id"],
-                outcome["message"],
-                blocked=is_blocked,
-                measurements=outcome.get("measurements"),
-            )
-            prefix = "BLOQUEADO" if is_blocked else "FALLO"
-            self.report(f"{prefix}: {outcome['message']}")
-            return
+            if decision == "retry":
+                retries = retry_counts.get(step["id"], 0)
+                if retries >= MAX_SAME_STEP_RETRIES:
+                    message = (
+                        f"{step['label']} ya agotó su único reintento"
+                    )
+                    self.mission_tracker.stop(message)
+                    self.report(f"FALLO: {message}")
+                    return
+                retry_counts[step["id"]] = retries + 1
+                self.mission_tracker.retry_step(step["id"])
+                pending.insert(0, step)
+                continue
+            if decision == "revise":
+                try:
+                    revised = validate_plan(
+                        review["revised_steps"],
+                        skill_catalog=SKILL_CATALOG,
+                        initial_facts=sorted(world_facts),
+                    )
+                    self.mission_tracker.replace_pending_steps(
+                        review["revised_steps"],
+                        skill_catalog=SKILL_CATALOG,
+                        current_facts=sorted(world_facts),
+                    )
+                except ValueError as error:
+                    if outcome["state"] == "succeeded":
+                        self.report(
+                            "la revisión local rechazó el cambio; conservo "
+                            f"el plan anterior: {error}"
+                        )
+                        continue
+                    message = (
+                        f"{outcome['message']}; revisión rechazada: {error}"
+                    )
+                    self.mission_tracker.stop(message)
+                    self.report(f"FALLO: {message}")
+                    return
+                pending = [
+                    {
+                        "id": item["id"],
+                        "skill": item["skill"],
+                        "argument": item["argument"],
+                        "label": item["label"],
+                    }
+                    for item in revised
+                ]
+                self.report(
+                    "plan pendiente revisado: "
+                    + " → ".join(item["label"] for item in pending)
+                )
+                continue
+            if decision == "ask_human":
+                question = review["question"]
+                self.mission_tracker.stop(question, blocked=True)
+                self.report(f"NECESITO AYUDA: {question}")
+                return
+            if decision == "stop":
+                self.mission_tracker.stop(
+                    reason,
+                    blocked=outcome["state"] == "blocked",
+                )
+                self.report(f"MISIÓN DETENIDA: {reason}")
+                return
+            raise ValueError(f"decisión no implementada: {decision}")
+
         self.mission_tracker.complete("misión completada")
         self.report("misión completada")
+
+    @staticmethod
+    def effects_of(step: dict) -> list[str]:
+        for skill in SKILL_CATALOG:
+            if skill["name"] != step["skill"]:
+                continue
+            for variant in skill["variants"]:
+                if variant.get("argument") == step.get("argument"):
+                    return list(variant.get("effects", []))
+        raise ValueError(
+            f"no existe el contrato ejecutado: {step['skill']}"
+        )
+
+    def review_step_with_model(
+        self,
+        *,
+        command: str,
+        step: dict,
+        outcome: dict,
+        pending: list[dict],
+        world_facts: list[str],
+        review_count: int,
+    ) -> dict:
+        event_id = str(uuid.uuid4())
+        started_wall = time.time()
+        started_monotonic = time.monotonic()
+        snapshot = self.mission_tracker.snapshot()
+        completed = [
+            {
+                key: item.get(key)
+                for key in (
+                    "id",
+                    "skill",
+                    "argument",
+                    "label",
+                    "state",
+                    "result",
+                    "error",
+                    "measurements",
+                    "attempts",
+                )
+            }
+            for item in snapshot["steps"]
+            if item["state"] != "pending"
+        ]
+        catalog = skill_catalog_for_model()
+        local_input = {
+            "command": command,
+            "skill_catalog": catalog,
+            "world_facts": world_facts,
+            "completed_steps": completed,
+            "last_step": deepcopy(step),
+            "outcome": deepcopy(outcome),
+            "pending_steps": deepcopy(pending),
+            "review_count": review_count,
+        }
+        summary = (
+            f"resultado medido de {step['id']} y "
+            f"{len(pending)} pasos pendientes"
+        )
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                task="review_step",
+                state="running",
+                input_summary=summary,
+                input_payload=local_input,
+                created_at=started_wall,
+            )
+        )
+        try:
+            review = self.intelligence.review_step(**local_input)
+        except RemoteIntelligenceError as error:
+            self.publish_model_event(
+                build_model_event(
+                    event_id=event_id,
+                    request_id=error.request_id,
+                    task="review_step",
+                    state="failed",
+                    input_summary=summary,
+                    input_payload=error.input_payload or local_input,
+                    raw_output=error.raw_output,
+                    duration_s=round(
+                        time.monotonic() - started_monotonic,
+                        3,
+                    ),
+                    error=str(error),
+                    created_at=started_wall,
+                )
+            )
+            raise
+
+        try:
+            if review["decision"] == "revise":
+                validate_plan(
+                    review["revised_steps"],
+                    skill_catalog=SKILL_CATALOG,
+                    initial_facts=world_facts,
+                )
+        except ValueError as error:
+            self.publish_model_event(
+                build_model_event(
+                    event_id=event_id,
+                    request_id=review.get("request_id"),
+                    task="review_step",
+                    state="failed",
+                    input_summary=summary,
+                    input_payload=review.get("model_input") or local_input,
+                    raw_output=review.get("raw_output"),
+                    duration_s=round(
+                        time.monotonic() - started_monotonic,
+                        3,
+                    ),
+                    error=f"la Jetson rechazó la revisión: {error}",
+                    created_at=started_wall,
+                )
+            )
+            raise
+
+        validated_output = {
+            key: review[key]
+            for key in ("decision", "reason", "revised_steps", "question")
+        }
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                request_id=review.get("request_id"),
+                task="review_step",
+                state="succeeded",
+                input_summary=summary,
+                input_payload=review.get("model_input") or local_input,
+                model=review.get("model"),
+                raw_output=review["raw_output"],
+                validated_output=validated_output,
+                duration_s=round(
+                    time.monotonic() - started_monotonic,
+                    3,
+                ),
+                created_at=started_wall,
+            )
+        )
+        return review
 
     def resolve_argument(self, argument):
         if argument == "$selected_table":

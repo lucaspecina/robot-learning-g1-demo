@@ -1,6 +1,7 @@
 # Plan de ejecución adaptable del agente
 
-Estado de esta decisión: **aprobada para el próximo tramo**, 30-jul-2026.
+Estado de esta decisión: **ejecución adaptable sin imágenes implementada y
+verificada**, 30-jul-2026.
 
 Este documento existe para poder retomar el trabajo en una sesión nueva sin
 reconstruir decisiones desde el chat. Describe el estado actual, el diseño que
@@ -40,19 +41,27 @@ Ya funciona:
 - validación independiente en el servidor y en la Jetson;
 - plan local de respaldo para la misión conocida;
 - trazabilidad de entrada exacta, salida literal y plan aceptado;
-- ejecución secuencial del plan.
+- ejecución secuencial del plan;
+- revisión remota después de cada paso y después de cada falla;
+- decisiones `continue`, `retry`, `revise`, `ask_human` y `stop` validadas en
+  el servidor y nuevamente en la Jetson;
+- un único reintento por paso, impuesto localmente aunque el modelo pida más;
+- reemplazo exclusivo de pasos pendientes sin borrar el historial;
+- tablero con plan inicial, última revisión e intercambio literal del modelo.
 
-La prueba real produjo los 11 pasos correctos en 4,3 segundos. Una misión
-mínima de guardar `home` completó todo el recorrido servidor → Jetson →
-ejecutor → tablero en 1,1 segundos.
+La prueba real original produjo los 11 pasos correctos en 4,3 segundos. La
+prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
+1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
+pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
+volvió a fallar. El robot permaneció en `STAND` en ambos casos.
 
 Todavía no funciona:
 
-- revisar el resultado después de cada paso;
-- modificar los pasos pendientes;
 - migrar al contrato cancelable las capacidades distintas de navegación;
 - adjuntar una imagen pertinente a la revisión;
-- pedir ayuda al operador desde el plan.
+- presentar y responder la pregunta del operador cuando la decisión sea
+  `ask_human`;
+- validar visualmente con Lucas el nuevo tablero.
 
 ## Avance verificado del 30-jul-2026
 
@@ -196,13 +205,14 @@ La Jetson rechaza cualquier revisión que:
 2. ~~Migrar `navigate_to` y medir distancia, progreso, éxito y bloqueo.~~
 3. ~~Probar tres fallas inducidas: falta de progreso, proceso muerto y plazo
    vencido; en las tres debe terminar en `STAND`.~~
-4. Agregar la revisión remota después de cada paso, inicialmente sin imagen.
-5. Validar de nuevo los pasos pendientes y conservar el plan anterior si la
-   revisión es inválida.
+4. ~~Agregar la revisión remota después de cada paso, inicialmente sin
+   imagen.~~
+5. ~~Validar de nuevo los pasos pendientes y conservar el plan anterior si la
+   revisión es inválida.~~
 6. Adjuntar imágenes puntuales a `look_at`, `read_clock` y `search_table`.
 7. Migrar brazos y demás capacidades listas al mismo contrato.
-8. Mostrar en el tablero plan original, revisión, evidencia, cancelación y
-   plan vigente.
+8. ~~Mostrar en el tablero plan original, revisión, evidencia, cancelación y
+   plan vigente.~~ Falta la aprobación visual de Lucas.
 9. Repetir la misión con red limpia, red lenta y corte total.
 10. Hacer la validación visual con Lucas.
 
@@ -246,6 +256,11 @@ segura y puede corregir la parte ejecutable de su plan.
   https://docs.ros.org/en/jazzy/How-To-Guides/Topics-Services-Actions.html
 - Gemini Robotics 2, seguridad: el modelo no reemplaza protecciones físicas:
   https://storage.googleapis.com/deepmind-media/gemini-robotics/Gemini-Robotics-2-Safety.pdf
+- ROS 2, visualización de imágenes, diagnósticos y logs con Foxglove:
+  https://docs.ros.org/en/rolling/Related-Projects/Visualizing-ROS-2-Data-With-Foxglove.html
+- OpenTelemetry, contenido completo opcional de pedidos y respuestas de
+  modelos generativos:
+  https://opentelemetry.io/blog/2026/genai-observability/
 
 ## Qué es oficial y qué es adaptación propia
 

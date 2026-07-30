@@ -6,6 +6,7 @@ from g1.agent.intelligence_client import (
     CircuitOpenError,
     IntelligenceClient,
     RemoteIntelligenceError,
+    validate_review,
 )
 
 
@@ -230,6 +231,57 @@ class IntelligenceClientTests(unittest.TestCase):
         )
         with self.assertRaises(RemoteIntelligenceError):
             client.detect_objects(b"jpeg", ["a red table"])
+
+    def test_reads_a_traced_step_review(self):
+        def opener(request, timeout):
+            request_id = request.headers["X-request-id"]
+            self.assertTrue(request.full_url.endswith("/v1/review-step"))
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "review": {
+                        "decision": "continue",
+                        "reason": "El paso tuvo éxito.",
+                        "revised_steps": [],
+                        "question": None,
+                    },
+                    "raw_output": '{"decision":"continue"}',
+                    "model_input": {"messages": []},
+                    "model": "planner-test",
+                    "elapsed_s": 0.4,
+                }
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=opener,
+        )
+        review = client.review_step(
+            command="Recordá home",
+            skill_catalog=[],
+            world_facts=["home_saved"],
+            completed_steps=[],
+            last_step={"id": "remember_home"},
+            outcome={"state": "succeeded", "message": "ok"},
+            pending_steps=[],
+            review_count=1,
+        )
+
+        self.assertEqual(review["decision"], "continue")
+        self.assertEqual(review["model"], "planner-test")
+
+    def test_rejects_continue_after_failed_step(self):
+        with self.assertRaises(RemoteIntelligenceError):
+            validate_review(
+                {
+                    "decision": "continue",
+                    "reason": "Seguir.",
+                    "revised_steps": [],
+                    "question": None,
+                },
+                "failed",
+            )
 
 
 if __name__ == "__main__":

@@ -550,8 +550,18 @@ class Handler(BaseHTTPRequestHandler):
                     else None
                 )
                 data["video_online"] = (
-                    now - state["camera_time"]
-                ) < OFFLINE_AFTER_S
+                    state["camera_jpeg"] is not None
+                    and (now - state["camera_time"]) < OFFLINE_AFTER_S
+                )
+                data["camera_available"] = data["video_online"]
+                data["analysis_available"] = (
+                    state["analysis_jpeg"] is not None
+                    and (now - state["analysis_time"])
+                    <= ANALYSIS_OFFLINE_AFTER_S
+                )
+                data["model_input_available"] = (
+                    state["model_input_jpeg"] is not None
+                )
                 data["analysis_age_s"] = (
                     round(now - state["analysis_time"], 1)
                     if state["analysis_time"]

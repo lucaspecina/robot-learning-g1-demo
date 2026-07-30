@@ -13,8 +13,16 @@ DEFAULT_SERVER_URL = "http://172.30.0.20:8000"
 DEFAULT_TIMEOUT_S = 15.0
 DEFAULT_DETECTION_TIMEOUT_S = 45.0
 DEFAULT_PLANNER_TIMEOUT_S = 20.0
+DEFAULT_REVIEW_TIMEOUT_S = 20.0
 FAILURE_THRESHOLD = 3
 OPEN_INTERVAL_S = 30.0
+REVIEW_DECISIONS = {
+    "continue",
+    "retry",
+    "revise",
+    "ask_human",
+    "stop",
+}
 
 
 class RemoteIntelligenceError(RuntimeError):
@@ -60,6 +68,52 @@ def validate_reading(reading: dict) -> dict:
                 "el texto y los campos numéricos no coinciden"
             )
     return reading
+
+
+def validate_review(review: dict, outcome_state: str) -> dict:
+    required = {"decision", "reason", "revised_steps", "question"}
+    if not isinstance(review, dict) or set(review) != required:
+        raise RemoteIntelligenceError(
+            "la revisión no tiene el formato esperado"
+        )
+    decision = review["decision"]
+    if decision not in REVIEW_DECISIONS:
+        raise RemoteIntelligenceError("decisión de revisión inválida")
+    if not isinstance(review["reason"], str) or not review["reason"].strip():
+        raise RemoteIntelligenceError("la revisión no explica su decisión")
+    if not isinstance(review["revised_steps"], list):
+        raise RemoteIntelligenceError("revised_steps no es una lista")
+    if review["question"] is not None and not isinstance(
+        review["question"],
+        str,
+    ):
+        raise RemoteIntelligenceError("question debe ser texto o null")
+    if decision == "continue" and outcome_state != "succeeded":
+        raise RemoteIntelligenceError(
+            "el modelo intentó continuar después de una falla"
+        )
+    if decision == "retry" and outcome_state not in {"failed", "blocked"}:
+        raise RemoteIntelligenceError(
+            "el modelo intentó repetir un paso exitoso"
+        )
+    if decision != "revise" and review["revised_steps"]:
+        raise RemoteIntelligenceError(
+            "el modelo cambió pasos sin elegir revise"
+        )
+    if decision == "revise" and not review["revised_steps"]:
+        raise RemoteIntelligenceError(
+            "el modelo eligió revise sin un plan pendiente"
+        )
+    if decision == "ask_human":
+        if not review["question"] or not review["question"].strip():
+            raise RemoteIntelligenceError(
+                "el modelo no formuló la pregunta al operador"
+            )
+    elif review["question"] is not None:
+        raise RemoteIntelligenceError(
+            "el modelo agregó una pregunta fuera de ask_human"
+        )
+    return review
 
 
 class IntelligenceClient:
@@ -206,6 +260,65 @@ class IntelligenceClient:
         self._record_success()
         return {
             "steps": plan["steps"],
+            "request_id": request_id,
+            "model": payload.get("model"),
+            "raw_output": raw_output,
+            "model_input": model_input,
+            "elapsed_s": payload.get("elapsed_s"),
+        }
+
+    def review_step(
+        self,
+        *,
+        command: str,
+        skill_catalog: list[dict],
+        world_facts: list[str],
+        completed_steps: list[dict],
+        last_step: dict,
+        outcome: dict,
+        pending_steps: list[dict],
+        review_count: int,
+    ) -> dict:
+        timeout_s = float(
+            os.environ.get(
+                "INTELLIGENCE_REVIEW_TIMEOUT_S",
+                DEFAULT_REVIEW_TIMEOUT_S,
+            )
+        )
+        payload, request_id, _response_text = self._post(
+            "/v1/review-step",
+            {
+                "command": command,
+                "skill_catalog": skill_catalog,
+                "world_facts": world_facts,
+                "completed_steps": completed_steps,
+                "last_step": last_step,
+                "outcome": outcome,
+                "pending_steps": pending_steps,
+                "review_count": review_count,
+            },
+            timeout_s,
+        )
+        review = payload.get("review")
+        raw_output = payload.get("raw_output")
+        model_input = payload.get("model_input")
+        if (
+            not isinstance(raw_output, str)
+            or not isinstance(model_input, dict)
+        ):
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                "el servidor no conservó una revisión trazable",
+                request_id=request_id,
+            )
+        try:
+            validated = validate_review(review, outcome.get("state"))
+        except RemoteIntelligenceError:
+            self._record_failure()
+            raise
+        self._record_success()
+        return {
+            **validated,
             "request_id": request_id,
             "model": payload.get("model"),
             "raw_output": raw_output,

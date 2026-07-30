@@ -85,6 +85,71 @@ class MissionContractTest(unittest.TestCase):
             "blocked",
         )
 
+    def test_failed_step_can_be_reviewed_and_retried_once(self):
+        self.tracker.begin("Traé el objeto", "rules")
+        self.tracker.set_plan(build_demo_plan())
+        self.tracker.start_step("navigate_to_clock")
+        state = self.tracker.record_step_failure(
+            "navigate_to_clock",
+            "sin progreso",
+            measurements={"distance_remaining_m": 1.0},
+        )
+
+        self.assertEqual(state["state"], "running")
+        failed_step = next(
+            step
+            for step in state["steps"]
+            if step["id"] == "navigate_to_clock"
+        )
+        self.assertEqual(failed_step["attempts"], 1)
+        self.assertEqual(len(failed_step["attempt_history"]), 1)
+
+        self.tracker.retry_step("navigate_to_clock")
+        retried = self.tracker.start_step("navigate_to_clock")
+        retried_step = next(
+            step
+            for step in retried["steps"]
+            if step["id"] == "navigate_to_clock"
+        )
+        self.assertEqual(retried_step["attempts"], 2)
+
+    def test_revision_preserves_history_and_replaces_only_pending(self):
+        self.tracker.begin("Volvé a home", "rules")
+        self.tracker.set_plan(build_demo_plan())
+        self.tracker.start_step("remember_home")
+        self.tracker.finish_step("remember_home", "home guardado")
+        state = self.tracker.replace_pending_steps(
+            [
+                {
+                    "id": "revised_return_home",
+                    "skill": "navigate_to",
+                    "argument": "home",
+                    "label": "Volver al inicio",
+                }
+            ],
+            skill_catalog=[
+                {
+                    "name": "navigate_to",
+                    "availability": "ready",
+                    "variants": [
+                        {
+                            "argument": "home",
+                            "preconditions": ["home_saved"],
+                            "effects": ["at_home"],
+                        }
+                    ],
+                }
+            ],
+            current_facts=["home_saved"],
+        )
+
+        self.assertEqual(
+            [step["id"] for step in state["steps"]],
+            ["remember_home", "revised_return_home"],
+        )
+        self.assertEqual(state["steps"][0]["state"], "succeeded")
+        self.assertEqual(state["steps"][1]["state"], "pending")
+
     def test_records_verifiable_decision(self):
         self.tracker.begin("Traé el objeto", "rules")
         state = self.tracker.set_decision(

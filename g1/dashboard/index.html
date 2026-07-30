@@ -85,7 +85,24 @@
       border-radius:7px;
       background:#050608;
     }
-    .camera-frame{position:relative}
+    [hidden]{display:none!important}
+    .camera-frame,.image-frame{
+      position:relative;
+      display:grid;
+      min-height:160px;
+      overflow:hidden;
+      border-radius:7px;
+      background:#090c12;
+    }
+    .camera-frame{aspect-ratio:16/9}
+    .image-frame{aspect-ratio:4/3}
+    .camera-frame>img,.camera-frame>.image-placeholder,
+    .image-frame>img,.image-frame>.image-placeholder{
+      grid-area:1/1;
+      width:100%;
+      height:100%;
+    }
+    .camera-frame>img,.image-frame>img{object-fit:contain}
     .live-badge{
       position:absolute;
       top:9px;
@@ -133,6 +150,7 @@
     .step-running{background:#302c20;color:var(--text)}
     .step-succeeded{color:#a9d9ba}
     .step-failed,.step-blocked{background:#352126;color:#ffc0c4}
+    .step-superseded{background:#252b36;color:#aeb8c8}
     .step-detail{display:block;color:var(--faint);font-size:11px}
     .decision{
       margin-top:12px;
@@ -143,12 +161,139 @@
     }
     .decision-row{margin:3px 0}
     .decision-row span{color:var(--muted)}
+    .brain-card{
+      margin-bottom:16px;
+      padding:0;
+      overflow:hidden;
+      border-color:#36527a;
+      background:linear-gradient(145deg,#172236,#171b24 45%);
+    }
+    .brain-heading{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:18px;
+      padding:15px 16px 12px;
+      border-bottom:1px solid #2c405d;
+    }
+    .brain-heading h2{
+      margin:0 0 3px;
+      color:#b9d5ff;
+      font-size:14px;
+      letter-spacing:.07em;
+    }
+    .brain-heading p{
+      max-width:760px;
+      margin:0;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .brain-decision{
+      min-width:260px;
+      padding:9px 12px;
+      background:#111a29;
+      border:1px solid #35537e;
+      border-radius:8px;
+    }
+    .brain-decision span{
+      display:block;
+      color:#86a8d7;
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .brain-decision strong{
+      display:block;
+      margin-top:2px;
+      color:#dbe9ff;
+      font-size:17px;
+    }
+    .brain-decision small{
+      display:block;
+      margin-top:2px;
+      color:var(--muted);
+    }
+    .brain-content{padding:14px 16px 16px}
+    .brain-summary{
+      display:grid;
+      grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .brain-summary-panel{
+      min-width:0;
+      padding:10px;
+      background:rgba(9,12,18,.58);
+      border:1px solid #28364a;
+      border-radius:8px;
+    }
+    .brain-plan{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:7px;
+    }
+    .brain-plan-step{
+      padding:5px 8px;
+      border-radius:6px;
+      background:#1b2a40;
+      color:#c9dcf7;
+      font-size:12px;
+    }
+    .brain-plan-step b{margin-right:4px;color:var(--blue)}
+    .review-cycle{
+      margin-top:7px;
+      color:#dce5f3;
+      font-weight:650;
+    }
+    .review-cycle small{
+      display:block;
+      margin-top:3px;
+      color:var(--muted);
+      font-weight:400;
+    }
+    .brain-flow{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:12px;
+    }
+    .brain-column{
+      min-width:0;
+      padding:10px;
+      background:rgba(9,12,18,.58);
+      border:1px solid #28364a;
+      border-radius:8px;
+    }
+    .brain-column h3{
+      margin:0 0 3px;
+      color:#c8d9f2;
+      font-size:12px;
+    }
+    .brain-column>p{
+      min-height:34px;
+      margin:0 0 8px;
+      color:var(--faint);
+      font-size:11px;
+    }
+    .brain-column pre{height:230px;max-height:230px}
+    .brain-column img{
+      max-height:230px;
+      object-fit:contain;
+    }
+    .brain-note{
+      margin-top:10px;
+      padding-top:9px;
+      border-top:1px solid #28364a;
+      color:var(--faint);
+      font-size:11px;
+    }
     .evidence-images{
       display:grid;
       grid-template-columns:1fr 1fr;
       gap:12px;
     }
-    .evidence-images h3{
+    .evidence-images h3,.perception-evidence h3{
       margin:0 0 6px;
       font-size:12px;
       color:#c8ceda;
@@ -162,6 +307,12 @@
       border-radius:7px;
       color:var(--faint);
       text-align:center;
+    }
+    .image-placeholder strong{
+      display:block;
+      margin-bottom:4px;
+      color:#aab3c2;
+      font-size:13px;
     }
     .model-trace{
       margin-top:13px;
@@ -238,6 +389,11 @@
     .empty{color:var(--faint)}
     @media(max-width:1050px){
       .top-grid,.evidence-grid{grid-template-columns:1fr}
+      .brain-heading{display:block}
+      .brain-decision{margin-top:10px}
+      .brain-summary{grid-template-columns:1fr}
+      .brain-flow{grid-template-columns:1fr}
+      .brain-column pre{height:auto;min-height:150px}
       .mission-banner{grid-template-columns:1fr auto}
       .mission-banner>div:first-child{grid-column:1/-1}
     }
@@ -276,8 +432,14 @@
       <article class="card">
         <h2>Lo que ve el robot</h2>
         <div class="camera-frame">
-          <img id="live-camera" alt="Video de la cámara frontal del robot">
-          <span class="live-badge" id="live-badge">LIVE</span>
+          <img id="live-camera" alt="Video de la cámara frontal del robot" hidden>
+          <div class="image-placeholder" id="live-camera-placeholder">
+            <div>
+              <strong>Esperando la cámara del robot</strong>
+              La imagen aparecerá cuando llegue el primer cuadro.
+            </div>
+          </div>
+          <span class="live-badge" id="live-badge">ESPERANDO</span>
         </div>
         <div class="tags" id="live-detections"></div>
         <div class="hint">
@@ -303,44 +465,94 @@
       </article>
     </section>
 
-    <section class="evidence-grid">
-      <article class="card">
-        <h2>Evidencia visual y modelos</h2>
-        <div class="evidence-images">
-          <div>
-            <h3>Cuadro analizado por el detector</h3>
-            <img id="analysis-image" alt="Cuadro exacto con detecciones">
-            <div class="image-placeholder" id="analysis-placeholder">
-              Esperando el primer análisis
+    <article class="card brain-card">
+      <div class="brain-heading">
+        <div class="perception-evidence">
+          <h2>Cerebro de la misión — LLM / VLM</h2>
+          <p>
+            El modelo propone el plan y revisa los resultados. La Jetson
+            comprueba cada respuesta antes de permitir que el robot la use.
+          </p>
+        </div>
+        <div class="brain-decision">
+          <span>Última decisión validada</span>
+          <strong id="model-decision">Esperando</strong>
+          <small id="model-reason">Todavía no hubo una llamada al modelo.</small>
+        </div>
+      </div>
+      <div class="brain-content">
+        <div class="model-meta">
+          <div class="metric"><span>Tarea</span><strong id="model-task">—</strong></div>
+          <div class="metric"><span>Modelo</span><strong id="model-name">—</strong></div>
+          <div class="metric"><span>Estado</span><strong id="model-status">—</strong></div>
+          <div class="metric"><span>Duración</span><strong id="model-duration">—</strong></div>
+        </div>
+        <div class="brain-summary">
+          <div class="brain-summary-panel">
+            <div class="section-label">Plan inicial producido por el modelo</div>
+            <div class="brain-plan" id="model-initial-plan">
+              <span class="empty">Todavía no armó un plan.</span>
             </div>
-            <div class="tags" id="analysis-labels"></div>
-            <div class="hint" id="analysis-age"></div>
           </div>
-          <div>
-            <h3>Entrada exacta del LLM/VLM</h3>
-            <img id="model-input-image" alt="Imagen exacta enviada al modelo">
-            <div class="image-placeholder" id="model-input-placeholder">
-              Todavía no hubo una entrada visual
+          <div class="brain-summary-panel">
+            <div class="section-label">Ciclo de revisión</div>
+            <div class="review-cycle" id="model-review-cycle">
+              Todavía no revisó ningún resultado.
+            </div>
+          </div>
+        </div>
+        <div class="brain-flow">
+          <div class="brain-column">
+            <h3>1. Lo que recibió</h3>
+            <p>Pedido exacto enviado al modelo, sin resumirlo.</p>
+            <div class="image-frame">
+              <img id="model-input-image" alt="Imagen exacta enviada al modelo" hidden>
+              <div class="image-placeholder" id="model-input-placeholder">
+                <div>
+                  <strong>Sin entrada visual</strong>
+                  Esta llamada todavía no usó una imagen.
+                </div>
+              </div>
             </div>
             <pre id="model-input-text" hidden></pre>
             <div class="hint" id="model-input-age"></div>
           </div>
-        </div>
-
-        <div class="model-trace">
-          <div class="model-meta">
-            <div class="metric"><span>Tarea</span><strong id="model-task">—</strong></div>
-            <div class="metric"><span>Modelo</span><strong id="model-name">—</strong></div>
-            <div class="metric"><span>Estado</span><strong id="model-status">—</strong></div>
-            <div class="metric"><span>Duración</span><strong id="model-duration">—</strong></div>
+          <div class="brain-column">
+            <h3>2. Lo que respondió literalmente</h3>
+            <p>Salida original del LLM o VLM, incluso si luego se rechaza.</p>
+            <pre id="model-raw-output">Todavía no hubo una llamada a un LLM o VLM.</pre>
           </div>
-          <div class="section-label">Texto literal devuelto por el modelo</div>
-          <pre id="model-raw-output">Todavía no hubo una llamada a un LLM o VLM.</pre>
-          <div class="section-label" style="margin-top:10px">Resultado validado que usó el robot</div>
-          <pre id="model-validated-output">—</pre>
-          <div class="hint">
-            Si la API no entrega un razonamiento interno adicional, no se
-            inventa. Acá se muestra exactamente lo que sí devolvió.
+          <div class="brain-column">
+            <h3>3. Lo que aceptó el robot</h3>
+            <p>Resultado ya revisado contra las reglas y skills disponibles.</p>
+            <pre id="model-validated-output">—</pre>
+          </div>
+        </div>
+        <div class="brain-note">
+          Este modelo organiza la misión; no controla directamente el
+          equilibrio, las piernas ni los motores. Si no entrega un
+          razonamiento interno, el tablero no lo inventa.
+        </div>
+      </div>
+    </article>
+
+    <section class="evidence-grid">
+      <article class="card">
+        <h2>Evidencia visual de la percepción</h2>
+        <div>
+          <div>
+            <h3>Cuadro analizado por el detector</h3>
+            <div class="image-frame">
+              <img id="analysis-image" alt="Cuadro exacto con detecciones" hidden>
+              <div class="image-placeholder" id="analysis-placeholder">
+                <div>
+                  <strong>Esperando el detector</strong>
+                  Acá aparecerá el cuadro exacto que analizó.
+                </div>
+              </div>
+            </div>
+            <div class="tags" id="analysis-labels"></div>
+            <div class="hint" id="analysis-age"></div>
           </div>
         </div>
       </article>
@@ -400,31 +612,67 @@
       document.getElementById(id).textContent = value;
     }
 
-    function refreshImage(imageId,path,delay,placeholderId){
+    function createImageFeed(imageId,path,delay,placeholderId){
       const image = document.getElementById(imageId);
-      const placeholder = placeholderId
-        ? document.getElementById(placeholderId)
-        : null;
+      const placeholder = document.getElementById(placeholderId);
+      let available = false;
+      let loading = false;
+      let timer = null;
+      let lastAttempt = 0;
+
       const load = () => {
+        timer = null;
+        if(!available || loading) return;
+        loading = true;
+        lastAttempt = Date.now();
         image.src = `${path}?${Date.now()}`;
       };
       image.onload = () => {
+        loading = false;
+        if(!available) return;
         image.hidden = false;
-        if(placeholder) placeholder.hidden = true;
-        setTimeout(load,delay);
+        placeholder.hidden = true;
+        timer = setTimeout(load,delay);
       };
       image.onerror = () => {
+        loading = false;
         image.hidden = true;
         image.removeAttribute('src');
-        if(placeholder) placeholder.hidden = false;
-        setTimeout(load,Math.max(delay,1200));
+        placeholder.hidden = false;
       };
-      load();
+      return {
+        setAvailable(nextAvailable){
+          available = Boolean(nextAvailable);
+          if(!available){
+            if(timer) clearTimeout(timer);
+            timer = null;
+            loading = false;
+            image.hidden = true;
+            image.removeAttribute('src');
+            placeholder.hidden = false;
+            return;
+          }
+          if(
+            !loading &&
+            !timer &&
+            (image.hidden || !image.getAttribute('src')) &&
+            Date.now() - lastAttempt > 1000
+          ){
+            load();
+          }
+        }
+      };
     }
 
-    refreshImage('live-camera','/camera.jpg',300,null);
-    refreshImage('analysis-image','/analysis.jpg',750,'analysis-placeholder');
-    refreshImage('model-input-image','/model-input.jpg',1400,'model-input-placeholder');
+    const cameraFeed = createImageFeed(
+      'live-camera','/camera.jpg',300,'live-camera-placeholder'
+    );
+    const analysisFeed = createImageFeed(
+      'analysis-image','/analysis.jpg',750,'analysis-placeholder'
+    );
+    const modelInputFeed = createImageFeed(
+      'model-input-image','/model-input.jpg',1400,'model-input-placeholder'
+    );
 
     const missionStateNames = {
       idle:'Sin misión',
@@ -440,7 +688,21 @@
       succeeded:'✓',
       failed:'✕',
       blocked:'■',
-      skipped:'–'
+      skipped:'–',
+      superseded:'↪'
+    };
+    const modelDecisionNames = {
+      continue:'Continuar',
+      retry:'Reintentar',
+      revise:'Actualizar el plan',
+      ask_human:'Pedir ayuda',
+      stop:'Detener la misión'
+    };
+    const modelTaskNames = {
+      plan_mission:'Crear el plan',
+      review_step:'Revisar un paso',
+      read_clock:'Leer el reloj',
+      inspect_scene:'Interpretar una imagen'
     };
 
     function renderMission(mission){
@@ -450,7 +712,9 @@
       const status = document.getElementById('mission-status');
       status.textContent = statusName;
       status.className = `summary-value status-${mission.state || 'idle'}`;
-      const completed = steps.filter(step => step.state === 'succeeded').length;
+      const completed = steps.filter(
+        step => ['succeeded','superseded'].includes(step.state)
+      ).length;
       setText('mission-progress',`${completed} / ${steps.length}`);
 
       const active = steps.find(step => step.id === mission.active_step_id);
@@ -472,7 +736,22 @@
 
       document.getElementById('mission-steps').innerHTML = steps.length
         ? steps.map(step => {
-            const detail = step.error || step.result || '';
+            const details = [];
+            if(step.error || step.result) details.push(step.error || step.result);
+            if(step.measurements){
+              details.push(
+                Object.entries(step.measurements)
+                  .map(([key,value]) => `${key}: ${value}`)
+                  .join(' · ')
+              );
+            }
+            if((step.attempts || 0) > 1){
+              details.push(`${step.attempts} intentos`);
+            }
+            if(step.state === 'superseded'){
+              details.push('el plan fue revisado después de esta falla');
+            }
+            const detail = details.join(' · ');
             return `<div class="step step-${escapeHtml(step.state)}">
               <span>${stepIcons[step.state] || '?'}</span>
               <span>${escapeHtml(step.label)}
@@ -494,18 +773,47 @@
 
     function renderModel(events,state){
       const event = events.length ? events[events.length - 1] : null;
+      const planEvent = events.slice().reverse().find(
+        item => item.task === 'plan_mission' &&
+          item.state === 'succeeded' &&
+          Array.isArray(item.validated_output?.steps)
+      );
+      const reviewEvent = events.slice().reverse().find(
+        item => item.task === 'review_step'
+      );
+      const planSteps = planEvent?.validated_output?.steps || [];
+      document.getElementById('model-initial-plan').innerHTML = planSteps.length
+        ? planSteps.map((step,index) =>
+            `<span class="brain-plan-step"><b>${index + 1}.</b>` +
+            `${escapeHtml(step.label || step.skill)}</span>`
+          ).join('')
+        : '<span class="empty">Todavía no armó un plan.</span>';
+      const reviewCycle = document.getElementById('model-review-cycle');
+      if(reviewEvent){
+        const reviewDecision = reviewEvent.validated_output?.decision;
+        const reviewReason = reviewEvent.validated_output?.reason ||
+          reviewEvent.error || '';
+        reviewCycle.innerHTML =
+          `${escapeHtml(modelDecisionNames[reviewDecision] || 'Revisión terminada')}` +
+          `${reviewReason ? `<small>${escapeHtml(reviewReason)}</small>` : ''}`;
+      }else{
+        reviewCycle.textContent='Todavía no revisó ningún resultado.';
+      }
       if(!event){
         setText('model-task','—');
         setText('model-name','—');
         setText('model-status','—');
         setText('model-duration','—');
+        setText('model-decision','Esperando');
+        setText('model-reason','Todavía no hubo una llamada al modelo.');
         setText('model-raw-output','Todavía no hubo una llamada a un LLM o VLM.');
         setText('model-validated-output','—');
         setText('model-input-age','');
         document.getElementById('model-input-text').hidden=true;
+        modelInputFeed.setAvailable(false);
         return;
       }
-      setText('model-task',event.task || '—');
+      setText('model-task',modelTaskNames[event.task] || event.task || '—');
       setText('model-name',event.model || 'esperando respuesta');
       setText('model-status',missionStateNames[event.state] || event.state);
       setText(
@@ -525,6 +833,43 @@
           ? '—'
           : JSON.stringify(event.validated_output,null,2)
       );
+      const validated=event.validated_output || {};
+      if(event.state === 'running'){
+        setText('model-decision','Pensando…');
+        setText('model-reason','La respuesta todavía no llegó.');
+      }else if(event.state === 'failed'){
+        setText('model-decision','Respuesta rechazada');
+        setText(
+          'model-reason',
+          event.error || 'El modelo no devolvió una respuesta utilizable.'
+        );
+      }else if(event.task === 'review_step'){
+        setText(
+          'model-decision',
+          modelDecisionNames[validated.decision] ||
+            validated.decision ||
+            'Revisión terminada'
+        );
+        setText(
+          'model-reason',
+          validated.reason || 'La revisión no incluyó una explicación.'
+        );
+      }else if(event.task === 'plan_mission'){
+        const count=Array.isArray(validated.steps)
+          ? validated.steps.length
+          : 0;
+        setText('model-decision','Plan inicial aceptado');
+        setText(
+          'model-reason',
+          `${count} ${count === 1 ? 'subtarea válida' : 'subtareas válidas'}.`
+        );
+      }else{
+        setText('model-decision','Resultado aceptado');
+        setText(
+          'model-reason',
+          'La respuesta pasó las comprobaciones del sistema.'
+        );
+      }
       const inputText=document.getElementById('model-input-text');
       const inputPlaceholder=document.getElementById(
         'model-input-placeholder'
@@ -532,21 +877,27 @@
       if(event.input_payload != null){
         inputText.hidden=false;
         inputText.textContent=JSON.stringify(event.input_payload,null,2);
-        inputPlaceholder.textContent='Esta llamada no usa una imagen';
-        setText(
-          'model-input-age',
-          'Arriba está el pedido exacto de texto enviado al modelo.'
-        );
       }else{
         inputText.hidden=true;
-        inputPlaceholder.textContent=
-          'Esperando la imagen exacta de esta llamada';
+      }
+      const hasModelImage = Boolean(
+        state.model_input_available &&
+        state.model_input_event_id === event.event_id
+      );
+      modelInputFeed.setAvailable(hasModelImage);
+      if(hasModelImage){
+        inputPlaceholder.innerHTML =
+          '<div><strong>Cargando la entrada visual</strong>' +
+          'Recuperando la imagen exacta enviada al modelo.</div>';
         setText(
           'model-input-age',
-          state.model_input_event_id === event.event_id
-            ? `Imagen exacta de esta llamada · conservada hace ${state.model_input_age_s ?? 0} s`
-            : 'La entrada exacta de esta llamada no está en el buffer.'
+          `Imagen exacta de esta llamada · conservada hace ${state.model_input_age_s ?? 0} s`
         );
+      }else{
+        inputPlaceholder.innerHTML =
+          '<div><strong>Esta llamada no usó una imagen</strong>' +
+          'El pedido exacto de texto aparece debajo.</div>';
+        setText('model-input-age','Sin entrada visual para esta llamada.');
       }
     }
 
@@ -714,6 +1065,8 @@
         renderMission(state.mission_state || {});
         renderModel(state.model_events || [],state);
         renderTimeline(state.mission_events || []);
+        cameraFeed.setAvailable(state.camera_available);
+        analysisFeed.setAvailable(state.analysis_available);
 
         if(!state.online){
           if(wasOnline) trail.length=0;

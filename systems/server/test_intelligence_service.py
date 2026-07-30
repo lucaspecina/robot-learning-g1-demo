@@ -11,6 +11,7 @@ from systems.server.intelligence_service import (
     MissionPlanner,
     decode_image,
     validate_generated_plan,
+    validate_generated_review,
     validate_reading,
 )
 from systems.server.open_vocabulary_detector import (
@@ -120,6 +121,83 @@ class IntelligenceServiceTests(unittest.TestCase):
             "json_schema",
         )
         self.assertEqual(result["model_input"]["messages"], request["messages"])
+
+    def test_step_reviewer_receives_measurements_and_continues(self):
+        catalog = [
+            {
+                "name": "remember_home",
+                "description": "Guarda la pose actual para regresar.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "argument_description": "Sin argumento.",
+                        "preconditions": ["robot_pose_known"],
+                        "effects": ["home_saved"],
+                    }
+                ],
+            }
+        ]
+        payload = {
+            "decision": "continue",
+            "reason": "El paso terminó correctamente.",
+            "revised_steps": [],
+            "question": None,
+        }
+        fake_client = FakeClient(payload)
+        planner = MissionPlanner(
+            client=fake_client,
+            deployment="planner-test",
+        )
+        outcome = {
+            "state": "succeeded",
+            "message": "home guardado",
+            "measurements": {"x": 0.0, "y": 0.0},
+        }
+
+        result = planner.review(
+            "Recordá dónde empezaste",
+            catalog,
+            ["robot_pose_known", "home_saved"],
+            [{"id": "remember_home", "state": "succeeded"}],
+            {
+                "id": "remember_home",
+                "skill": "remember_home",
+                "argument": None,
+                "label": "Guardar home",
+            },
+            outcome,
+            [],
+            1,
+        )
+
+        self.assertEqual(result["review"], payload)
+        request = fake_client.chat.completions.last_kwargs
+        self.assertIn(
+            '"measurements": {',
+            request["messages"][1]["content"],
+        )
+        self.assertEqual(
+            request["response_format"]["json_schema"]["name"],
+            "robot_step_review",
+        )
+
+    def test_reviewer_rejects_continue_after_failure(self):
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "continuar",
+        ):
+            validate_generated_review(
+                {
+                    "decision": "continue",
+                    "reason": "Seguir.",
+                    "revised_steps": [],
+                    "question": None,
+                },
+                [],
+                [],
+                "failed",
+            )
 
     def test_external_validator_rejects_missing_preconditions(self):
         catalog = [

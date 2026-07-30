@@ -23,6 +23,7 @@ STEP_STATES = {
     "failed",
     "blocked",
     "skipped",
+    "superseded",
 }
 STEP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 MAX_PLAN_STEPS = 20
@@ -182,6 +183,8 @@ def validate_plan(
                 "result": None,
                 "error": None,
                 "measurements": None,
+                "attempts": 0,
+                "attempt_history": [],
             }
         )
     return normalized
@@ -303,6 +306,7 @@ class MissionTracker:
             step["state"] = "running"
             step["started_at"] = now
             step["resolved_argument"] = resolved_argument
+            step["attempts"] += 1
             state["active_step_id"] = step_id
 
         return self._update(mutate)
@@ -323,6 +327,99 @@ class MissionTracker:
             step["finished_at"] = now
             step["result"] = result
             step["measurements"] = deepcopy(measurements)
+            state["active_step_id"] = None
+
+        return self._update(mutate)
+
+    def record_step_failure(
+        self,
+        step_id: str,
+        error: str,
+        *,
+        blocked: bool = False,
+        measurements: dict = None,
+    ) -> dict:
+        """Registra la falla sin cerrar aún la misión para poder revisarla."""
+        now = self.clock()
+        terminal_state = "blocked" if blocked else "failed"
+
+        def mutate(state):
+            if state["state"] != "running":
+                raise ValueError("la misión no está en ejecución")
+            step = self._step(state, step_id)
+            if step["state"] != "running":
+                raise ValueError(f"{step_id} no está en ejecución")
+            step["state"] = terminal_state
+            step["finished_at"] = now
+            step["error"] = error
+            step["measurements"] = deepcopy(measurements)
+            step["attempt_history"].append(
+                {
+                    "attempt": step["attempts"],
+                    "finished_at": now,
+                    "state": terminal_state,
+                    "error": error,
+                    "measurements": deepcopy(measurements),
+                }
+            )
+            state["active_step_id"] = None
+
+        return self._update(mutate)
+
+    def retry_step(self, step_id: str) -> dict:
+        """Vuelve a dejar pendiente una falla, conservando su historial."""
+
+        def mutate(state):
+            if state["state"] != "running":
+                raise ValueError("la misión no está en ejecución")
+            step = self._step(state, step_id)
+            if step["state"] not in {"failed", "blocked"}:
+                raise ValueError(f"{step_id} no puede repetirse")
+            step["state"] = "pending"
+            step["started_at"] = None
+            step["finished_at"] = None
+            step["result"] = None
+            step["error"] = None
+            step["measurements"] = None
+            state["active_step_id"] = None
+
+        return self._update(mutate)
+
+    def replace_pending_steps(
+        self,
+        steps: list[dict],
+        *,
+        skill_catalog: list[dict],
+        current_facts: list[str],
+    ) -> dict:
+        """Reemplaza sólo el futuro; el historial ejecutado queda inmutable."""
+        normalized = validate_plan(
+            steps,
+            skill_catalog=skill_catalog,
+            initial_facts=current_facts,
+        )
+
+        def mutate(state):
+            if state["state"] != "running":
+                raise ValueError("la misión no está en ejecución")
+            history = [
+                step for step in state["steps"] if step["state"] != "pending"
+            ]
+            history_ids = {step["id"] for step in history}
+            collisions = [
+                step["id"]
+                for step in normalized
+                if step["id"] in history_ids
+            ]
+            if collisions:
+                raise ValueError(
+                    "la revisión reutiliza pasos ya ejecutados: "
+                    + ", ".join(collisions)
+                )
+            for step in history:
+                if step["state"] in {"failed", "blocked"}:
+                    step["state"] = "superseded"
+            state["steps"] = history + normalized
             state["active_step_id"] = None
 
         return self._update(mutate)
@@ -364,7 +461,10 @@ class MissionTracker:
 
     def complete(self, result: str = None) -> dict:
         def mutate(state):
-            if any(step["state"] != "succeeded" for step in state["steps"]):
+            if any(
+                step["state"] not in {"succeeded", "superseded"}
+                for step in state["steps"]
+            ):
                 raise ValueError("no se puede completar una misión con pasos abiertos")
             state["state"] = "succeeded"
             state["active_step_id"] = None
