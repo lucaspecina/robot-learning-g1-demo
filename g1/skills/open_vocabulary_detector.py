@@ -17,13 +17,23 @@ from agent.intelligence_client import (  # noqa: E402
     IntelligenceClient,
     RemoteIntelligenceError,
 )
+from model_trace import build_model_event  # noqa: E402
 from open_vocabulary_core import parse_search_request  # noqa: E402
-from visual_evidence import VISUAL_EVIDENCE_TOPIC, image_ref  # noqa: E402
+from visual_evidence import (  # noqa: E402
+    MODEL_INPUT_TOPIC,
+    VISUAL_EVIDENCE_TOPIC,
+    image_ref,
+)
 
 import rclpy  # noqa: E402
 from rclpy.executors import ExternalShutdownException  # noqa: E402
 from rclpy.node import Node  # noqa: E402
-from rclpy.qos import qos_profile_sensor_data  # noqa: E402
+from rclpy.qos import (  # noqa: E402
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import CompressedImage, Image  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from vision_msgs.msg import (  # noqa: E402
@@ -34,6 +44,11 @@ from vision_msgs.msg import (  # noqa: E402
 
 MAX_FRAME_AGE_S = 2.0
 FRAME_WAIT_TIMEOUT_S = 6.0
+MODEL_EVENT_QOS = QoSProfile(
+    depth=20,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 class OpenVocabularyDetector(Node):
@@ -54,6 +69,16 @@ class OpenVocabularyDetector(Node):
             CompressedImage,
             VISUAL_EVIDENCE_TOPIC,
             2,
+        )
+        self.model_input_pub = self.create_publisher(
+            CompressedImage,
+            MODEL_INPUT_TOPIC,
+            2,
+        )
+        self.model_event_pub = self.create_publisher(
+            String,
+            "/g1/model_events",
+            MODEL_EVENT_QOS,
         )
         self.status_pub = self.create_publisher(
             String,
@@ -87,6 +112,13 @@ class OpenVocabularyDetector(Node):
                     ensure_ascii=False,
                 )
             )
+        )
+
+    def publish_model_event(self, event: dict):
+        if self.finished or not rclpy.ok():
+            return
+        self.model_event_pub.publish(
+            String(data=json.dumps(event, ensure_ascii=False))
         )
 
     def on_image(self, msg: Image):
@@ -165,6 +197,9 @@ class OpenVocabularyDetector(Node):
     ):
         started_at = time.monotonic()
         frame_reference = None
+        model_input_reference = None
+        model_input_payload = None
+        model_event_id = None
         self.publish_status(
             "running",
             request_id=request_id,
@@ -182,6 +217,38 @@ class OpenVocabularyDetector(Node):
             evidence.format = "jpeg"
             evidence.data = jpeg
             self.evidence_pub.publish(evidence)
+            # El tablero recibe exactamente el mismo buffer que sale por HTTP.
+            # Publicarlo antes de llamar al servidor prueba qué vio el modelo,
+            # incluso si la red se corta y nunca llega una respuesta.
+            model_input = CompressedImage()
+            model_input.header = header
+            model_input.format = "jpeg"
+            model_input.data = jpeg
+            self.model_input_pub.publish(model_input)
+            model_input_reference = {
+                **image_ref(MODEL_INPUT_TOPIC, header),
+                "source_topic": "/g1/head_cam/image",
+                "purpose": f"buscar {target} con Grounding DINO",
+                "bytes": len(jpeg),
+            }
+            model_input_payload = {
+                "target": target,
+                "labels": list(labels),
+                "image_width": int(rgb.shape[1]),
+                "image_height": int(rgb.shape[0]),
+            }
+            running_event = build_model_event(
+                task="detect_objects",
+                state="running",
+                input_summary=(
+                    f"cuadro JPEG {rgb.shape[1]}x{rgb.shape[0]} y categorías "
+                    + ", ".join(labels)
+                ),
+                input_ref=model_input_reference,
+                input_payload=model_input_payload,
+            )
+            model_event_id = running_event["event_id"]
+            self.publish_model_event(running_event)
             result = self.client.detect_objects(jpeg, labels)
             if (
                 result["image_width"] != rgb.shape[1]
@@ -198,6 +265,33 @@ class OpenVocabularyDetector(Node):
             if self.finished or not rclpy.ok():
                 return
             self.detections_pub.publish(message)
+            validated_output = {
+                "target": target,
+                "detections": result["detections"],
+                "image_width": result["image_width"],
+                "image_height": result["image_height"],
+            }
+            self.publish_model_event(
+                build_model_event(
+                    event_id=model_event_id,
+                    request_id=result.get("request_id"),
+                    task="detect_objects",
+                    state="succeeded",
+                    input_summary=(
+                        f"cuadro JPEG {rgb.shape[1]}x{rgb.shape[0]} y "
+                        "categorías " + ", ".join(labels)
+                    ),
+                    input_ref=model_input_reference,
+                    input_payload=model_input_payload,
+                    model=result.get("model"),
+                    raw_output=result["raw_output"],
+                    validated_output=validated_output,
+                    duration_s=round(
+                        time.monotonic() - started_at,
+                        3,
+                    ),
+                )
+            )
             self.publish_status(
                 "complete",
                 request_id=request_id,
@@ -210,6 +304,24 @@ class OpenVocabularyDetector(Node):
                 model=result.get("model"),
             )
         except (RemoteIntelligenceError, OSError, ValueError) as error:
+            if model_event_id is not None:
+                self.publish_model_event(
+                    build_model_event(
+                        event_id=model_event_id,
+                        request_id=getattr(error, "request_id", None),
+                        task="detect_objects",
+                        state="failed",
+                        input_summary="cuadro JPEG y categorías de búsqueda",
+                        input_ref=model_input_reference,
+                        input_payload=model_input_payload,
+                        raw_output=getattr(error, "raw_output", None),
+                        duration_s=round(
+                            time.monotonic() - started_at,
+                            3,
+                        ),
+                        error=str(error),
+                    )
+                )
             fields = {
                 "request_id": request_id,
                 "target": target,

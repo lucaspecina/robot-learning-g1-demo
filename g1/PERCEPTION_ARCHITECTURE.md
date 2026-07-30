@@ -95,6 +95,11 @@ El tablero muestra:
 6. el dato estructurado que aceptó el validador antes de que el robot actuara;
 7. qué paso de la misión está activo, qué decisión se tomó y con qué evidencia.
 
+Grounding DINO publica un evento propio antes de salir por HTTP y lo actualiza
+con éxito o falla al terminar. El evento enlaza el JPEG publicado en
+`/g1/model_input/compressed`; ambos usan la fecha original de adquisición de
+la cámara. Así una respuesta perdida no borra qué cuadro se intentó enviar.
+
 Esto permite distinguir cuatro casos diferentes: el objeto no entró en la
 cámara, entró pero el detector no lo reconoció, fue reconocido pero la tarea
 no reaccionó, o falló el modelo remoto. También deja visible una quinta falla:
