@@ -25,6 +25,7 @@ STEP_STATES = {
     "skipped",
 }
 STEP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+MAX_PLAN_STEPS = 20
 
 
 def build_demo_plan() -> list[dict]:
@@ -99,10 +100,24 @@ def build_demo_plan() -> list[dict]:
     ]
 
 
-def validate_plan(steps: list[dict]) -> list[dict]:
+def validate_plan(
+    steps: list[dict],
+    *,
+    skill_catalog: list[dict] = None,
+    initial_facts: list[str] = None,
+) -> list[dict]:
     """Valida el contrato antes de publicarlo o ejecutarlo."""
     if not isinstance(steps, list) or not steps:
         raise ValueError("el plan debe contener pasos")
+    if len(steps) > MAX_PLAN_STEPS:
+        raise ValueError(
+            f"el plan supera el máximo de {MAX_PLAN_STEPS} pasos"
+        )
+    catalog_by_name = {
+        entry["name"]: entry
+        for entry in (skill_catalog or [])
+    }
+    known_facts = set(initial_facts or [])
     normalized = []
     seen_ids = set()
     for step in steps:
@@ -119,14 +134,48 @@ def validate_plan(steps: list[dict]) -> list[dict]:
             raise ValueError(f"skill inválida: {skill}")
         if not isinstance(label, str) or not label.strip():
             raise ValueError(f"falta la descripción de {step_id}")
+        argument = step.get("argument")
+        availability = None
+        if catalog_by_name:
+            spec = catalog_by_name.get(skill)
+            if spec is None:
+                raise ValueError(f"skill no permitida: {skill}")
+            variants = spec.get("variants")
+            if not isinstance(variants, list) or not variants:
+                raise ValueError(f"skill sin contrato ejecutable: {skill}")
+            variant = next(
+                (
+                    candidate
+                    for candidate in variants
+                    if candidate.get("argument") == argument
+                ),
+                None,
+            )
+            if variant is None:
+                raise ValueError(
+                    f"argumento no permitido para {skill}: {argument}"
+                )
+            missing = [
+                fact
+                for fact in variant.get("preconditions", [])
+                if fact not in known_facts
+            ]
+            if missing:
+                raise ValueError(
+                    f"{step_id} aparece antes de cumplir: "
+                    + ", ".join(missing)
+                )
+            known_facts.update(variant.get("effects", []))
+            availability = spec.get("availability")
         seen_ids.add(step_id)
         normalized.append(
             {
                 "id": step_id,
                 "skill": skill,
-                "argument": step.get("argument"),
+                "argument": argument,
                 "resolved_argument": None,
                 "label": label,
+                "availability": availability,
                 "state": "pending",
                 "started_at": None,
                 "finished_at": None,
@@ -196,14 +245,36 @@ class MissionTracker:
 
         return self._update(mutate)
 
-    def set_plan(self, steps: list[dict]) -> dict:
-        normalized = validate_plan(steps)
+    def set_plan(
+        self,
+        steps: list[dict],
+        *,
+        skill_catalog: list[dict] = None,
+        initial_facts: list[str] = None,
+    ) -> dict:
+        normalized = validate_plan(
+            steps,
+            skill_catalog=skill_catalog,
+            initial_facts=initial_facts,
+        )
 
         def mutate(state):
             if state["state"] != "planning":
                 raise ValueError("la misión no está siendo planificada")
             state["steps"] = normalized
             state["state"] = "running"
+
+        return self._update(mutate)
+
+    def set_planner(self, planner: str) -> dict:
+        """Registra si el plan vino del modelo o del respaldo local."""
+        if not isinstance(planner, str) or not planner.strip():
+            raise ValueError("falta el nombre del planificador")
+
+        def mutate(state):
+            if state["state"] != "planning":
+                raise ValueError("el planificador sólo cambia al planificar")
+            state["planner"] = planner
 
         return self._update(mutate)
 

@@ -108,8 +108,17 @@ versión anterior quedaron fuera del alcance actual.
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
-cajas, el planificador de reglas
-por un modelo de lenguaje, el robot simulado por el real.
+cajas, el modelo de lenguaje por otro planificador, el robot simulado por el
+real.
+
+El planificador remoto recibe la orden original y un catálogo cerrado. Cada
+capacidad del catálogo explica en castellano qué hace, qué argumento acepta,
+qué condiciones necesita y qué resultado deja. El modelo devuelve solamente
+un plan JSON; no puede publicar movimiento. El servidor lo valida y la Jetson
+lo vuelve a validar contra su propia copia antes de ejecutarlo. Si el servicio
+remoto falla, la misión conocida usa el plan local de respaldo. Las
+capacidades todavía pendientes aparecen como `placeholder` y bloquean la
+ejecución honestamente al llegar a ellas.
 
 ## Los archivos
 
@@ -130,8 +139,9 @@ por un modelo de lenguaje, el robot simulado por el real.
 | `skills/table_localizer.py` | une caja, profundidad y pose histórica; publica el punto en el mapa |
 | `skills/detection_adapter.py` | conserva cuadros acotados, clasifica color y recorta el reloj |
 | `mission_contract.py` | contrato de misión, pasos, estados y decisiones |
+| `skill_catalog.py` | catálogo explicado y contratos que recibe el planificador |
 | `model_trace.py` | contrato de trazabilidad de modelos, incluido el texto literal |
-| `agent/agent.py` | ejecutor local de la misión y cliente del servidor |
+| `agent/agent.py` | valida y ejecuta localmente el plan; nunca entrega motores al LLM |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
 
@@ -175,6 +185,13 @@ reloj y la manda al servidor por HTTP. El servidor consulta el modelo visual y
 devuelve datos validados. Si la red o el proveedor fallan, el paso se aborta;
 equilibrio, espera y autoridad de movilidad siguen funcionando localmente.
 
+**El LLM propone; la Jetson decide si el plan es ejecutable.** El modelo ve
+descripciones completas, no sólo nombres de capacidades, pero su salida sigue
+siendo datos no confiables. Dos validaciones independientes rechazan skills
+inventadas, argumentos desconocidos y pasos ordenados antes de cumplir sus
+condiciones. El tablero conserva el pedido exacto, la respuesta literal y el
+plan aceptado.
+
 **Llegar tiene memoria.** El balanceo del bípedo hacía que la posición cruzara
 el límite de 10 cm mientras terminaba de orientar el cuerpo, alternando para
 siempre entre posición y ángulo. Como el verificador de objetivos de Nav2, la
@@ -215,4 +232,5 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 6. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
 7. **El agarre** con un VLA entrenado por nosotros.
-8. **Voz y planificador semántico** después de cerrar las capacidades físicas.
+8. **Voz** para reemplazar la publicación manual de texto; el planificador
+   semántico ya está conectado y acotado por el catálogo.

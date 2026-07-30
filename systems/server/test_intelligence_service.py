@@ -8,7 +8,9 @@ from systems.server.intelligence_service import (
     IntelligenceService,
     InvalidImageError,
     InvalidModelResponseError,
+    MissionPlanner,
     decode_image,
+    validate_generated_plan,
     validate_reading,
 )
 from systems.server.open_vocabulary_detector import (
@@ -67,6 +69,94 @@ class FakeObjectDetector:
 
 
 class IntelligenceServiceTests(unittest.TestCase):
+    def test_mission_planner_receives_skill_meaning_and_returns_literal_text(self):
+        catalog = [
+            {
+                "name": "remember_home",
+                "description": "Guarda la pose actual para regresar.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "argument_description": "Sin argumento.",
+                        "preconditions": ["robot_pose_known"],
+                        "effects": ["home_saved"],
+                    }
+                ],
+            }
+        ]
+        payload = {
+            "steps": [
+                {
+                    "id": "remember_home",
+                    "skill": "remember_home",
+                    "argument": None,
+                    "label": "Guardar el punto de inicio",
+                }
+            ]
+        }
+        fake_client = FakeClient(payload)
+        planner = MissionPlanner(
+            client=fake_client,
+            deployment="planner-test",
+        )
+
+        result = planner.plan(
+            "Recordá dónde empezaste",
+            catalog,
+            ["robot_pose_known"],
+        )
+
+        self.assertEqual(result["plan"], payload)
+        self.assertEqual(json.loads(result["raw_output"]), payload)
+        self.assertEqual(result["model"], "planner-test")
+        request = fake_client.chat.completions.last_kwargs
+        self.assertIn(
+            "Guarda la pose actual para regresar.",
+            request["messages"][0]["content"],
+        )
+        self.assertEqual(
+            request["response_format"]["type"],
+            "json_schema",
+        )
+        self.assertEqual(result["model_input"]["messages"], request["messages"])
+
+    def test_external_validator_rejects_missing_preconditions(self):
+        catalog = [
+            {
+                "name": "read_clock",
+                "description": "Lee el reloj.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "argument_description": "Sin argumento.",
+                        "preconditions": ["clock_confirmed"],
+                        "effects": ["clock_reading_known"],
+                    }
+                ],
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "clock_confirmed",
+        ):
+            validate_generated_plan(
+                {
+                    "steps": [
+                        {
+                            "id": "read_clock",
+                            "skill": "read_clock",
+                            "argument": None,
+                            "label": "Leer la hora",
+                        }
+                    ]
+                },
+                catalog,
+                [],
+            )
+
     def test_validates_consistent_reading(self):
         reading = {
             "readable": True,

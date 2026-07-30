@@ -12,6 +12,7 @@ import uuid
 DEFAULT_SERVER_URL = "http://172.30.0.20:8000"
 DEFAULT_TIMEOUT_S = 15.0
 DEFAULT_DETECTION_TIMEOUT_S = 45.0
+DEFAULT_PLANNER_TIMEOUT_S = 20.0
 FAILURE_THRESHOLD = 3
 OPEN_INTERVAL_S = 30.0
 
@@ -23,10 +24,12 @@ class RemoteIntelligenceError(RuntimeError):
         *,
         request_id: str = None,
         raw_output: str = None,
+        input_payload=None,
     ):
         super().__init__(message)
         self.request_id = request_id
         self.raw_output = raw_output
+        self.input_payload = input_payload
 
 
 class CircuitOpenError(RemoteIntelligenceError):
@@ -124,11 +127,13 @@ class IntelligenceClient:
                 payload = json.loads(response_text)
         except urllib.error.HTTPError as error:
             raw_output = None
+            input_payload = None
             try:
                 failure_payload = json.loads(
                     error.read().decode("utf-8")
                 )
                 raw_output = failure_payload.get("raw_output")
+                input_payload = failure_payload.get("model_input")
             except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
                 pass
             self._record_failure()
@@ -136,6 +141,7 @@ class IntelligenceClient:
                 f"falló el pedido remoto: HTTP {error.code}",
                 request_id=request_id,
                 raw_output=raw_output,
+                input_payload=input_payload,
             ) from error
         except (
             OSError,
@@ -160,6 +166,52 @@ class IntelligenceClient:
                 request_id=request_id,
             )
         return payload, request_id, response_text
+
+    def plan_mission(
+        self,
+        command: str,
+        skill_catalog: list[dict],
+        initial_facts: list[str],
+    ) -> dict:
+        """Pide una propuesta; la validación autoritativa queda en la Jetson."""
+        timeout_s = float(
+            os.environ.get(
+                "INTELLIGENCE_PLANNER_TIMEOUT_S",
+                DEFAULT_PLANNER_TIMEOUT_S,
+            )
+        )
+        payload, request_id, _response_text = self._post(
+            "/v1/plan-mission",
+            {
+                "command": command,
+                "skill_catalog": skill_catalog,
+                "initial_facts": initial_facts,
+            },
+            timeout_s,
+        )
+        plan = payload.get("plan")
+        raw_output = payload.get("raw_output")
+        model_input = payload.get("model_input")
+        if (
+            not isinstance(plan, dict)
+            or not isinstance(plan.get("steps"), list)
+            or not isinstance(raw_output, str)
+            or not isinstance(model_input, dict)
+        ):
+            self._record_failure()
+            raise RemoteIntelligenceError(
+                "el servidor no conservó un plan trazable",
+                request_id=request_id,
+            )
+        self._record_success()
+        return {
+            "steps": plan["steps"],
+            "request_id": request_id,
+            "model": payload.get("model"),
+            "raw_output": raw_output,
+            "model_input": model_input,
+            "elapsed_s": payload.get("elapsed_s"),
+        }
 
     def read_clock(self, image: bytes) -> dict:
         payload, request_id, _response_text = self._post(

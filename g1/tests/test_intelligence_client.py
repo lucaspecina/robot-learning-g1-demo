@@ -24,6 +24,69 @@ class FakeResponse:
 
 
 class IntelligenceClientTests(unittest.TestCase):
+    def test_requests_a_plan_with_the_described_skills(self):
+        catalog = [
+            {
+                "name": "remember_home",
+                "description": "Guarda el inicio.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "argument_description": "Sin argumento.",
+                        "preconditions": ["robot_pose_known"],
+                        "effects": ["home_saved"],
+                    }
+                ],
+            }
+        ]
+
+        def opener(request, timeout):
+            request_payload = json.loads(request.data)
+            self.assertEqual(request_payload["command"], "Recordá el inicio")
+            self.assertEqual(
+                request_payload["skill_catalog"][0]["description"],
+                "Guarda el inicio.",
+            )
+            request_id = request.headers["X-request-id"]
+            raw_output = (
+                '{"steps":[{"id":"remember_home",'
+                '"skill":"remember_home","argument":null,'
+                '"label":"Guardar el inicio"}]}'
+            )
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "plan": json.loads(raw_output),
+                    "raw_output": raw_output,
+                    "model_input": {
+                        "messages": [
+                            {"role": "user", "content": "Recordá el inicio"}
+                        ]
+                    },
+                    "model": "planner-test",
+                    "elapsed_s": 0.5,
+                }
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=opener,
+        )
+        result = client.plan_mission(
+            "Recordá el inicio",
+            catalog,
+            ["robot_pose_known"],
+        )
+
+        self.assertEqual(result["steps"][0]["skill"], "remember_home")
+        self.assertEqual(result["model"], "planner-test")
+        self.assertEqual(
+            result["model_input"]["messages"][0]["content"],
+            "Recordá el inicio",
+        )
+
     def test_reads_clock_and_preserves_request_id(self):
         def opener(request, timeout):
             request_payload = json.loads(request.data)

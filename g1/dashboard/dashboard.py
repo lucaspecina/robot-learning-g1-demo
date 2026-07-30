@@ -288,9 +288,19 @@ class DashboardNode(Node):
                 return
             event = state["model_events"][-1]
             input_ref = event.get("input_ref") or {}
+            if not input_ref:
+                # Un planificador de texto no debe heredar la imagen de una
+                # llamada visual anterior y presentarla como si fuera suya.
+                state["model_input_jpeg"] = None
+                state["model_input_time"] = 0.0
+                state["model_input_event_id"] = None
+                return
             key = (input_ref.get("sec"), input_ref.get("nanosec"))
             jpeg = self.model_input_cache.get(key)
             if jpeg is None:
+                state["model_input_jpeg"] = None
+                state["model_input_time"] = 0.0
+                state["model_input_event_id"] = None
                 return
             state["model_input_jpeg"] = jpeg
             state["model_input_time"] = time.time()

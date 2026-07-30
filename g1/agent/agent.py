@@ -20,8 +20,9 @@ robot y conserva, por separado, tres tipos de evidencia:
            /g1/mission_state              estado estructurado de cada paso
            /g1/model_events               salida literal de LLM/VLM y validación
 
-Las decisiones lentas se piden al servidor externo. Si la red o el modelo
-fallan, la misión se detiene, pero el control local conserva el equilibrio.
+Las decisiones lentas se piden al servidor externo. Si falla el planificador,
+la misión conocida conserva un respaldo local; cualquier ejecución sigue
+validada y el control local mantiene el equilibrio.
 """
 import json
 import math
@@ -53,10 +54,15 @@ from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
 )
-from mission_contract import MissionTracker, build_demo_plan
+from mission_contract import MissionTracker, build_demo_plan, validate_plan
 from model_trace import build_model_event
 from open_vocabulary_core import make_search_request
 from scene_layout import NAVIGATION_TARGETS
+from skill_catalog import (
+    INITIAL_WORLD_FACTS,
+    SKILL_CATALOG,
+    skill_catalog_for_model,
+)
 
 
 STATE_QOS = QoSProfile(
@@ -84,21 +90,6 @@ ARM_POSES = {
     "ready": "listo",
     "transport": "transporte",
 }
-
-# Este catálogo será la entrada acotada del planificador con LLM. Los
-# identificadores son estables aunque cambie la explicación para el operador.
-SKILLS = {
-    "remember_home": "guardar la posición inicial de esta misión",
-    "navigate_to": "ir a una pose segura conocida o a home",
-    "look_at": "confirmar visualmente un objeto",
-    "read_clock": "leer el recorte del reloj con un VLM",
-    "choose_table": "aplicar la regla de las 12:00",
-    "search_table": "buscar una mesa no registrada por posición",
-    "approach_table": "crear y ejecutar una aproximación segura",
-    "set_arm_pose": "mover y verificar una postura de brazos",
-    "grasp_object": "agarrar el objeto",
-}
-
 
 def succeeded(message: str) -> dict:
     return {"state": "succeeded", "message": message}
@@ -305,24 +296,151 @@ class Agent(Node):
 
     def run_mission(self, command: str):
         self.mission_context = {}
-        planner = "rules"
-        self.mission_tracker.begin(command, planner)
+        self.mission_tracker.begin(command, "azure_llm")
         self.report(f"planificando: {command}")
         try:
-            plan = self.plan_with_rules(command)
-            self.mission_tracker.set_plan(plan)
+            plan = self.plan_with_model(command)
+            self.mission_tracker.set_planner("azure_llm")
+        except (RemoteIntelligenceError, ValueError) as model_error:
+            self.report(
+                "el planificador remoto no produjo un plan utilizable; "
+                f"uso el respaldo local: {model_error}"
+            )
+            try:
+                plan = self.plan_with_rules(command)
+                validate_plan(
+                    plan,
+                    skill_catalog=SKILL_CATALOG,
+                    initial_facts=INITIAL_WORLD_FACTS,
+                )
+                self.mission_tracker.set_planner("rules_fallback")
+            except ValueError as fallback_error:
+                self.mission_tracker.stop(str(fallback_error))
+                self.report(f"FALLO al planificar: {fallback_error}")
+                return
+        try:
+            self.mission_tracker.set_plan(
+                plan,
+                skill_catalog=SKILL_CATALOG,
+                initial_facts=INITIAL_WORLD_FACTS,
+            )
         except ValueError as error:
             self.mission_tracker.stop(str(error))
-            self.report(f"FALLO al planificar: {error}")
+            self.report(f"FALLO al validar el plan: {error}")
             return
         self.report(
             "plan: " + " → ".join(step["label"] for step in plan)
         )
         self.execute_plan(plan)
 
+    def plan_with_model(self, command: str) -> list[dict]:
+        """Pide una propuesta y la vuelve a validar dentro de la Jetson."""
+        event_id = str(uuid.uuid4())
+        started_wall = time.time()
+        started_monotonic = time.monotonic()
+        catalog = skill_catalog_for_model()
+        local_input = {
+            "command": command,
+            "skill_catalog": catalog,
+            "initial_facts": list(INITIAL_WORLD_FACTS),
+        }
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                task="plan_mission",
+                state="running",
+                input_summary=(
+                    "orden original, hechos conocidos y catálogo descriptivo "
+                    "de skills"
+                ),
+                input_payload=local_input,
+                created_at=started_wall,
+            )
+        )
+        try:
+            proposal = self.intelligence.plan_mission(
+                command,
+                catalog,
+                list(INITIAL_WORLD_FACTS),
+            )
+        except RemoteIntelligenceError as error:
+            self.publish_model_event(
+                build_model_event(
+                    event_id=event_id,
+                    request_id=error.request_id,
+                    task="plan_mission",
+                    state="failed",
+                    input_summary=(
+                        "orden original, hechos conocidos y catálogo "
+                        "descriptivo de skills"
+                    ),
+                    input_payload=error.input_payload or local_input,
+                    raw_output=error.raw_output,
+                    duration_s=round(
+                        time.monotonic() - started_monotonic,
+                        3,
+                    ),
+                    error=str(error),
+                    created_at=started_wall,
+                )
+            )
+            raise
+
+        try:
+            validated = validate_plan(
+                proposal["steps"],
+                skill_catalog=SKILL_CATALOG,
+                initial_facts=INITIAL_WORLD_FACTS,
+            )
+        except ValueError as error:
+            self.publish_model_event(
+                build_model_event(
+                    event_id=event_id,
+                    request_id=proposal.get("request_id"),
+                    task="plan_mission",
+                    state="failed",
+                    input_summary=(
+                        "orden original, hechos conocidos y catálogo "
+                        "descriptivo de skills"
+                    ),
+                    input_payload=proposal.get("model_input") or local_input,
+                    raw_output=proposal.get("raw_output"),
+                    duration_s=round(
+                        time.monotonic() - started_monotonic,
+                        3,
+                    ),
+                    error=f"la Jetson rechazó el plan: {error}",
+                    created_at=started_wall,
+                )
+            )
+            raise
+
+        self.publish_model_event(
+            build_model_event(
+                event_id=event_id,
+                request_id=proposal.get("request_id"),
+                task="plan_mission",
+                state="succeeded",
+                input_summary=(
+                    "orden original, hechos conocidos y catálogo descriptivo "
+                    "de skills"
+                ),
+                input_payload=proposal.get("model_input") or local_input,
+                model=proposal.get("model"),
+                raw_output=proposal["raw_output"],
+                validated_output={"steps": validated},
+                duration_s=round(
+                    time.monotonic() - started_monotonic,
+                    3,
+                ),
+                created_at=started_wall,
+            )
+        )
+        return proposal["steps"]
+
     @staticmethod
     def plan_with_rules(command: str) -> list[dict]:
-        """Produce sólo la misión de referencia mientras no haya un LLM."""
+        """Respaldo local para la misión de referencia si falla el servidor."""
         normalized = command.lower()
         if not any(
             word in normalized

@@ -8,13 +8,13 @@
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh table red  mira una mesa desde una pose sólo de prueba
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
-#   bash run_demo.sh mission     le da la mision completa de 10 pasos
+#   bash run_demo.sh mission     le da la misión completa al planificador
 #   bash run_demo.sh layers      reinicia sólo las capas de la Jetson
 #   bash run_demo.sh status      como viene todo
 #   bash run_demo.sh down        apaga las capas de arriba (no el robot)
 #
-# El orden correcto es: up -> check all -> recien ahi mission. La mision de 10
-# pasos no significa nada si el robot no se sostiene de pie.
+# El orden correcto es: up -> check all -> recién ahí mission. Un plan correcto
+# no significa nada si el robot no se sostiene de pie.
 #
 # EL TABLERO VA APARTE, a proposito: es un observador, no parte del robot.
 # Se prende una vez (tablero on) y se queda vivo mientras el robot nace, se

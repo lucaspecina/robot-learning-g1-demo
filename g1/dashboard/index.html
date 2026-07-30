@@ -320,8 +320,9 @@
             <h3>Entrada exacta del LLM/VLM</h3>
             <img id="model-input-image" alt="Imagen exacta enviada al modelo">
             <div class="image-placeholder" id="model-input-placeholder">
-              Todavía no se envió una imagen a un modelo
+              Todavía no hubo una entrada visual
             </div>
+            <pre id="model-input-text" hidden></pre>
             <div class="hint" id="model-input-age"></div>
           </div>
         </div>
@@ -501,6 +502,7 @@
         setText('model-raw-output','Todavía no hubo una llamada a un LLM o VLM.');
         setText('model-validated-output','—');
         setText('model-input-age','');
+        document.getElementById('model-input-text').hidden=true;
         return;
       }
       setText('model-task',event.task || '—');
@@ -523,12 +525,29 @@
           ? '—'
           : JSON.stringify(event.validated_output,null,2)
       );
-      setText(
-        'model-input-age',
-        state.model_input_event_id === event.event_id
-          ? `Entrada de esta llamada · conservada hace ${state.model_input_age_s ?? 0} s`
-          : 'La entrada exacta de esta llamada no está en el buffer.'
+      const inputText=document.getElementById('model-input-text');
+      const inputPlaceholder=document.getElementById(
+        'model-input-placeholder'
       );
+      if(event.input_payload != null){
+        inputText.hidden=false;
+        inputText.textContent=JSON.stringify(event.input_payload,null,2);
+        inputPlaceholder.textContent='Esta llamada no usa una imagen';
+        setText(
+          'model-input-age',
+          'Arriba está el pedido exacto de texto enviado al modelo.'
+        );
+      }else{
+        inputText.hidden=true;
+        inputPlaceholder.textContent=
+          'Esperando la imagen exacta de esta llamada';
+        setText(
+          'model-input-age',
+          state.model_input_event_id === event.event_id
+            ? `Imagen exacta de esta llamada · conservada hace ${state.model_input_age_s ?? 0} s`
+            : 'La entrada exacta de esta llamada no está en el buffer.'
+        );
+      }
     }
 
     function toScreen(canvas,x,y){

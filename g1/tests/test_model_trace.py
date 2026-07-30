@@ -17,6 +17,7 @@ class ModelTraceTest(unittest.TestCase):
                 "sec": 12,
                 "nanosec": 34,
             },
+            input_payload={"messages": [{"role": "user", "content": "hola"}]},
             model="vision-test",
             raw_output=raw_output,
             validated_output={"text": "09:00"},
@@ -25,6 +26,10 @@ class ModelTraceTest(unittest.TestCase):
         self.assertEqual(event["raw_output"], raw_output)
         self.assertEqual(event["validated_output"], {"text": "09:00"})
         self.assertEqual(event["input_ref"]["nanosec"], 34)
+        self.assertEqual(
+            event["input_payload"]["messages"][0]["content"],
+            "hola",
+        )
 
     def test_does_not_present_a_success_without_raw_output(self):
         with self.assertRaises(ValueError):
