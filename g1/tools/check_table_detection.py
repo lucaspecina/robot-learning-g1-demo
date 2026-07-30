@@ -450,7 +450,11 @@ def main() -> int:
             raise RuntimeError(
                 f"la mesa no fue estable: {expected_count}/{len(samples)}"
             )
-        if opposite_count:
+        # Desde una pose de banco dedicada, ver el otro color indicaría una
+        # clasificación falsa. En una vista libre y amplia pueden entrar las
+        # dos mesas reales; ahí el contrato correcto es seleccionar y medir
+        # sólo el color pedido, no exigir que el resto del mundo desaparezca.
+        if opposite_count and not args.current_view:
             raise RuntimeError("la mesa apareció también con el color opuesto")
         print(
             "APROBADO: la mesa se reconoce y se mide desde el mismo "
