@@ -4,6 +4,7 @@ import unittest
 
 from payload_core import (
     parse_payload_request,
+    payload_geometry_measurements,
     payload_mass_values,
     select_payload_body_indices,
 )
@@ -50,6 +51,22 @@ class PayloadCoreTest(unittest.TestCase):
 
         self.assertEqual(first, [10.0, 0.9, 0.9])
         self.assertEqual(second, first)
+
+    def test_reports_visual_position_relative_to_pelvis(self):
+        geometry = payload_geometry_measurements(
+            [[0.4, 0.2, 1.0], [0.4, -0.2, 1.0]],
+            [0.0, 0.0, 0.75],
+        )
+
+        self.assertEqual(geometry["wrist_separation_m"], 0.4)
+        self.assertEqual(
+            geometry["visual_position_world_m"],
+            [0.4, 0.0, 1.0],
+        )
+        self.assertEqual(
+            geometry["visual_offset_from_pelvis_world_m"],
+            [0.4, 0.0, 0.25],
+        )
 
 
 if __name__ == "__main__":

@@ -47,11 +47,15 @@ POSES = {
         0.35, -0.16, 0.0, 0.87, 0.0, 0.0, 0.0,     # derecho
     ], dtype=np.float32),
 
-    # Brazos recogidos contra el cuerpo: para caminar llevando algo, mantiene
-    # la carga cerca del centro y molesta menos al equilibrio.
+    # La pose anterior usaba hombro positivo y llevó las muñecas contra la
+    # pelvis: los ángulos se cumplían, pero la inspección visual la rechazó.
+    # Esta candidata espeja el brazo derecho del cuadro 178 de la demostración
+    # NVIDIA object_pick_and_place_retarget_motion_g1_3finger_hands. NVIDIA
+    # controla las muñecas por posición; el espejo bilateral sigue siendo una
+    # adaptación nuestra y debe aprobar visualmente antes de llamarse estable.
     "transporte": np.array([
-        0.20, 0.25, 0.0, 1.20, 0.0, 0.0, 0.0,
-        0.20, -0.25, 0.0, 1.20, 0.0, 0.0, 0.0,
+        -0.49, 0.51, -0.51, 0.79, -0.38, -0.34, -0.15,
+        -0.49, -0.51, 0.51, 0.79, 0.38, -0.34, 0.15,
     ], dtype=np.float32),
 }
 

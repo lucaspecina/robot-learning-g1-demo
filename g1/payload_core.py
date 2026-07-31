@@ -91,3 +91,38 @@ def payload_mass_values(
         result[body_index] += extra_per_body
     return result
 
+
+def payload_geometry_measurements(
+    wrist_positions: list[list[float]],
+    pelvis_position: list[float],
+) -> dict:
+    """Mide dónde queda el dibujo; verlo entre muñecas no basta para aprobarlo."""
+    if len(wrist_positions) != 2 or any(
+        len(position) != 3
+        for position in wrist_positions
+    ):
+        raise ValueError("se necesitan dos posiciones 3D de muñeca")
+    if len(pelvis_position) != 3:
+        raise ValueError("se necesita una posición 3D de pelvis")
+    midpoint = [
+        (float(wrist_positions[0][axis]) + float(wrist_positions[1][axis]))
+        / 2.0
+        for axis in range(3)
+    ]
+    separation = math.dist(wrist_positions[0], wrist_positions[1])
+    relative = [
+        midpoint[axis] - float(pelvis_position[axis])
+        for axis in range(3)
+    ]
+    return {
+        "wrist_separation_m": round(separation, 3),
+        "visual_position_world_m": [round(value, 3) for value in midpoint],
+        "visual_offset_from_pelvis_world_m": [
+            round(value, 3)
+            for value in relative
+        ],
+        "visual_distance_from_pelvis_m": round(
+            math.sqrt(sum(value * value for value in relative)),
+            3,
+        ),
+    }

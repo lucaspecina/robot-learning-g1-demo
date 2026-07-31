@@ -216,6 +216,7 @@ from locomotion import (  # noqa: E402
 )
 from payload_core import (  # noqa: E402
     parse_payload_request,
+    payload_geometry_measurements,
     payload_mass_values,
     select_payload_body_indices,
 )
@@ -1013,6 +1014,14 @@ def main():
             return
         try:
             status = payload_controller.set_mass(request["mass_kg"])
+            wrist_positions = robot.data.body_pos_w[
+                0,
+                payload_controller.body_indices,
+            ]
+            status.update(payload_geometry_measurements(
+                wrist_positions.detach().cpu().tolist(),
+                robot.data.root_pos_w[0].detach().cpu().tolist(),
+            ))
             payload_visual.set_attached(status["attached"])
             status.update({
                 "request_id": request["request_id"],
