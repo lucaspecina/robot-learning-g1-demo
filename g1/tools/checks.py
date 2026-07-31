@@ -338,6 +338,12 @@ def check_stand(c: Checker) -> bool:
             print(f"  t={i+1:3d}s   altura {z:.3f} m   error {d:.2f} m   {estado}")
         if z <= STANDING_HEIGHT_MIN and cayo_en is None:
             cayo_en = i + 1
+        if c.mobility_owner != "stand":
+            return veredicto(
+                False,
+                "otra operación tomó la movilidad durante quietud; "
+                f"dueño observado: {c.mobility_owner}",
+            )
 
     x, y, z, _ = c.pose
     deriva = math.hypot(x - x0, y - y0)

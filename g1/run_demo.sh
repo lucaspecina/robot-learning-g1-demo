@@ -35,6 +35,20 @@ HOST_DEMO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 D=/workspace/g1          # ruta dentro del contenedor jetson
 ROS="source /opt/ros/jazzy/setup.bash"
 
+# Dos operaciones de banco simultáneas invalidan cualquier medición y pueden
+# duplicar todos los nodos. `status` queda libre para poder observar mientras
+# una prueba corre; las operaciones que cambian estado son exclusivas.
+case "${1:-up}" in
+status) ;;
+*)
+    exec 8>/tmp/g1_demo_operation.lock
+    if ! flock -n 8; then
+        echo "ERROR: ya hay otra operación de la demo en curso" >&2
+        exit 2
+    fi
+    ;;
+esac
+
 launch() {   # nombre archivo_log script
     # Bajo supervisor: si el proceso se muere, vuelve solo a los 3 s. Un
     # tablero que se cae en silencio es peor que no tenerlo — te deja mirando
