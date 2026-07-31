@@ -78,8 +78,12 @@ case "$MODE" in
         ARGS="--locomotion stand --model $MODEL --payload_kg $PAYLOAD $EXTRA"
         ;;
     stop)
-        kill_all_robots && echo "detenido (todas las instancias)" || echo "quedaron instancias vivas"
-        exit 0;;
+        if kill_all_robots; then
+            echo "detenido (todas las instancias)"
+            exit 0
+        fi
+        echo "quedaron instancias vivas" >&2
+        exit 1;;
     status)
         pgrep -f "g1_robot.p[y]" >/dev/null && echo "corriendo" || echo "detenido"
         tail -c 500 "$LOG" | tr '\r' '\n' | tail -4
@@ -108,7 +112,10 @@ esac
 cd ~/go2-lab/g1 || exit 1
 source ~/go2-lab/isaac_ros_env.sh
 export PYTHONPATH="$WBC_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+# Vaciar el log antes de desprender el proceso impide que un lanzador lea el
+# `LISTO` de una corrida anterior si Isaac todavía no llegó a iniciar.
+: > "$LOG"
 setsid nohup ~/go2-lab/IsaacLab/isaaclab.sh -p g1_robot.py $MODO_VIDEO $ARGS \
-    > "$LOG" 2>&1 < /dev/null &
+    > "$LOG" 2>&1 < /dev/null 9>&- &
 echo "lanzado: modo=$MODE modelo=$MODEL carga=${PAYLOAD}kg ${EXTRA}"
 echo "seguir con: bash run_g1.sh status"

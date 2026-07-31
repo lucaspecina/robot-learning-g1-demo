@@ -83,7 +83,10 @@ preflight() {
     zombis=$(pgrep -f "g1_robot.p[y]" 2>/dev/null | wc -l)
     if [ "$zombis" -gt 0 ]; then
         echo "   había $zombis proceso(s) de la cadena de Isaac: limpiando"
-        bash ~/go2-lab/g1/run_g1.sh stop >/dev/null
+        bash ~/go2-lab/g1/run_g1.sh stop >/dev/null || {
+            echo "ERROR: no se pudo detener la instancia anterior" >&2
+            exit 1
+        }
     fi
     stop_layers
     sleep 2
@@ -108,7 +111,15 @@ case "${1:-up}" in
 up)
     preflight
     echo ">> El robot (Isaac, ~1 min de arranque)..."
-    bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 "--camera --scene --visible" | tail -1
+    if ! ROBOT_LAUNCH_OUTPUT=$(
+        bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 \
+            "--camera --scene --visible" 2>&1
+    ); then
+        echo "$ROBOT_LAUNCH_OUTPUT" >&2
+        echo "ERROR: Isaac no fue lanzado; no se acepta un log anterior" >&2
+        exit 1
+    fi
+    echo "$ROBOT_LAUNCH_OUTPUT" | tail -1
 
     echo ">> Esperando a que el robot este en pie..."
     until tr '\r' '\n' < ~/g1.log 2>/dev/null | grep -q "LISTO:"; do
