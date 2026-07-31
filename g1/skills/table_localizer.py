@@ -121,7 +121,7 @@ class SpatialLocalizer(Node):
         self.create_subscription(
             Detection2DArray,
             "/g1/object_detections",
-            self.on_object_detections,
+            self.on_local_detections,
             qos_profile_sensor_data,
         )
         self.get_logger().info(
@@ -162,15 +162,31 @@ class SpatialLocalizer(Node):
             "mesa",
         )
 
-    def on_object_detections(self, message: Detection2DArray):
-        selected = [
+    def on_local_detections(self, message: Detection2DArray):
+        # La búsqueda remota confirma qué mesa es. Durante la aproximación,
+        # el lazo necesita mediciones locales nuevas cada pocos segundos; usar
+        # aquí el mismo RT-DETR que ya corre evita cerrar el control sobre una
+        # imagen remota vieja.
+        selected_tables = [
+            detection
+            for detection in message.detections
+            if self.class_name(detection) in TABLE_CLASS_NAMES
+        ]
+        self.localize_message(
+            message,
+            selected_tables,
+            self.localize_table,
+            self.table_detections_pub,
+            "mesa",
+        )
+        selected_objects = [
             detection
             for detection in message.detections
             if self.class_name(detection) in TRANSPORT_OBJECT_CLASS_NAMES
         ]
         self.localize_message(
             message,
-            selected,
+            selected_objects,
             self.localize_object,
             self.object_detections_pub,
             "objeto",
