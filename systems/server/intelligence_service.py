@@ -103,6 +103,7 @@ def build_plan_schema(skill_names: list[str]) -> dict:
                                 "argument": {
                                     "anyOf": [
                                         {"type": "string"},
+                                        {"type": "number"},
                                         {"type": "null"},
                                     ]
                                 },
@@ -138,6 +139,7 @@ def build_review_schema(skill_names: list[str]) -> dict:
             "argument": {
                 "anyOf": [
                     {"type": "string"},
+                    {"type": "number"},
                     {"type": "null"},
                 ]
             },
@@ -230,6 +232,7 @@ def validate_reviewer_input(
     outcome: dict,
     pending_steps: list[dict],
     review_count: int,
+    required_facts: list[str] = None,
 ) -> list[str]:
     skill_names = validate_planner_input(
         command,
@@ -281,6 +284,17 @@ def validate_reviewer_input(
         or not 0 <= review_count <= MAX_PLAN_STEPS
     ):
         raise ValueError("el contador de revisiones es inválido")
+    if (
+        required_facts is not None
+        and (
+            not isinstance(required_facts, list)
+            or any(
+                not isinstance(fact, str) or not fact
+                for fact in required_facts
+            )
+        )
+    ):
+        raise ValueError("los objetivos obligatorios son inválidos")
     return skill_names
 
 
@@ -291,6 +305,7 @@ def validate_generated_review(
     outcome,
     reserved_step_ids: set[str] = None,
     pending_steps: list[dict] = None,
+    required_facts: list[str] = None,
 ) -> dict:
     outcome_state = (
         outcome.get("state")
@@ -329,6 +344,14 @@ def validate_generated_review(
             raise InvalidModelResponseError(
                 "no se puede completar con pasos pendientes"
             )
+        missing_goals = sorted(
+            set(required_facts or []) - set(world_facts or [])
+        )
+        if missing_goals:
+            raise InvalidModelResponseError(
+                "no se puede completar sin cumplir: "
+                + ", ".join(missing_goals)
+            )
     if decision == "retry" and outcome_state not in {"failed", "blocked"}:
         raise InvalidModelResponseError(
             "sólo se puede repetir un paso fallido o bloqueado"
@@ -350,6 +373,7 @@ def validate_generated_review(
             {"steps": revised_steps},
             skill_catalog,
             world_facts,
+            required_facts,
         )
     elif revised_steps:
         raise InvalidModelResponseError(
@@ -409,6 +433,7 @@ def validate_generated_plan(
     plan: dict,
     skill_catalog: list[dict],
     initial_facts: list[str],
+    required_facts: list[str] = None,
 ) -> dict:
     """Comprueba nombres, argumentos y precondiciones fuera del LLM."""
     if not isinstance(plan, dict) or set(plan) != {"steps"}:
@@ -448,7 +473,13 @@ def validate_generated_plan(
             raise InvalidModelResponseError(
                 f"skill no permitida: {skill_name}"
             )
-        if argument is not None and not isinstance(argument, str):
+        if (
+            argument is not None
+            and (
+                not isinstance(argument, (str, int, float))
+                or isinstance(argument, bool)
+            )
+        ):
             raise InvalidModelResponseError(
                 f"argumento inválido en {step_id}"
             )
@@ -480,6 +511,12 @@ def validate_generated_plan(
             )
         known_facts.update(variant.get("effects", []))
         seen_ids.add(step_id)
+    missing_goals = sorted(set(required_facts or []) - known_facts)
+    if missing_goals:
+        raise InvalidModelResponseError(
+            "el plan revisado elimina objetivos de la misión: "
+            + ", ".join(missing_goals)
+        )
     return plan
 
 
@@ -815,6 +852,7 @@ class MissionPlanner:
         pending_steps: list[dict],
         review_count: int,
         visual_evidence: dict = None,
+        required_facts: list[str] = None,
     ) -> dict:
         skill_names = validate_reviewer_input(
             command,
@@ -825,6 +863,7 @@ class MissionPlanner:
             outcome,
             pending_steps,
             review_count,
+            required_facts,
         )
         reserved_step_ids = {
             step["id"]
@@ -835,6 +874,7 @@ class MissionPlanner:
         measured_context = {
             "mission": command.strip(),
             "verified_world_facts": world_facts,
+            "required_mission_facts": required_facts or [],
             "completed_steps": completed_steps,
             "last_step": last_step,
             "measured_outcome": outcome,
@@ -904,7 +944,10 @@ class MissionPlanner:
                     "no existe continuación honesta. No declares cumplida "
                     "una capacidad que falló y no inventes skills. Si usás "
                     "revise, revised_steps debe contener el nuevo plan "
-                    "pendiente completo; en cualquier otra decisión debe ser "
+                    "pendiente completo y conservar todos los objetivos "
+                    "todavía ausentes de required_mission_facts. Una "
+                    "recuperación ayuda al objetivo original: nunca lo "
+                    "reemplaza. En cualquier otra decisión debe ser "
                     "una lista vacía. question sólo lleva texto con "
                     "ask_human. Los identificadores incluidos en "
                     "reserved_step_ids ya fueron ejecutados y no se pueden "
@@ -988,6 +1031,7 @@ class MissionPlanner:
                 outcome,
                 reserved_step_ids,
                 pending_steps,
+                required_facts,
             )
         except InvalidModelResponseError as error:
             raise InvalidModelResponseError(
@@ -1131,6 +1175,7 @@ class IntelligenceService:
         pending_steps: list[dict],
         review_count: int,
         visual_evidence: dict = None,
+        required_facts: list[str] = None,
     ) -> dict:
         if self.mission_planner is None:
             raise ServiceConfigurationError(
@@ -1148,6 +1193,7 @@ class IntelligenceService:
             pending_steps,
             review_count,
             visual_evidence,
+            required_facts,
         )
         return {
             "ok": True,
@@ -1241,6 +1287,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("pending_steps"),
                     payload.get("review_count"),
                     visual_evidence,
+                    payload.get("required_facts"),
                 )
             else:
                 image = decode_image(payload.get("image_base64"))

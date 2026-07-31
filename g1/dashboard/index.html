@@ -70,7 +70,7 @@
       gap:16px;
       margin-bottom:16px;
     }
-    .evidence-grid{grid-template-columns:minmax(0,1.4fr) minmax(340px,.8fr)}
+    .evidence-grid{grid-template-columns:1fr}
     .card{
       min-width:0;
       padding:14px;
@@ -115,6 +115,12 @@
       font-weight:700;
     }
     .hint{margin-top:7px;color:var(--faint);font-size:11px}
+    .map-panel{
+      margin-top:16px;
+      padding-top:14px;
+      border-top:1px solid var(--border);
+    }
+    .map-panel canvas{max-height:360px}
     .tags{margin-top:8px}
     .tag,.status-badge{
       display:inline-block;
@@ -350,12 +356,34 @@
     .timeline{max-height:270px;overflow:auto}
     .event{
       display:grid;
-      grid-template-columns:70px minmax(0,1fr);
+      grid-template-columns:70px 110px minmax(0,1fr);
       gap:10px;
       padding:6px 0;
       border-bottom:1px solid #232a37;
     }
     .event time{color:var(--faint);font-variant-numeric:tabular-nums}
+    .author-badge{
+      align-self:start;
+      padding:2px 7px;
+      border-radius:999px;
+      background:#273247;
+      color:#b9d5ff;
+      font-size:10px;
+      font-weight:700;
+      text-align:center;
+    }
+    .author-skill{background:#183c2a;color:var(--green)}
+    .author-validator{background:#472f25;color:#f5c17b}
+    .author-llm{background:#322653;color:#cbb8ff}
+    .author-local_rules{background:#2f3440;color:#c3cad6}
+    .human-summary{min-height:72px;margin-top:7px;color:#dce5f3}
+    .raw-trace{margin-top:12px}
+    .raw-trace summary{
+      padding:8px 10px;
+      background:#121925;
+      border-color:#28364a;
+      font-size:12px;
+    }
     details{margin-top:16px}
     details summary{
       cursor:pointer;
@@ -443,8 +471,17 @@
         </div>
         <div class="tags" id="live-detections"></div>
         <div class="hint">
-          Éste es todo el campo visual utilizado por el robot. Los recuadros
-          aparecen abajo sobre el cuadro exacto que analizó el modelo.
+          Éste es todo el campo visual utilizado por el robot. Si el detector
+          entrega un resultado reciente, se muestra ese cuadro exacto con sus
+          cajas; nunca se pegan cajas viejas sobre una imagen nueva.
+        </div>
+        <div class="map-panel">
+          <h2>Mapa y recorrido</h2>
+          <canvas id="map" width="720" height="430"></canvas>
+          <div class="hint">
+            Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
+            vigente. Punto amarillo: última superficie 3D del objeto.
+          </div>
         </div>
       </article>
 
@@ -464,6 +501,13 @@
         </div>
       </article>
     </section>
+
+    <article class="card" style="margin-bottom:16px">
+      <h2>Historia de la misión — quién produjo cada dato</h2>
+      <div class="timeline" id="mission-timeline">
+        <span class="empty">Todavía no hay eventos.</span>
+      </div>
+    </article>
 
     <article class="card brain-card">
       <div class="brain-heading">
@@ -489,7 +533,7 @@
         </div>
         <div class="brain-summary">
           <div class="brain-summary-panel">
-            <div class="section-label">Plan inicial producido por el modelo</div>
+            <div class="section-label" id="model-plan-title">Plan vigente</div>
             <div class="brain-plan" id="model-initial-plan">
               <span class="empty">Todavía no armó un plan.</span>
             </div>
@@ -503,8 +547,11 @@
         </div>
         <div class="brain-flow">
           <div class="brain-column">
-            <h3>1. Lo que recibió</h3>
-            <p>Pedido exacto enviado al modelo, sin resumirlo.</p>
+            <h3>1. Qué información recibió</h3>
+            <p>Resumen humano del pedido que llegó al modelo.</p>
+            <div class="human-summary" id="model-human-input">
+              Todavía no hubo una llamada.
+            </div>
             <div class="image-frame">
               <img id="model-input-image" alt="Imagen exacta enviada al modelo" hidden>
               <div class="image-placeholder" id="model-input-placeholder">
@@ -514,20 +561,40 @@
                 </div>
               </div>
             </div>
-            <pre id="model-input-text" hidden></pre>
             <div class="hint" id="model-input-age"></div>
           </div>
           <div class="brain-column">
-            <h3>2. Lo que respondió literalmente</h3>
-            <p>Salida original del LLM o VLM, incluso si luego se rechaza.</p>
-            <pre id="model-raw-output">Todavía no hubo una llamada a un LLM o VLM.</pre>
+            <h3>2. Qué decidió el modelo</h3>
+            <p>La respuesta traducida a una decisión entendible.</p>
+            <div class="human-summary" id="model-human-decision">
+              Todavía no hubo una decisión.
+            </div>
           </div>
           <div class="brain-column">
-            <h3>3. Lo que aceptó el robot</h3>
-            <p>Resultado ya revisado contra las reglas y skills disponibles.</p>
-            <pre id="model-validated-output">—</pre>
+            <h3>3. Qué cambió realmente</h3>
+            <p>Lo que la Jetson aceptó después de comprobar la respuesta.</p>
+            <div class="human-summary" id="model-human-effect">
+              Todavía no cambió el plan.
+            </div>
           </div>
         </div>
+        <details class="raw-trace">
+          <summary>Ver trazabilidad técnica literal (entrada y salida JSON)</summary>
+          <div class="brain-flow" style="margin-top:10px">
+            <div class="brain-column">
+              <h3>Entrada exacta</h3>
+              <pre id="model-input-text">—</pre>
+            </div>
+            <div class="brain-column">
+              <h3>Salida literal</h3>
+              <pre id="model-raw-output">Todavía no hubo una llamada a un LLM o VLM.</pre>
+            </div>
+            <div class="brain-column">
+              <h3>Salida validada</h3>
+              <pre id="model-validated-output">—</pre>
+            </div>
+          </div>
+        </details>
         <div class="brain-note">
           Este modelo organiza la misión; no controla directamente el
           equilibrio, las piernas ni los motores. Si no entrega un
@@ -536,7 +603,7 @@
       </div>
     </article>
 
-    <section class="evidence-grid">
+    <section style="margin-bottom:16px">
       <article class="card">
         <h2>Evidencia visual de la percepción</h2>
         <div>
@@ -557,23 +624,7 @@
         </div>
       </article>
 
-      <article class="card">
-        <h2>Mapa y recorrido</h2>
-        <canvas id="map" width="480" height="430"></canvas>
-        <div class="hint">
-          Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
-          vigente. Punto amarillo: última superficie 3D del objeto. El mapa y
-          la escena física comparten las mismas medidas.
-        </div>
-      </article>
     </section>
-
-    <article class="card">
-      <h2>Historia de la misión</h2>
-      <div class="timeline" id="mission-timeline">
-        <span class="empty">Todavía no hay eventos.</span>
-      </div>
-    </article>
 
     <details>
       <summary>Detalles técnicos del robot, percepción y control</summary>
@@ -757,6 +808,32 @@
       inspect_scene:'Interpretar una imagen'
     };
 
+    const measurementNames = {
+      distance_remaining_m:'distancia restante',
+      position_error_m:'error de posición',
+      final_error_m:'error final',
+      yaw_error_deg:'error de giro',
+      confidence:'confianza',
+      applied_mass_kg:'carga aplicada',
+      views_checked:'vistas revisadas',
+      detection_count:'detecciones'
+    };
+
+    function conciseMeasurements(measurements){
+      if(!measurements) return '';
+      return Object.entries(measurements)
+        .filter(([key,value]) => measurementNames[key] &&
+          ['string','number','boolean'].includes(typeof value))
+        .slice(0,3)
+        .map(([key,value]) => {
+          const suffix=key.endsWith('_m') ? ' m' :
+            key.endsWith('_deg') ? '°' :
+            key.endsWith('_kg') ? ' kg' : '';
+          return `${measurementNames[key]}: ${value}${suffix}`;
+        })
+        .join(' · ');
+    }
+
     function renderMission(mission){
       const steps = mission.steps || [];
       setText('task-text',mission.command || 'Esperando una misión');
@@ -790,13 +867,8 @@
         ? steps.map(step => {
             const details = [];
             if(step.error || step.result) details.push(step.error || step.result);
-            if(step.measurements){
-              details.push(
-                Object.entries(step.measurements)
-                  .map(([key,value]) => `${key}: ${value}`)
-                  .join(' · ')
-              );
-            }
+            const measured=conciseMeasurements(step.measurements);
+            if(measured) details.push(measured);
             if((step.attempts || 0) > 1){
               details.push(`${step.attempts} intentos`);
             }
@@ -804,9 +876,13 @@
               details.push('el plan fue revisado después de esta falla');
             }
             const detail = details.join(' · ');
+            const source = step.source === 'azure_llm' ? 'plan: LLM' :
+              step.source === 'rules_fallback' ? 'plan: respaldo local' :
+              step.source === 'llm_revision' ? 'agregado por revisión LLM' : '';
             return `<div class="step step-${escapeHtml(step.state)}">
               <span>${stepIcons[step.state] || '?'}</span>
               <span>${escapeHtml(step.label)}
+                ${source ? `<small class="step-detail">${escapeHtml(source)}</small>` : ''}
                 ${detail ? `<small class="step-detail">${escapeHtml(detail)}</small>` : ''}
               </span>
             </div>`;
@@ -823,8 +899,52 @@
       }
     }
 
+    function humanModelInput(event){
+      const input=event.input_payload || {};
+      if(event.task === 'plan_mission'){
+        const skillCount=input.skill_catalog?.length || 0;
+        return `Recibió la tarea “${input.command || 'sin texto'}” y la descripción de ${skillCount} capacidades disponibles.`;
+      }
+      if(event.task === 'review_step'){
+        const step=input.last_step?.label || input.last_step?.id || 'último paso';
+        const outcome=input.outcome || {};
+        const pending=input.pending_steps?.length || 0;
+        return `Revisó “${step}”. Resultado medido: ${outcome.state || 'sin estado'} — ${outcome.message || 'sin detalle'}. Quedaban ${pending} subtareas.`;
+      }
+      if(event.task === 'read_clock') return 'Recibió el recorte exacto del reloj para leer la hora.';
+      return event.input_summary || 'Recibió datos estructurados del robot.';
+    }
+
+    function humanModelEffect(event,mission){
+      const validated=event.validated_output || {};
+      if(event.state === 'running') return 'Todavía no se aplicó ningún cambio.';
+      if(event.state === 'failed'){
+        return mission.planner === 'rules_fallback'
+          ? 'La Jetson no aplicó esa respuesta y activó el plan local de respaldo.'
+          : 'La Jetson no aplicó esa respuesta; el plan anterior quedó intacto.';
+      }
+      if(event.task === 'plan_mission'){
+        const count=validated.steps?.length || 0;
+        return `La Jetson comprobó el contrato y aceptó ${count} subtareas como plan inicial.`;
+      }
+      if(event.task === 'review_step'){
+        if(validated.decision === 'revise'){
+          const labels=(validated.revised_steps || [])
+            .map(step => step.label || step.skill).join(' → ');
+          return `Reemplazó el futuro del plan por: ${labels || 'ningún paso'}. Los objetivos originales siguen siendo obligatorios.`;
+        }
+        if(validated.decision === 'continue') return 'Conservó el plan pendiente sin cambios.';
+        if(validated.decision === 'retry') return 'Autorizó un reintento acotado del mismo paso.';
+        if(validated.decision === 'complete') return 'Pidió cerrar la misión; la Jetson sólo lo permite si todos los objetivos físicos están medidos.';
+        if(validated.decision === 'stop') return 'La Jetson detuvo la misión.';
+        if(validated.decision === 'ask_human') return 'La misión quedó pausada esperando a una persona.';
+      }
+      return 'La Jetson aceptó el resultado estructurado.';
+    }
+
     function renderModel(events,state){
       const event = events.length ? events[events.length - 1] : null;
+      const mission=state.mission_state || {};
       const planEvent = events.slice().reverse().find(
         item => item.task === 'plan_mission' &&
           item.state === 'succeeded' &&
@@ -833,7 +953,18 @@
       const reviewEvent = events.slice().reverse().find(
         item => item.task === 'review_step'
       );
-      const planSteps = planEvent?.validated_output?.steps || [];
+      const missionSteps = mission.steps || [];
+      const planSteps = missionSteps.length
+        ? missionSteps
+        : planEvent?.validated_output?.steps || [];
+      setText(
+        'model-plan-title',
+        mission.planner === 'rules_fallback'
+          ? 'Plan local de respaldo — el LLM inicial falló'
+          : mission.planner === 'azure_llm'
+          ? 'Plan vigente propuesto por el LLM y validado por la Jetson'
+          : 'Plan vigente'
+      );
       document.getElementById('model-initial-plan').innerHTML = planSteps.length
         ? planSteps.map((step,index) =>
             `<span class="brain-plan-step"><b>${index + 1}.</b>` +
@@ -858,10 +989,13 @@
         setText('model-duration','—');
         setText('model-decision','Esperando');
         setText('model-reason','Todavía no hubo una llamada al modelo.');
+        setText('model-human-input','Todavía no hubo una llamada.');
+        setText('model-human-decision','Todavía no hubo una decisión.');
+        setText('model-human-effect','Todavía no cambió el plan.');
         setText('model-raw-output','Todavía no hubo una llamada a un LLM o VLM.');
         setText('model-validated-output','—');
         setText('model-input-age','');
-        document.getElementById('model-input-text').hidden=true;
+        setText('model-input-text','—');
         modelInputFeed.setAvailable(false);
         return;
       }
@@ -922,15 +1056,28 @@
           'La respuesta pasó las comprobaciones del sistema.'
         );
       }
+      setText('model-human-input',humanModelInput(event));
+      setText(
+        'model-human-decision',
+        event.state === 'running'
+          ? 'Está esperando la respuesta del modelo.'
+          : event.state === 'failed'
+          ? `No produjo una respuesta utilizable: ${event.error || 'error desconocido'}.`
+          : event.task === 'review_step'
+          ? `${modelDecisionNames[validated.decision] || validated.decision}: ${validated.reason || 'sin explicación'}`
+          : event.task === 'plan_mission'
+          ? `Propuso ${validated.steps?.length || 0} subtareas ordenadas.`
+          : 'Produjo una respuesta válida.'
+      );
+      setText('model-human-effect',humanModelEffect(event,mission));
       const inputText=document.getElementById('model-input-text');
       const inputPlaceholder=document.getElementById(
         'model-input-placeholder'
       );
       if(event.input_payload != null){
-        inputText.hidden=false;
         inputText.textContent=JSON.stringify(event.input_payload,null,2);
       }else{
-        inputText.hidden=true;
+        inputText.textContent='—';
       }
       const hasModelImage = Boolean(
         state.model_input_available &&
@@ -948,7 +1095,7 @@
       }else{
         inputPlaceholder.innerHTML =
           '<div><strong>Esta llamada no usó una imagen</strong>' +
-          'El pedido exacto de texto aparece debajo.</div>';
+          'El resumen aparece arriba; el JSON literal queda en trazabilidad.</div>';
         setText('model-input-age','Sin entrada visual para esta llamada.');
       }
     }
@@ -1132,9 +1279,19 @@
     }
 
     function renderTimeline(events){
+      const authorNames={
+        agent:'Agente',
+        skill:'Skill + sensores',
+        llm:'LLM',
+        validator:'Validador Jetson',
+        local_rules:'Respaldo local',
+        legacy:'Evento anterior'
+      };
       document.getElementById('mission-timeline').innerHTML = events.length
         ? events.slice().reverse().map(event =>
             `<div class="event"><time>${escapeHtml(event.time)}</time>` +
+            `<span class="author-badge author-${escapeHtml(event.author || 'agent')}">` +
+            `${escapeHtml(authorNames[event.author] || event.author || 'Agente')}</span>` +
             `<span>${escapeHtml(event.text)}</span></div>`
           ).join('')
         : '<span class="empty">Todavía no hay eventos.</span>';
@@ -1173,7 +1330,9 @@
         }
         setText('heartbeat',`actualizado ${new Date().toLocaleTimeString()}`);
         setText('system-alert',state.fallen ? '⚠ EL ROBOT ESTÁ EN EL PISO' : '');
-        document.getElementById('live-badge').textContent='LIVE';
+        document.getElementById('live-badge').textContent = state.live_boxes_active
+          ? `CAJAS · ${state.live_detection_source || 'DETECTOR'}`
+          : 'LIVE';
         document.getElementById('live-badge').style.color='var(--green)';
 
         document.getElementById('live-detections').innerHTML =

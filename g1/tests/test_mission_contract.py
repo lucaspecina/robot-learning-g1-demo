@@ -154,6 +154,89 @@ class MissionContractTest(unittest.TestCase):
         self.assertEqual(state["steps"][0]["state"], "succeeded")
         self.assertEqual(state["steps"][1]["state"], "pending")
 
+    def test_revision_cannot_delete_the_original_mission_goal(self):
+        catalog = [
+            {
+                "name": "scan",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["target_found"],
+                    }
+                ],
+            },
+            {
+                "name": "return_home",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": ["target_found"],
+                        "effects": ["at_home"],
+                    }
+                ],
+            },
+        ]
+        original = [
+            {"id": "scan", "skill": "scan", "argument": None, "label": "Buscar"},
+            {
+                "id": "return_home",
+                "skill": "return_home",
+                "argument": None,
+                "label": "Volver",
+            },
+        ]
+        self.tracker.begin("Buscá y volvé", "llm")
+        self.tracker.set_plan(original, skill_catalog=catalog)
+
+        with self.assertRaisesRegex(ValueError, "at_home"):
+            self.tracker.replace_pending_steps(
+                [
+                    {
+                        "id": "scan_recovery",
+                        "skill": "scan",
+                        "argument": None,
+                        "label": "Buscar otra vez",
+                    }
+                ],
+                skill_catalog=catalog,
+                current_facts=[],
+            )
+
+    def test_completion_requires_measured_mission_goals(self):
+        catalog = [
+            {
+                "name": "return_home",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["at_home"],
+                    }
+                ],
+            }
+        ]
+        self.tracker.begin("Volvé", "llm")
+        self.tracker.set_plan(
+            [
+                {
+                    "id": "return_home",
+                    "skill": "return_home",
+                    "argument": None,
+                    "label": "Volver",
+                }
+            ],
+            skill_catalog=catalog,
+        )
+        self.tracker.start_step("return_home")
+        self.tracker.finish_step("return_home", "llegó")
+
+        with self.assertRaisesRegex(ValueError, "at_home"):
+            self.tracker.complete("listo", achieved_facts=[])
+
     def test_records_verifiable_decision(self):
         self.tracker.begin("Traé el objeto", "rules")
         state = self.tracker.set_decision(

@@ -13,6 +13,11 @@ try:
 except ImportError:
     from g1.visual_evidence import validate_jpeg
 
+try:
+    from mission_contract import validate_plan
+except ImportError:
+    from g1.mission_contract import validate_plan
+
 
 DEFAULT_SERVER_URL = "http://172.30.0.20:8000"
 DEFAULT_TIMEOUT_S = 15.0
@@ -121,6 +126,8 @@ def validate_review(
     outcome,
     skill_catalog: list[dict] = None,
     pending_steps: list[dict] = None,
+    world_facts: list[str] = None,
+    required_facts: list[str] = None,
 ) -> dict:
     outcome_state = (
         outcome.get("state")
@@ -158,6 +165,14 @@ def validate_review(
             raise RemoteIntelligenceError(
                 "el modelo intentó completar con pasos pendientes"
             )
+        missing_goals = sorted(
+            set(required_facts or []) - set(world_facts or [])
+        )
+        if missing_goals:
+            raise RemoteIntelligenceError(
+                "el modelo intentó completar sin cumplir: "
+                + ", ".join(missing_goals)
+            )
     if decision == "retry" and outcome_state not in {"failed", "blocked"}:
         raise RemoteIntelligenceError(
             "el modelo intentó repetir un paso exitoso"
@@ -170,6 +185,16 @@ def validate_review(
         raise RemoteIntelligenceError(
             "el modelo eligió revise sin un plan pendiente"
         )
+    if decision == "revise" and world_facts is not None:
+        try:
+            validate_plan(
+                review["revised_steps"],
+                skill_catalog=skill_catalog,
+                initial_facts=world_facts,
+                required_facts=required_facts,
+            )
+        except ValueError as error:
+            raise RemoteIntelligenceError(str(error)) from error
     if decision == "ask_human":
         if not review["question"] or not review["question"].strip():
             raise RemoteIntelligenceError(
@@ -286,17 +311,21 @@ class IntelligenceClient:
         except urllib.error.HTTPError as error:
             raw_output = None
             input_payload = None
+            server_error = None
             try:
                 failure_payload = json.loads(
                     error.read().decode("utf-8")
                 )
                 raw_output = failure_payload.get("raw_output")
                 input_payload = failure_payload.get("model_input")
+                if isinstance(failure_payload.get("error"), str):
+                    server_error = failure_payload["error"].strip()
             except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
                 pass
             self._record_failure()
+            detail = f": {server_error}" if server_error else ""
             raise RemoteIntelligenceError(
-                f"falló el pedido remoto: HTTP {error.code}",
+                f"falló el pedido remoto: HTTP {error.code}{detail}",
                 request_id=request_id,
                 raw_output=raw_output,
                 input_payload=input_payload,
@@ -382,6 +411,7 @@ class IntelligenceClient:
         outcome: dict,
         pending_steps: list[dict],
         review_count: int,
+        required_facts: list[str] = None,
         visual_evidence: dict = None,
     ) -> dict:
         timeout_s = float(
@@ -399,6 +429,7 @@ class IntelligenceClient:
             "outcome": outcome,
             "pending_steps": pending_steps,
             "review_count": review_count,
+            "required_facts": required_facts or [],
         }
         if visual_evidence is not None:
             request_payload["visual_evidence"] = (
@@ -427,6 +458,8 @@ class IntelligenceClient:
                 outcome,
                 skill_catalog,
                 pending_steps,
+                world_facts,
+                required_facts,
             )
         except RemoteIntelligenceError:
             self._record_failure()

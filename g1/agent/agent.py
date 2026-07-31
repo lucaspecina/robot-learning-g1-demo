@@ -505,9 +505,26 @@ class Agent(Node):
             String(data=json.dumps(event, ensure_ascii=False))
         )
 
-    def report(self, text: str):
+    def report(
+        self,
+        text: str,
+        *,
+        author: str = "agent",
+        category: str = "coordination",
+    ):
         self.get_logger().info(text)
-        self.status_pub.publish(String(data=text))
+        self.status_pub.publish(
+            String(
+                data=json.dumps(
+                    {
+                        "text": text,
+                        "author": author,
+                        "category": category,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        )
 
     # ---------- planificación y ejecución ----------
 
@@ -521,7 +538,9 @@ class Agent(Node):
         except (RemoteIntelligenceError, ValueError) as model_error:
             self.report(
                 "el planificador remoto no produjo un plan utilizable; "
-                f"uso el respaldo local: {model_error}"
+                f"uso el respaldo local: {model_error}",
+                author="validator",
+                category="safety",
             )
             try:
                 plan = self.plan_with_rules(command)
@@ -533,7 +552,11 @@ class Agent(Node):
                 self.mission_tracker.set_planner("rules_fallback")
             except ValueError as fallback_error:
                 self.mission_tracker.stop(str(fallback_error))
-                self.report(f"FALLO al planificar: {fallback_error}")
+                self.report(
+                    f"FALLO al planificar: {fallback_error}",
+                    author="validator",
+                    category="safety",
+                )
                 return
         try:
             self.mission_tracker.set_plan(
@@ -543,10 +566,20 @@ class Agent(Node):
             )
         except ValueError as error:
             self.mission_tracker.stop(str(error))
-            self.report(f"FALLO al validar el plan: {error}")
+            self.report(
+                f"FALLO al validar el plan: {error}",
+                author="validator",
+                category="safety",
+            )
             return
         self.report(
-            "plan: " + " → ".join(step["label"] for step in plan)
+            "plan: " + " → ".join(step["label"] for step in plan),
+            author=(
+                "llm"
+                if self.mission_tracker.snapshot()["planner"] == "azure_llm"
+                else "local_rules"
+            ),
+            category="plan",
         )
         self.execute_plan(command, plan)
 
@@ -669,6 +702,11 @@ class Agent(Node):
     def execute_plan(self, command: str, plan: list[dict]):
         pending = deepcopy(plan)
         world_facts = set(INITIAL_WORLD_FACTS)
+        required_facts = {
+            fact
+            for planned_step in plan
+            for fact in self.effects_of(planned_step)
+        }
         retry_counts = {}
         review_count = 0
 
@@ -688,7 +726,11 @@ class Agent(Node):
                     outcome["message"],
                     outcome.get("measurements"),
                 )
-                self.report(f"completado: {outcome['message']}")
+                self.report(
+                    f"completado: {outcome['message']}",
+                    author="skill",
+                    category="measurement",
+                )
                 world_facts.update(self.effects_of(step))
             else:
                 is_blocked = outcome["state"] == "blocked"
@@ -699,7 +741,11 @@ class Agent(Node):
                     measurements=outcome.get("measurements"),
                 )
                 prefix = "BLOQUEADO" if is_blocked else "FALLO"
-                self.report(f"{prefix}: {outcome['message']}")
+                self.report(
+                    f"{prefix}: {outcome['message']}",
+                    author="skill",
+                    category="measurement",
+                )
 
             # También se revisa el último paso: sin esta vuelta, una misión
             # terminaba justo antes de que el supervisor viera su evidencia.
@@ -719,6 +765,7 @@ class Agent(Node):
                     outcome=outcome,
                     pending=pending,
                     world_facts=sorted(world_facts),
+                    required_facts=sorted(required_facts),
                     review_count=review_count,
                 )
             except (RemoteIntelligenceError, ValueError) as error:
@@ -728,7 +775,9 @@ class Agent(Node):
                     # ni detener una misión que localmente sigue siendo válida.
                     self.report(
                         "revisión remota no utilizable; conservo el plan "
-                        f"validado: {error}"
+                        f"validado: {error}",
+                        author="validator",
+                        category="safety",
                     )
                     continue
                 message = (
@@ -744,9 +793,18 @@ class Agent(Node):
 
             decision = review["decision"]
             reason = review["reason"]
-            self.report(f"revisión: {decision} — {reason}")
+            self.report(
+                f"revisión: {decision} — {reason}",
+                author="llm",
+                category="review",
+            )
             if decision == "complete":
-                if pending or outcome["state"] != "succeeded":
+                missing_goals = required_facts - world_facts
+                if (
+                    pending
+                    or outcome["state"] != "succeeded"
+                    or missing_goals
+                ):
                     message = (
                         "el servidor intentó completar una misión que "
                         "todavía no satisface su contrato"
@@ -754,7 +812,10 @@ class Agent(Node):
                     self.mission_tracker.stop(message)
                     self.report(f"FALLO: {message}")
                     return
-                self.mission_tracker.complete(reason)
+                self.mission_tracker.complete(
+                    reason,
+                    achieved_facts=sorted(world_facts),
+                )
                 self.report(f"misión completada: {reason}")
                 return
             if decision == "continue":
@@ -778,6 +839,7 @@ class Agent(Node):
                         review["revised_steps"],
                         skill_catalog=SKILL_CATALOG,
                         initial_facts=sorted(world_facts),
+                        required_facts=sorted(required_facts),
                     )
                     self.mission_tracker.replace_pending_steps(
                         review["revised_steps"],
@@ -788,7 +850,9 @@ class Agent(Node):
                     if outcome["state"] == "succeeded":
                         self.report(
                             "la revisión local rechazó el cambio; conservo "
-                            f"el plan anterior: {error}"
+                            f"el plan anterior: {error}",
+                            author="validator",
+                            category="safety",
                         )
                         continue
                     message = (
@@ -808,7 +872,9 @@ class Agent(Node):
                 ]
                 self.report(
                     "plan pendiente revisado: "
-                    + " → ".join(item["label"] for item in pending)
+                    + " → ".join(item["label"] for item in pending),
+                    author="llm",
+                    category="plan",
                 )
                 continue
             if decision == "ask_human":
@@ -825,7 +891,19 @@ class Agent(Node):
                 return
             raise ValueError(f"decisión no implementada: {decision}")
 
-        self.mission_tracker.complete("misión completada")
+        missing_goals = required_facts - world_facts
+        if missing_goals:
+            message = (
+                "el plan terminó sin cumplir objetivos: "
+                + ", ".join(sorted(missing_goals))
+            )
+            self.mission_tracker.stop(message)
+            self.report(f"FALLO: {message}")
+            return
+        self.mission_tracker.complete(
+            "misión completada",
+            achieved_facts=sorted(world_facts),
+        )
         self.report("misión completada")
 
     @staticmethod
@@ -848,6 +926,7 @@ class Agent(Node):
         outcome: dict,
         pending: list[dict],
         world_facts: list[str],
+        required_facts: list[str],
         review_count: int,
     ) -> dict:
         event_id = str(uuid.uuid4())
@@ -877,6 +956,7 @@ class Agent(Node):
             "command": command,
             "skill_catalog": catalog,
             "world_facts": world_facts,
+            "required_facts": required_facts,
             "completed_steps": completed,
             "last_step": deepcopy(step),
             "outcome": deepcopy(outcome),
@@ -944,6 +1024,7 @@ class Agent(Node):
                     review["revised_steps"],
                     skill_catalog=SKILL_CATALOG,
                     initial_facts=world_facts,
+                    required_facts=required_facts,
                 )
         except ValueError as error:
             self.publish_model_event(

@@ -58,6 +58,9 @@ FALLEN_HEIGHT = 0.45
 OFFLINE_AFTER_S = 3.0
 OPEN_RESULT_HOLD_S = 60.0
 ANALYSIS_OFFLINE_AFTER_S = OPEN_RESULT_HOLD_S + 5.0
+# La vista superior sólo usa cajas ligadas al cuadro exacto del detector. El
+# límite corto evita congelar una detección vieja sobre un video que avanzó.
+LIVE_DETECTION_MAX_AGE_S = 2.0
 
 STATE_QOS = QoSProfile(
     depth=1,
@@ -73,6 +76,9 @@ MODEL_EVENT_QOS = QoSProfile(
 state = {
     "camera_jpeg": None,
     "camera_time": 0.0,
+    "live_detection_jpeg": None,
+    "live_detection_time": 0.0,
+    "live_detection_source": None,
     "analysis_jpeg": None,
     "analysis_time": 0.0,
     "analysis_labels": [],
@@ -394,15 +400,21 @@ class DashboardNode(Node):
         if image is None:
             return
         now = time.time()
-        with lock:
-            hold_result = state["analysis_hold_until"] > now
-        if source != "Grounding DINO" and hold_result:
-            return
         try:
             jpeg, labels = to_analysis_jpeg(image, message.detections)
         except Exception:
             return
         with lock:
+            state["live_detection_jpeg"] = jpeg
+            state["live_detection_time"] = now
+            state["live_detection_source"] = source
+            # La evidencia lenta se conserva abajo, pero eso no debe congelar
+            # las cajas nuevas del detector rápido en la cámara superior.
+            if (
+                source != "Grounding DINO"
+                and state["analysis_hold_until"] > now
+            ):
+                return
             state["analysis_jpeg"] = jpeg
             state["analysis_time"] = now
             state["analysis_labels"] = labels
@@ -497,11 +509,19 @@ class DashboardNode(Node):
         self.update_json("payload", message.data)
 
     def on_mission_event(self, message: String):
+        try:
+            event = json.loads(message.data)
+        except json.JSONDecodeError:
+            event = {"text": message.data, "author": "legacy"}
+        if not isinstance(event, dict) or not isinstance(event.get("text"), str):
+            return
         with lock:
             state["mission_events"].append(
                 {
                     "time": time.strftime("%H:%M:%S"),
-                    "text": message.data,
+                    "text": event["text"],
+                    "author": event.get("author", "agent"),
+                    "category": event.get("category", "coordination"),
                 }
             )
             del state["mission_events"][:-HISTORY_MAX]
@@ -580,7 +600,18 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/camera.jpg":
             with lock:
                 old = time.time() - state["camera_time"] > OFFLINE_AFTER_S
-                jpeg = None if old else state["camera_jpeg"]
+                detection_is_fresh = (
+                    state["live_detection_jpeg"] is not None
+                    and time.time() - state["live_detection_time"]
+                    <= LIVE_DETECTION_MAX_AGE_S
+                )
+                jpeg = (
+                    state["live_detection_jpeg"]
+                    if detection_is_fresh
+                    else state["camera_jpeg"]
+                )
+                if old:
+                    jpeg = None
             self.send_jpeg(jpeg, "sin imagen todavía".encode("utf-8"))
             return
         if route == "/analysis.jpg":
@@ -609,6 +640,7 @@ class Handler(BaseHTTPRequestHandler):
                     if key
                     not in {
                         "camera_jpeg",
+                        "live_detection_jpeg",
                         "analysis_jpeg",
                         "analysis_hold_until",
                         "model_input_jpeg",
@@ -628,6 +660,16 @@ class Handler(BaseHTTPRequestHandler):
                     and (now - state["camera_time"]) < OFFLINE_AFTER_S
                 )
                 data["camera_available"] = data["video_online"]
+                data["live_boxes_active"] = (
+                    state["live_detection_jpeg"] is not None
+                    and now - state["live_detection_time"]
+                    <= LIVE_DETECTION_MAX_AGE_S
+                )
+                data["live_boxes_age_s"] = (
+                    round(now - state["live_detection_time"], 1)
+                    if state["live_detection_time"]
+                    else None
+                )
                 data["analysis_available"] = (
                     state["analysis_jpeg"] is not None
                     and (now - state["analysis_time"])

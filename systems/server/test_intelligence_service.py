@@ -9,6 +9,7 @@ from systems.server.intelligence_service import (
     InvalidImageError,
     InvalidModelResponseError,
     MissionPlanner,
+    build_plan_schema,
     decode_image,
     decode_visual_evidence,
     validate_generated_plan,
@@ -472,6 +473,93 @@ class IntelligenceServiceTests(unittest.TestCase):
                 },
                 catalog,
                 [],
+            )
+
+    def test_structured_plan_allows_the_numeric_payload_mass(self):
+        argument_variants = build_plan_schema(["attach_payload"])[
+            "json_schema"
+        ]["schema"]["properties"]["steps"]["items"]["properties"][
+            "argument"
+        ]["anyOf"]
+        self.assertIn({"type": "number"}, argument_variants)
+
+        plan = {
+            "steps": [
+                {
+                    "id": "attach_payload",
+                    "skill": "attach_payload",
+                    "argument": 0.5,
+                    "label": "Agregar la carga simulada",
+                }
+            ]
+        }
+        catalog = [
+            {
+                "name": "attach_payload",
+                "description": "Agrega una carga física simulada.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": 0.5,
+                        "preconditions": ["aligned"],
+                        "effects": ["object_secured"],
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            validate_generated_plan(plan, catalog, ["aligned"]),
+            plan,
+        )
+
+    def test_reviewer_cannot_replace_the_mission_with_only_recovery(self):
+        catalog = [
+            {
+                "name": "scan",
+                "description": "Busca el objetivo.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["target_found"],
+                    }
+                ],
+            },
+            {
+                "name": "return_home",
+                "description": "Regresa al inicio.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["at_home"],
+                    }
+                ],
+            },
+        ]
+        review = {
+            "decision": "revise",
+            "reason": "Recuperar la detección.",
+            "revised_steps": [
+                {
+                    "id": "scan_recovery",
+                    "skill": "scan",
+                    "argument": None,
+                    "label": "Buscar otra vez",
+                }
+            ],
+            "question": None,
+        }
+
+        with self.assertRaisesRegex(InvalidModelResponseError, "at_home"):
+            validate_generated_review(
+                review,
+                catalog,
+                [],
+                "failed",
+                required_facts=["target_found", "at_home"],
             )
 
     def test_validates_consistent_reading(self):

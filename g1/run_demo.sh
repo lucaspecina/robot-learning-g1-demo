@@ -302,7 +302,7 @@ search-table)
     ;;
 
 mission)
-    MISSION="${2:-andá al reloj, leé la hora, elegí la mesa correcta, agarrá el objeto y volvé al inicio}"
+    MISSION="${2:-andá al reloj, leé la hora, elegí la mesa correcta, simulá el agarre agregando la carga física aprobada de 0,5 kg y volvé al inicio}"
     sudo docker exec jetson bash -c \
         "$ROS && timeout 8 ros2 topic pub --once /g1/mission std_msgs/msg/String \
         \"{data: '$MISSION'}\"" \
@@ -412,7 +412,7 @@ down)
     # La autoridad y stand_hold pertenecen al robot a bordo: siguen activos
     # mientras el robot esté de pie. Sólo se detienen tareas y percepción.
     sudo docker exec jetson pkill -f \
-        "go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py"
+        "go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py"
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 

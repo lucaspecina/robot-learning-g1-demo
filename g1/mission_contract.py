@@ -118,6 +118,7 @@ def validate_plan(
     *,
     skill_catalog: list[dict] = None,
     initial_facts: list[str] = None,
+    required_facts: list[str] = None,
 ) -> list[dict]:
     """Valida el contrato antes de publicarlo o ejecutarlo."""
     if not isinstance(steps, list) or not steps:
@@ -199,7 +200,37 @@ def validate_plan(
                 "attempt_history": [],
             }
         )
+    missing_goals = sorted(set(required_facts or []) - known_facts)
+    if missing_goals:
+        raise ValueError(
+            "el plan revisado elimina objetivos de la misión: "
+            + ", ".join(missing_goals)
+        )
     return normalized
+
+
+def projected_plan_facts(
+    steps: list[dict],
+    *,
+    skill_catalog: list[dict],
+    initial_facts: list[str] = None,
+) -> list[str]:
+    """Calcula qué hechos quedarán ciertos si el plan completo tiene éxito."""
+    validate_plan(
+        steps,
+        skill_catalog=skill_catalog,
+        initial_facts=initial_facts,
+    )
+    catalog_by_name = {entry["name"]: entry for entry in skill_catalog}
+    facts = set(initial_facts or [])
+    for step in steps:
+        variant = next(
+            candidate
+            for candidate in catalog_by_name[step["skill"]]["variants"]
+            if candidate.get("argument") == step.get("argument")
+        )
+        facts.update(variant.get("effects", []))
+    return sorted(facts)
 
 
 class MissionTracker:
@@ -224,6 +255,7 @@ class MissionTracker:
             "created_at": None,
             "updated_at": None,
             "steps": [],
+            "required_facts": [],
             "decision": None,
             "result": None,
             "error": None,
@@ -273,11 +305,26 @@ class MissionTracker:
             skill_catalog=skill_catalog,
             initial_facts=initial_facts,
         )
+        required_facts = []
+        if skill_catalog:
+            projected = projected_plan_facts(
+                steps,
+                skill_catalog=skill_catalog,
+                initial_facts=initial_facts,
+            )
+            required_facts = sorted(
+                set(projected) - set(initial_facts or [])
+            )
 
         def mutate(state):
             if state["state"] != "planning":
                 raise ValueError("la misión no está siendo planificada")
+            for step in normalized:
+                step["source"] = state["planner"]
             state["steps"] = normalized
+            # Estos objetivos vienen del plan inicial aceptado. Una
+            # recuperación puede cambiar el camino, pero nunca borrarlos.
+            state["required_facts"] = required_facts
             state["state"] = "running"
 
         return self._update(mutate)
@@ -405,10 +452,13 @@ class MissionTracker:
         current_facts: list[str],
     ) -> dict:
         """Reemplaza sólo el futuro; el historial ejecutado queda inmutable."""
+        with self.lock:
+            required_facts = list(self.state.get("required_facts", []))
         normalized = validate_plan(
             steps,
             skill_catalog=skill_catalog,
             initial_facts=current_facts,
+            required_facts=required_facts,
         )
 
         def mutate(state):
@@ -431,6 +481,8 @@ class MissionTracker:
             for step in history:
                 if step["state"] in {"failed", "blocked"}:
                     step["state"] = "superseded"
+            for step in normalized:
+                step["source"] = "llm_revision"
             state["steps"] = history + normalized
             state["active_step_id"] = None
 
@@ -471,13 +523,27 @@ class MissionTracker:
 
         return self._update(mutate)
 
-    def complete(self, result: str = None) -> dict:
+    def complete(
+        self,
+        result: str = None,
+        *,
+        achieved_facts: list[str] = None,
+    ) -> dict:
         def mutate(state):
             if any(
                 step["state"] not in {"succeeded", "superseded"}
                 for step in state["steps"]
             ):
                 raise ValueError("no se puede completar una misión con pasos abiertos")
+            missing_goals = sorted(
+                set(state.get("required_facts", []))
+                - set(achieved_facts or [])
+            )
+            if missing_goals:
+                raise ValueError(
+                    "no se puede completar: faltan objetivos de la misión: "
+                    + ", ".join(missing_goals)
+                )
             state["state"] = "succeeded"
             state["active_step_id"] = None
             state["result"] = result

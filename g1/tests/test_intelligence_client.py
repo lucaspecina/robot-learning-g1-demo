@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import unittest
 import urllib.error
@@ -148,6 +149,32 @@ class IntelligenceClientTests(unittest.TestCase):
         now[0] += 31.0
         with self.assertRaises(RemoteIntelligenceError):
             client.read_clock(b"jpeg")
+
+    def test_preserves_the_safe_server_error_detail(self):
+        def failing_opener(request, timeout):
+            body = json.dumps(
+                {
+                    "ok": False,
+                    "error": "argumento no permitido para attach_payload: None",
+                }
+            ).encode("utf-8")
+            raise urllib.error.HTTPError(
+                request.full_url,
+                502,
+                "Bad Gateway",
+                {},
+                io.BytesIO(body),
+            )
+
+        client = IntelligenceClient(
+            server_url="http://server",
+            opener=failing_opener,
+        )
+        with self.assertRaisesRegex(
+            RemoteIntelligenceError,
+            "argumento no permitido para attach_payload",
+        ):
+            client.plan_mission("Traé el objeto", [], [])
 
     def test_rejects_inconsistent_reading(self):
         def opener(request, timeout):
@@ -470,6 +497,54 @@ class IntelligenceClientTests(unittest.TestCase):
                 },
                 outcome,
                 catalog,
+            )
+
+    def test_rejects_revision_that_drops_the_return_goal(self):
+        catalog = [
+            {
+                "name": "scan",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["target_found"],
+                    }
+                ],
+            },
+            {
+                "name": "return_home",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": None,
+                        "preconditions": [],
+                        "effects": ["at_home"],
+                    }
+                ],
+            },
+        ]
+        review = {
+            "decision": "revise",
+            "reason": "Buscar desde otra vista.",
+            "revised_steps": [
+                {
+                    "id": "scan_recovery",
+                    "skill": "scan",
+                    "argument": None,
+                    "label": "Buscar nuevamente",
+                }
+            ],
+            "question": None,
+        }
+
+        with self.assertRaisesRegex(RemoteIntelligenceError, "at_home"):
+            validate_review(
+                review,
+                "failed",
+                catalog,
+                world_facts=[],
+                required_facts=["target_found", "at_home"],
             )
 
 

@@ -90,6 +90,7 @@ versión anterior quedaron fuera del alcance actual.
 |---|---|---|
 | `/g1/mission` | String | vos (o el reconocimiento de voz, más adelante) |
 | `/g1/mission_state` | String (JSON transitorio) | estado, pasos y decisiones verificables de la misión |
+| `/g1/mission_status` | String (JSON) | historia legible con autor: agente, skill/sensores, LLM, validador o respaldo local |
 | `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
 | `/g1/navigate_to_pose` | Action NavigateToPose | objetivo, progreso, resultado y cancelación de navegación |
 | `/g1/spin` | Action Spin | giro relativo, progreso angular, resultado y cancelación |
@@ -135,6 +136,11 @@ lo vuelve a validar contra su propia copia antes de ejecutarlo. Si el servicio
 remoto falla, la misión conocida usa el plan local de respaldo. Las
 capacidades todavía pendientes aparecen como `placeholder` y bloquean la
 ejecución honestamente al llegar a ellas.
+
+La misión visual completa pide explícitamente la adaptación simulada de
+`attach_payload` con 0,5 kg. Su argumento numérico forma parte del esquema que
+recibe el LLM. Una orden real de “agarrar” sin esa aclaración debe seguir
+llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
 
 ## Los archivos
 
@@ -242,9 +248,15 @@ siendo datos no confiables. Dos validaciones independientes rechazan skills
 inventadas, argumentos desconocidos y pasos ordenados antes de cumplir sus
 condiciones. Después de cada resultado, el modelo puede continuar, pedir un
 único reintento, modificar sólo lo pendiente, pedir ayuda, completar con éxito
-o detenerse. `complete` sólo es válido si el último paso pasó y no queda
-ninguno pendiente. El tablero conserva el plan inicial, la revisión, el pedido
-exacto, la respuesta literal y el resultado aceptado.
+o detenerse. Los resultados físicos exigidos por el plan inicial quedan
+inmutables: una búsqueda de recuperación puede cambiar el camino, pero no
+borrar “asegurar el objeto” ni “volver al inicio”. `complete` exige que esos
+resultados estén medidos, no sólo que la lista de pasos quede vacía. Es el
+mismo principio del
+[`RecoveryNode` de Nav2](https://docs.nav2.org/configuration/packages/bt-plugins/controls/RecoveryNode.html):
+recuperar permite volver a intentar la tarea original; no la reemplaza. El
+tablero muestra el resumen procesado y el autor de cada evento, y conserva el
+JSON literal plegado para auditoría.
 
 **Llegar tiene memoria.** El balanceo del bípedo hacía que la posición cruzara
 el límite de 10 cm mientras terminaba de orientar el cuerpo, alternando para
