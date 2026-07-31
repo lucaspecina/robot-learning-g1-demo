@@ -34,6 +34,22 @@ ARM_JOINTS = [
     "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
 ]
 
+
+def arm_tracking_tolerances(joint_names) -> np.ndarray:
+    """Devuelve el error aceptable medido para cada articulación."""
+    # En modo activo medimos cinco veces un error estable de 2,2° en los
+    # hombros, aunque la forma bilateral ya había sido aprobada visualmente.
+    # NVIDIA no prescribe un umbral universal de llegada: 2,9° conserva
+    # margen sobre ese piso sin ocultar errores grandes. Los codos, que sí
+    # sostienen 1,7°, mantienen el criterio más estricto.
+    return np.asarray(
+        [
+            0.05 if "_shoulder_" in name or "_wrist_" in name else 0.03
+            for name in joint_names
+        ],
+        dtype=np.float32,
+    )
+
 # Poses con nombre (radianes, en el orden de ARM_JOINTS).
 # "reposo" es la pose en la que los brazos estan soldados en el modelo de 12
 # articulaciones: la que la policy de locomocion conoce.

@@ -199,7 +199,12 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import String as RosString
 
 sys.path.insert(0, _here)
-from arm_control import ARM_JOINTS, POSES, PoseArmController  # noqa: E402
+from arm_control import (  # noqa: E402
+    ARM_JOINTS,
+    POSES,
+    PoseArmController,
+    arm_tracking_tolerances,
+)
 from demo_scene import build_demo_scene  # noqa: E402
 from g1_asset import make_g1_cfg, make_wbc_agile_g1_cfg  # noqa: E402
 from perception import (  # noqa: E402
@@ -663,14 +668,7 @@ class G1RobotNode(Node):
         target = np.asarray(target, dtype=np.float32)
         actual = np.asarray(actual, dtype=np.float32)
         errors = np.abs(target - actual)
-        # Las muñecas del modelo oficial tienen mucha menos rigidez que
-        # hombros y codos. La prueba activa midió un piso repetible de 2,4°
-        # bajo gravedad; exigirles 1,7° convertía una limitación conocida del
-        # motor en un falso fallo de toda la pose.
-        tolerances = np.asarray(
-            [0.05 if "_wrist_" in name else 0.03 for name in joint_names],
-            dtype=np.float32,
-        )
+        tolerances = arm_tracking_tolerances(joint_names)
         max_error = float(np.max(errors))
         max_error_ratio = float(np.max(errors / tolerances))
         status = {
