@@ -82,6 +82,49 @@ El informe también debe confirmar la ruta exacta del código importado, la
 cantidad de articulaciones y la existencia real de los catorce dedos. Después
 se hará caminata y frenado; una prueba quieta no valida locomoción.
 
+### Resultado de quietud
+
+La referencia intacta se ejecutó el 31 de julio de 2026 sobre la T4, con tres
+repeticiones de diez segundos simulados:
+
+| Repetición | Desplazamiento máximo | Altura mínima | Inclinación máxima |
+|---|---:|---:|---:|
+| 1 | `3,23 cm` | `72,13 cm` | `9,06°` |
+| 2 | `6,75 cm` | `71,92 cm` | `7,00°` |
+| 3 | `6,74 cm` | `71,92 cm` | `6,97°` |
+
+Las tres fueron aceptadas y ninguna terminó antes de tiempo. El entorno
+confirmó `43` articulaciones en total, `14` dedos y una acción externa de
+`32` valores: `28` para muñecas y dedos, y `4` para velocidad X/Y, giro y
+altura. Esto demuestra que la tarea oficial funciona en esta VM; no demuestra
+todavía que nuestra integración tenga el mismo comportamiento.
+
+Para caminar sin generar una fuerza artificial, las muñecas se conservan
+respecto de la pelvis y sus objetivos mundiales se actualizan en cada paso.
+Dejarlas fijas en el mundo mientras el robot avanza obligaría a los brazos a
+quedarse atrás y contaminaría la prueba de piernas.
+
+### Resultado de caminata y frenado
+
+El mando oficial de los controles de mano convierte el rango `[-1, 1]` a
+`[-0,5, 0,5]` para avance y costado. Por eso la prueba usó `0,30`, un valor
+válido dentro del contrato oficial, durante cuatro segundos, y luego pidió
+velocidad cero durante otros cuatro.
+
+| Repetición | Avance | Error lateral máximo | Recorrido al frenar | Velocidad final |
+|---|---:|---:|---:|---:|
+| 1 | `13,88 cm` | `1,34 cm` | `6,00 cm` | `7,78 cm/s` |
+| 2 | `13,77 cm` | `2,80 cm` | `14,51 cm` | `7,19 cm/s` |
+| 3 | `11,94 cm` | `2,77 cm` | `18,52 cm` | `0,57 cm/s` |
+
+Las tres repeticiones mantuvieron al robot de pie, con altura mínima entre
+`66,08` y `67,19 cm` e inclinación máxima menor que `13,79°`. La dirección
+fue correcta y el error lateral fue pequeño, pero ninguna alcanzó el criterio
+externo de `50 cm` de avance; una superó por `3,52 cm` el límite de frenado.
+Esto no invalida la referencia oficial: demuestra que la policy equilibra y
+responde al mando, no que sea un controlador preciso de posición ni que siga
+perfectamente la velocidad solicitada. La navegación debe cerrar ese error.
+
 ## Orden de integración recomendado
 
 1. Reproducir quietud, caminata y frenado en la tarea oficial intacta.
@@ -100,6 +143,7 @@ se hará caminata y frenado; una prueba quieta no valida locomoción.
 ## Fuentes oficiales
 
 - [Configuración G1 de locomoción y manipulación de Isaac Lab](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomanipulation/pick_place/locomanipulation_g1_env_cfg.py)
+- [Conversión oficial del mando de locomoción del G1](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/isaaclab/devices/openxr/retargeters/humanoid/unitree/g1_motion_controller_locomotion.py)
 - [Dependencia oficial `numpy<2` de Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/setup.py)
 - [Flujo de teleoperación e imitación fijado en Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/docs/source/overview/imitation-learning/teleop_imitation.rst)
 - [Configuración exacta del control de muñecas, dedos y cintura](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomanipulation/pick_place/configs/pink_controller_cfg.py)

@@ -9,6 +9,10 @@ task_id="${G1_OFFICIAL_LOCOMANIP_TASK:-Isaac-PickPlace-Locomanipulation-G1-Abs-v
 duration_s="${G1_OFFICIAL_LOCOMANIP_DURATION_S:-10}"
 repetitions="${G1_OFFICIAL_LOCOMANIP_REPETITIONS:-3}"
 device="${G1_OFFICIAL_LOCOMANIP_DEVICE:-cuda:0}"
+run_walk_stop="${G1_OFFICIAL_LOCOMANIP_RUN_WALK_STOP:-1}"
+walk_command="${G1_OFFICIAL_LOCOMANIP_WALK_COMMAND:-0.30}"
+walk_duration_s="${G1_OFFICIAL_LOCOMANIP_WALK_DURATION_S:-4}"
+stop_duration_s="${G1_OFFICIAL_LOCOMANIP_STOP_DURATION_S:-4}"
 output_dir="${G1_OFFICIAL_LOCOMANIP_OUTPUT_DIR:-${demo_root}/logs/official_locomanipulation}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 log_path="${output_dir}/${stamp}.log"
@@ -36,6 +40,7 @@ mkdir -p "${output_dir}"
 echo "Referencia: Isaac Lab v2.3.2 sin cambios"
 echo "Tarea: ${task_id}"
 echo "Repeticiones: ${repetitions} de ${duration_s} s simulados"
+echo "Caminata y frenado: ${run_walk_stop}"
 echo "Dispositivo: ${device}"
 echo "Log: ${log_path}"
 echo "Informe: ${report_path}"
@@ -47,12 +52,24 @@ export PYTHONPATH="${reference_python_paths}${PYTHONPATH:+:${PYTHONPATH}}"
 reference_python="${isaaclab_root}/_isaac_sim/kit/python/bin/python3"
 "${reference_python}" -c \
     'import numpy, pinocchio; assert int(numpy.__version__.split(".")[0]) < 2; print(f"NumPy compatible: {numpy.__version__}; Pinocchio: {pinocchio.__version__}")'
+walk_stop_arguments=()
+if [[ "${run_walk_stop}" == "1" ]]; then
+    walk_stop_arguments+=(--run-walk-stop)
+elif [[ "${run_walk_stop}" != "0" ]]; then
+    echo "ERROR: G1_OFFICIAL_LOCOMANIP_RUN_WALK_STOP debe ser 0 o 1" >&2
+    exit 2
+fi
+
 set +e
 ./isaaclab.sh -p "${demo_root}/tools/evaluate_official_locomanipulation.py" \
     --task "${task_id}" \
     --expected-isaaclab-root "${isaaclab_root}" \
     --duration-s "${duration_s}" \
     --repetitions "${repetitions}" \
+    --walk-command "${walk_command}" \
+    --walk-duration-s "${walk_duration_s}" \
+    --stop-duration-s "${stop_duration_s}" \
+    "${walk_stop_arguments[@]}" \
     --output "${report_path}" \
     --device "${device}" \
     --enable_pinocchio \
