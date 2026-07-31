@@ -235,6 +235,45 @@ refinado. Usa la Action `DockRobot`, filtro 0,1, máximo 0,15 m/s y un único
 reintento medido. No es el servidor completo de Nav2 ni una alineación de
 agarre: el navegador actual todavía no tiene mapa local de obstáculos.
 
+### Corrección del contrato de alineación, 31 de julio de 2026
+
+La primera misión integral reveló que la afirmación anterior era demasiado
+amplia. La mesa roja fue ubicada y confirmada varias veces, el objeto apareció
+cada unos 2,2 s, pero después de preparar los brazos RT-DETR dejó de publicar
+la clase `diningtable`. El alineador abortó dos veces sin siquiera empezar a
+corregir la base porque exigía una caja nueva de mesa. No fallaron la cámara,
+la profundidad ni la búsqueda remota: falló esa clasificación local concreta.
+
+El error estructural fue mezclar dos modos que Nav2 mantiene separados:
+
+- infraestructura estática: el controlador usa la pose registrada que recibió;
+- objetivo seguido por visión: una fuente especializada debe renovar su pose
+  durante todo el control y una pérdida reciente aborta la maniobra.
+
+El modo actual es explícitamente `requested_pose`. La preaproximación vuelve a
+medir la superficie elegida con Grounding DINO, profundidad y la posición de la
+cámara; `DockRobot` recibe ese punto y la corrección fina lo conserva como
+objetivo fijo. El detector general puede seguir publicando cajas, pero ya no se
+lo presenta como un seguidor continuo y no puede cancelar una alineación por
+dejar de llamar “mesa” al mismo objeto.
+
+`G1_TABLE_USE_EXTERNAL_DETECTION=true` conserva el segundo modo para cuando
+exista un estimador de pose continuo validado. En ese modo siguen vigentes el
+filtro y el plazo de 11 s. Activarlo antes de medir su disponibilidad sería
+volver a introducir la falla. Esta separación sigue el contrato de Nav2
+Docking, pero nuestro nodo continúa siendo una adaptación Python: todavía no
+es el servidor oficial completo ni aporta la posición y orientación del objeto
+que necesitará un agarre real.
+
+Referencias verificadas para esta decisión:
+
+- [Nav2: configuración del Docking Server](https://docs.nav2.org/configuration/packages/configuring-docking-server.html)
+  distingue `use_external_detection_pose` y la pose fija del acople;
+- [Nav2: flujo completo de docking](https://docs.nav2.org/tutorials/docs/using_docking.html)
+  explica la preaproximación, detección opcional y corrección final;
+- [NVIDIA Isaac ROS Object Detection](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html)
+  delimita RT-DETR a presencia y ubicación 2D mediante cajas.
+
 ## Del objeto visible a una posición 3D: validado el 30 de julio de 2026
 
 El flujo oficial de manipulación de NVIDIA separa dos datos que no deben

@@ -23,6 +23,84 @@ class AlignmentTarget:
 
 
 @dataclass(frozen=True)
+class AlignmentTargetSnapshot:
+    target: AlignmentTarget | None
+    source: str
+    detection_count: int
+    waiting_for_external: bool
+    stale: bool
+
+
+class AlignmentTargetTracker:
+    """Separa una pose fija de un seguimiento visual continuo."""
+
+    def __init__(
+        self,
+        *,
+        use_external_detection: bool,
+        detection_timeout_s: float = 1.0,
+        filter_coefficient: float = 0.1,
+    ):
+        if not math.isfinite(detection_timeout_s) or detection_timeout_s <= 0.0:
+            raise ValueError("el plazo de detección debe ser positivo y finito")
+        self.use_external_detection = bool(use_external_detection)
+        self.detection_timeout_s = float(detection_timeout_s)
+        self.filter = TargetFilter(filter_coefficient)
+        self.target = None
+        self.detection_received_at = None
+        self.detection_count = 0
+
+    @property
+    def source(self) -> str:
+        return (
+            "external_detection"
+            if self.use_external_detection
+            else "requested_pose"
+        )
+
+    def reset(self, requested_target: AlignmentTarget):
+        self.filter.reset()
+        validated = self.filter.update(requested_target)
+        # Nav2 admite usar directamente la pose registrada para infraestructura
+        # fija. Exigir visión continua es otro modo y no debe activarse de forma
+        # implícita sólo porque haya un detector general publicando cajas 2D.
+        self.target = None if self.use_external_detection else validated
+        self.detection_received_at = None
+        self.detection_count = 0
+
+    def update_external(
+        self,
+        target: AlignmentTarget,
+        received_at: float,
+    ) -> bool:
+        if not self.use_external_detection:
+            return False
+        if not math.isfinite(received_at):
+            raise ValueError("la fecha de detección no es finita")
+        self.target = self.filter.update(target)
+        self.detection_received_at = float(received_at)
+        self.detection_count += 1
+        return True
+
+    def snapshot(self, now: float) -> AlignmentTargetSnapshot:
+        if not math.isfinite(now):
+            raise ValueError("la fecha actual no es finita")
+        waiting = self.use_external_detection and self.target is None
+        stale = (
+            self.use_external_detection
+            and self.detection_received_at is not None
+            and now - self.detection_received_at > self.detection_timeout_s
+        )
+        return AlignmentTargetSnapshot(
+            target=self.target,
+            source=self.source,
+            detection_count=self.detection_count,
+            waiting_for_external=waiting,
+            stale=stale,
+        )
+
+
+@dataclass(frozen=True)
 class AlignmentCommand:
     linear_x: float
     angular_z: float

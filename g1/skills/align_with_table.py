@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Alineación visual fina detrás de la Action estándar DockRobot de Nav2.
+"""Alineación fina detrás de la Action estándar DockRobot de Nav2.
 
 La navegación general deja al G1 en una zona de observación. Este nodo toma
-mediciones nuevas de mesa, corrige despacio la base y devuelve la movilidad a
-STAND ante éxito, cancelación o falla. La mesa se trata como infraestructura
-de acople no cargadora; todavía no se afirma que las manos puedan agarrar.
+la pose medida de una mesa, corrige despacio la base y devuelve la movilidad a
+STAND ante éxito, cancelación o falla. Puede usar una pose fija o seguimiento
+visual continuo, pero esos modos son explícitos. La mesa se trata como
+infraestructura de acople no cargadora; todavía no se afirma que las manos
+puedan agarrar.
 """
 
 import json
@@ -34,8 +36,8 @@ from navigation_core import ProgressChecker  # noqa: E402
 from table_alignment_core import (  # noqa: E402
     AlignmentPose,
     AlignmentTarget,
+    AlignmentTargetTracker,
     TableAlignmentController,
-    TargetFilter,
 )
 
 
@@ -55,6 +57,18 @@ PROGRESS_TIMEOUT_S = 35.0
 # primer reintento idéntico; limitarlo a uno conserva esa recuperación medida
 # sin esconder una locomoción poco confiable detrás de intentos repetidos.
 MAX_CONTROL_RETRIES = 1
+
+
+def read_boolean_environment(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} debe ser true o false")
 
 
 def yaw_from_quaternion(w: float, x: float, y: float, z: float) -> float:
@@ -89,10 +103,15 @@ class TableAlignment(Node):
         self.had_authority = False
         self.interrupt_reason = None
         self.selected_table = None
-        self.filtered_target = None
-        self.detection_received_at = None
-        self.detection_count = 0
-        self.target_filter = TargetFilter(coefficient=0.1)
+        self.use_external_detection = read_boolean_environment(
+            "G1_TABLE_USE_EXTERNAL_DETECTION",
+            False,
+        )
+        self.target_tracker = AlignmentTargetTracker(
+            use_external_detection=self.use_external_detection,
+            detection_timeout_s=DETECTION_TIMEOUT_S,
+            filter_coefficient=0.1,
+        )
         self.controller = TableAlignmentController(
             standoff_m=float(os.environ.get("G1_TABLE_STANDOFF_M", "0.70")),
         )
@@ -143,7 +162,8 @@ class TableAlignment(Node):
             callback_group=self.callback_group,
         )
         self.get_logger().info(
-            "alineación lista en /g1/dock_to_table con interfaz DockRobot"
+            "alineación lista en /g1/dock_to_table con interfaz DockRobot; "
+            f"fuente del objetivo: {self.target_tracker.source}"
         )
 
     def on_odom(self, message: Odometry):
@@ -174,7 +194,8 @@ class TableAlignment(Node):
         with self.state_lock:
             selected_table = self.selected_table
             active = self.alignment_active
-        if not active or selected_table is None:
+            use_external_detection = self.use_external_detection
+        if not active or selected_table is None or not use_external_detection:
             return
         candidates = []
         for detection in message.detections:
@@ -196,16 +217,14 @@ class TableAlignment(Node):
         if not candidates:
             return
         _confidence, target = max(candidates, key=lambda item: item[0])
-        try:
-            filtered = self.target_filter.update(target)
-        except ValueError as error:
-            with self.state_lock:
-                self.interrupt_reason = f"medición de mesa inválida: {error}"
-            return
         with self.state_lock:
-            self.filtered_target = filtered
-            self.detection_received_at = time.monotonic()
-            self.detection_count += 1
+            try:
+                self.target_tracker.update_external(
+                    target,
+                    time.monotonic(),
+                )
+            except ValueError as error:
+                self.interrupt_reason = f"medición de mesa inválida: {error}"
 
     def on_mobility_status(self, message: String):
         try:
@@ -241,6 +260,13 @@ class TableAlignment(Node):
         if request.dock_type not in ("red_table", "blue_table"):
             self.get_logger().warning("se rechazó una mesa desconocida")
             return GoalResponse.REJECT
+        requested_point = request.dock_pose.pose.position
+        if not all(
+            math.isfinite(value)
+            for value in (requested_point.x, requested_point.y)
+        ):
+            self.get_logger().warning("se rechazó una pose de mesa no finita")
+            return GoalResponse.REJECT
         with self.state_lock:
             if self.goal_reserved or self.alignment_active:
                 return GoalResponse.REJECT
@@ -267,6 +293,11 @@ class TableAlignment(Node):
         result.num_retries = 0
         result.error_msg = ""
 
+        requested_target = AlignmentTarget(
+            float(request.dock_pose.pose.position.x),
+            float(request.dock_pose.pose.position.y),
+        )
+
         with self.state_lock:
             self.goal_reserved = False
             self.alignment_active = True
@@ -274,29 +305,34 @@ class TableAlignment(Node):
             self.had_authority = False
             self.interrupt_reason = None
             self.selected_table = request.dock_type
-            self.filtered_target = None
-            self.detection_received_at = None
-            self.detection_count = 0
-        self.target_filter.reset()
+            self.target_tracker.reset(requested_target)
         self.controller.reset()
         progress.reset()
-        self.publish_status("esperando_percepcion")
+        self.publish_status(
+            (
+                "esperando_percepcion"
+                if self.use_external_detection
+                else "objetivo_fijo_listo"
+            ),
+            target_source=self.target_tracker.source,
+        )
         retry_count = 0
 
         terminal = "failed"
         message = "la alineación terminó sin resultado"
         error_code = DockRobot.Result.UNKNOWN
         last_command = None
+        target_snapshot = self.target_tracker.snapshot(started_at)
         try:
             while rclpy.ok():
                 now = time.monotonic()
                 with self.state_lock:
                     pose = self.pose
-                    target = self.filtered_target
-                    detection_at = self.detection_received_at
-                    detection_count = self.detection_count
+                    target_snapshot = self.target_tracker.snapshot(now)
                     owner = self.mobility_owner
                     interrupt_reason = self.interrupt_reason
+                target = target_snapshot.target
+                detection_count = target_snapshot.detection_count
 
                 if goal_handle.is_cancel_requested:
                     terminal = "canceled"
@@ -323,7 +359,7 @@ class TableAlignment(Node):
                     )
                     time.sleep(1.0 / RATE_HZ)
                     continue
-                if target is None or detection_at is None:
+                if target is None:
                     if now > initial_perception_deadline:
                         message = "la cámara no volvió a medir la mesa elegida"
                         error_code = DockRobot.Result.FAILED_TO_DETECT_DOCK
@@ -336,7 +372,7 @@ class TableAlignment(Node):
                     )
                     time.sleep(1.0 / RATE_HZ)
                     continue
-                if now - detection_at > DETECTION_TIMEOUT_S:
+                if target_snapshot.stale:
                     message = "se perdió la medición reciente de la mesa"
                     error_code = DockRobot.Result.FAILED_TO_DETECT_DOCK
                     break
@@ -375,6 +411,7 @@ class TableAlignment(Node):
                     linear_speed_mps=round(pose.linear_speed, 4),
                     angular_speed_radps=round(pose.angular_speed, 4),
                     detection_count=detection_count,
+                    target_source=target_snapshot.source,
                 )
                 if command.stable:
                     terminal = "succeeded"
@@ -451,6 +488,7 @@ class TableAlignment(Node):
                 linear_speed_mps=round(pose.linear_speed, 4),
                 angular_speed_radps=round(pose.angular_speed, 4),
                 detection_count=detection_count,
+                target_source=target_snapshot.source,
                 retry_count=retry_count,
             )
             self.get_logger().info(message)
@@ -460,7 +498,10 @@ class TableAlignment(Node):
             self.get_logger().warning(message)
         else:
             goal_handle.abort()
-            failure_fields = {"error": message}
+            failure_fields = {
+                "error": message,
+                "target_source": target_snapshot.source,
+            }
             if last_command is not None:
                 failure_fields.update(
                     {

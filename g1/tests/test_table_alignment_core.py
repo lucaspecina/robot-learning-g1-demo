@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from table_alignment_core import (  # noqa: E402
     AlignmentPose,
     AlignmentTarget,
+    AlignmentTargetTracker,
     TableAlignmentController,
     TargetFilter,
 )
@@ -38,6 +39,47 @@ class TargetFilterTest(unittest.TestCase):
         filtered = target_filter.update(AlignmentTarget(3.0, 1.0))
         self.assertAlmostEqual(filtered.x, 2.1)
         self.assertAlmostEqual(filtered.y, 2.8)
+
+
+class AlignmentTargetTrackerTest(unittest.TestCase):
+    def test_fixed_pose_is_immediately_available_and_never_expires(self):
+        tracker = AlignmentTargetTracker(
+            use_external_detection=False,
+            detection_timeout_s=1.0,
+        )
+        requested = AlignmentTarget(3.6, 3.0)
+        tracker.reset(requested)
+
+        initial = tracker.snapshot(0.0)
+        much_later = tracker.snapshot(120.0)
+
+        self.assertEqual(initial.target, requested)
+        self.assertEqual(initial.source, "requested_pose")
+        self.assertFalse(initial.waiting_for_external)
+        self.assertFalse(much_later.stale)
+        self.assertFalse(
+            tracker.update_external(AlignmentTarget(9.0, 9.0), 121.0)
+        )
+        self.assertEqual(tracker.snapshot(122.0).target, requested)
+
+    def test_external_mode_waits_for_and_expires_live_measurements(self):
+        tracker = AlignmentTargetTracker(
+            use_external_detection=True,
+            detection_timeout_s=1.0,
+        )
+        tracker.reset(AlignmentTarget(3.6, 3.0))
+
+        self.assertTrue(tracker.snapshot(0.0).waiting_for_external)
+        self.assertTrue(
+            tracker.update_external(AlignmentTarget(3.7, 3.1), 0.5)
+        )
+        fresh = tracker.snapshot(1.0)
+        stale = tracker.snapshot(1.6)
+
+        self.assertEqual(fresh.source, "external_detection")
+        self.assertEqual(fresh.detection_count, 1)
+        self.assertFalse(fresh.stale)
+        self.assertTrue(stale.stale)
 
 
 class TableAlignmentControllerTest(unittest.TestCase):

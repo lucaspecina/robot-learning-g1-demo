@@ -214,8 +214,10 @@ Habrá límites duros para evitar ciclos infinitos:
 
 - máximo 20 decisiones por misión en la primera versión;
 - un reintento automático del mismo paso ante el mismo error;
-- máximo dos barridos completos por misión; otro exige cambiar el punto de
-  observación o pedir ayuda;
+- máximo dos barridos completos por misión; al agotarlos se declara que falta
+  `relocate_viewpoint`, una capacidad que cambie físicamente el punto de
+  observación. El validador sólo admite pedir ayuda o detenerse: cambiar el
+  texto de otro barrido no cuenta como movimiento;
 - máximo dos preaproximaciones por misión, aunque el modelo cambie el nombre
   del paso al revisar el plan;
 - una respuesta inválida del modelo no reemplaza el plan validado;

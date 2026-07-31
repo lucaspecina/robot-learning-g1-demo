@@ -70,7 +70,11 @@ from intelligence_client import (
     IntelligenceClient,
     RemoteIntelligenceError,
 )
-from active_search import local_table_candidate, make_scan_pattern
+from active_search import (
+    local_table_candidate,
+    make_scan_pattern,
+    reserve_scan_attempt,
+)
 from camera_geometry import horizontal_field_of_view_deg
 from execution_core import FeedbackWatchdog
 from mission_contract import MissionTracker, build_demo_plan, validate_plan
@@ -1508,20 +1512,26 @@ class Agent(Node):
         if target not in ("red_table", "blue_table"):
             return failed("no hay una mesa elegida")
 
-        scan_attempt = int(
-            self.mission_context.get("active_scan_attempts", 0)
-        ) + 1
-        self.mission_context["active_scan_attempts"] = scan_attempt
-        if scan_attempt > MAX_ACTIVE_SCANS_PER_MISSION:
+        try:
+            scan_attempt, allowed = reserve_scan_attempt(
+                int(self.mission_context.get("active_scan_attempts", 0)),
+                MAX_ACTIVE_SCANS_PER_MISSION,
+            )
+        except (TypeError, ValueError) as error:
+            return failed(f"el contador de barridos es inválido: {error}")
+        if not allowed:
             return blocked(
-                "ya se hicieron dos barridos completos sin evidencia nueva; "
-                "hace falta cambiar el punto de observación o pedir ayuda",
-                {"scan_attempt": scan_attempt},
+                "ya se usaron los dos barridos permitidos; repetir el mismo "
+                "giro no cambia la vista. Hace falta mover físicamente el "
+                "punto de observación o pedir ayuda",
+                {"scan_attempts_used": scan_attempt},
                 blocker={
-                    "type": "search_exhausted",
+                    "type": "missing_skill",
+                    "skill": "relocate_viewpoint",
                     "target": target,
                 },
             )
+        self.mission_context["active_scan_attempts"] = scan_attempt
 
         pattern = make_scan_pattern(
             SEARCH_HORIZONTAL_FOV_DEG,
@@ -1908,6 +1918,7 @@ class Agent(Node):
                 "linear_speed_mps",
                 "angular_speed_radps",
                 "detection_count",
+                "target_source",
             ):
                 if key in status:
                     measurements[key] = status[key]
@@ -1966,7 +1977,12 @@ class Agent(Node):
             )
 
         status = self.alignment_status or {}
-        for key in ("distance_error_m", "yaw_error_deg"):
+        for key in (
+            "distance_error_m",
+            "yaw_error_deg",
+            "detection_count",
+            "target_source",
+        ):
             if key in status:
                 measurements[key] = status[key]
         safe = self.wait_for_stand(timeout_s=3.0)

@@ -209,6 +209,11 @@ ocho esferas de los pies contra MuJoCo.
 
 ## Otros pendientes conocidos
 
+- **Recuperación visual desde otro lugar**: todavía no existe la capacidad
+  `relocate_viewpoint`. Después de dos barridos el agente debe pedir ayuda; no
+  puede renombrar `scan_for_table` y fingir que cambió de posición. Se agregará
+  sobre Nav2 con mapa de obstáculos y posiciones de observación comprobables.
+
 - **Demo objetivo actualizada**: la misión vigente ya no busca personas. Debe
   escuchar una orden, guardar `home`, encontrar y leer el reloj, elegir por la
   hora una mesa roja o azul no registrada, encontrarla, tomar su objeto y

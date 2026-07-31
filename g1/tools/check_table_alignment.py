@@ -177,7 +177,10 @@ class AlignmentChecker(Node):
             f"recorrido neto {displacement:.3f} m"
         )
         print(
-            f"visión: {status.get('detection_count', 'sin dato')} mediciones; "
+            "objetivo: "
+            f"fuente {status.get('target_source', 'sin dato')}; "
+            "refinamientos visuales "
+            f"{status.get('detection_count', 'sin dato')}; "
             f"reintentos: {wrapped.result.num_retries}; "
             f"dueño final: {self.mobility_owner}"
         )

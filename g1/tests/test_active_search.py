@@ -8,7 +8,11 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from active_search import local_table_candidate, make_scan_pattern
+from active_search import (
+    local_table_candidate,
+    make_scan_pattern,
+    reserve_scan_attempt,
+)
 
 
 class ScanPatternTest(unittest.TestCase):
@@ -78,6 +82,17 @@ class LocalCandidateTest(unittest.TestCase):
                 minimum_color_pixels=100,
             )
         )
+
+
+class ScanBudgetTest(unittest.TestCase):
+    def test_does_not_fake_a_new_attempt_after_the_budget_is_spent(self):
+        first, first_allowed = reserve_scan_attempt(0, 2)
+        second, second_allowed = reserve_scan_attempt(first, 2)
+        exhausted, third_allowed = reserve_scan_attempt(second, 2)
+
+        self.assertEqual((first, first_allowed), (1, True))
+        self.assertEqual((second, second_allowed), (2, True))
+        self.assertEqual((exhausted, third_allowed), (2, False))
 
 
 if __name__ == "__main__":

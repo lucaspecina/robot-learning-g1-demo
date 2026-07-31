@@ -77,3 +77,14 @@ def local_table_candidate(
     ):
         return status
     return None
+
+
+def reserve_scan_attempt(completed_attempts: int, maximum_attempts: int):
+    """Reserva un barrido sin aumentar el contador cuando ya no está permitido."""
+    if not isinstance(completed_attempts, int) or completed_attempts < 0:
+        raise ValueError("los barridos completados deben ser un entero no negativo")
+    if not isinstance(maximum_attempts, int) or maximum_attempts <= 0:
+        raise ValueError("el máximo de barridos debe ser un entero positivo")
+    if completed_attempts >= maximum_attempts:
+        return completed_attempts, False
+    return completed_attempts + 1, True
