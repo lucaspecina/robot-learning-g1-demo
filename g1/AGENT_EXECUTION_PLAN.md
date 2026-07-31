@@ -30,6 +30,35 @@ Nav2 es el sistema estándar de navegación de ROS 2. SLAM es construir un mapa
 con sensores y ubicar al robot dentro de él. Ambos reemplazarán después la
 navegación simple sin cambiar el contrato del agente.
 
+## Dos bloques siguientes, después de la validación visual actual
+
+No se agregarán más capacidades a la misión inmediatamente después de cerrar
+la corrida visual. Primero se harán estos dos bloques, en este orden:
+
+1. **Auditoría de preparación para el robot real.** Inventariar todo mecanismo
+   de respaldo, dato perfecto de Isaac, valor fijo, detector específico de la
+   escena y simulación de una capacidad que todavía no existe. Cada elemento se
+   clasificará como:
+   - simulación válida de una interfaz que tendrá el robot real;
+   - inyección de prueba, permitida sólo en un perfil de prueba explícito;
+   - atajo incompatible con despliegue, que debe desaparecer del camino normal.
+2. **Mapa, ubicación y navegación estándar.** Retomar LiDAR, SLAM y Nav2 desde
+   el dato crudo del sensor hasta una misión completa, sin leer la posición
+   perfecta que conoce Isaac. El resultado debe poder reemplazar la navegación
+   simple sin cambiar las capacidades que consume el agente.
+
+El primer candidato que debe salir del camino normal es el plan local de
+respaldo: si Azure no responde o devuelve algo inválido, el robot real debe
+quedar seguro, pedir ayuda o detener la misión. Ejecutar silenciosamente una
+misión conocida haría parecer inteligente y conectado a un sistema que en
+realidad falló. El respaldo podrá conservarse como prueba explícita y visible,
+pero no activarse por defecto.
+
+Tampoco se llamará “fake” a todo lo simulado. Por ejemplo, un LiDAR de Isaac
+que publica el mismo tipo de medición que el sensor físico es una simulación
+útil. En cambio, usar coordenadas internas perfectas de la escena para ubicar
+el robot o un objeto sólo valida el guion, no el sistema que se desplegará.
+
 ## Estado actual
 
 Ya funciona:
@@ -362,6 +391,12 @@ segura y puede corregir la parte ejecutable de su plan.
   https://docs.nav2.org/configuration/packages/configuring-docking-server.html
 - Nav2, recuperación y replanificación mediante Behavior Trees:
   https://docs.nav2.org/behavior_trees/index.html
+- Nav2, flujo recomendado de mapa, localización y mapas de obstáculos:
+  https://docs.nav2.org/setup_guides/sensors/mapping_localization.html
+- NVIDIA Isaac Sim, LiDAR RTX publicado mediante mensajes ROS 2 estándar:
+  https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_rtx_lidar.html
+- Unitree, sensores declarados para el G1 EDU:
+  https://www.unitree.com/g1/
 - Google SayCan, selección de capacidades limitada por lo que el robot puede
   ejecutar realmente:
   https://research.google/blog/towards-helpful-robots-grounding-language-in-robotic-affordances/

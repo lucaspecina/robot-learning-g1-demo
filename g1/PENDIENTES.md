@@ -209,6 +209,31 @@ ocho esferas de los pies contra MuJoCo.
 
 ## Otros pendientes conocidos
 
+- **Auditoría para quitar las “rueditas de ayuda”**: se hará inmediatamente
+  después de la próxima corrida integral aprobada visualmente. No será una
+  eliminación a ciegas. Primero se registrará, para cada dato y decisión, de
+  dónde sale y qué equivalente tendrá en el G1 físico. La primera lista que hay
+  que confirmar en el código incluye:
+
+  1. plan local de respaldo ante falla del modelo;
+  2. coordenadas conocidas del reloj y cualquier posición interna leída de
+     Isaac;
+  3. detectores por color o forma ajustados sólo a esta habitación;
+  4. profundidad perfecta o sin ruido usada como si fuera medición real;
+  5. `attach_payload`, que prueba carga pero no agarre;
+  6. respuestas simuladas, modos de prueba y valores fijos habilitables por
+     variables de entorno;
+  7. publicación directa de movimiento que pueda evitar
+     `mobility_authority`;
+  8. éxito declarado a partir de un valor pedido y no de una medición.
+
+  El perfil normal deberá **fallar de forma visible y segura**: ante falta de
+  modelo, sensor o dato válido, pasar a `STAND` y pedir ayuda o detenerse. Las
+  inyecciones útiles se conservarán sólo bajo un perfil `test` explícito, con
+  su origen mostrado en el tablero. El cierre será una misión bajo perfil de
+  despliegue, seguida por fallas inducidas de red, visión y localización; ninguna
+  deberá activar un reemplazo silencioso.
+
 - **Recuperación visual desde otro lugar**: todavía no existe la capacidad
   `relocate_viewpoint`. Después de dos barridos el agente debe pedir ayuda; no
   puede renombrar `scan_for_table` y fingir que cambió de posición. Se agregará
@@ -219,23 +244,46 @@ ocho esferas de los pies contra MuJoCo.
   hora una mesa roja o azul no registrada, encontrarla, tomar su objeto y
   regresar al inicio. El alcance y la escalera de pruebas están fijados en
   [`DEMO_TARGET.md`](DEMO_TARGET.md).
-- **Mapeo y localización como en el G1 real**: la demo actual usa coordenadas
-  conocidas de Isaac. Es un escalón válido para probar locomoción, pero no la
-  arquitectura final. El G1 EDU dispone de cámara de profundidad y LiDAR 3D.
-  Hay que simular ambos sensores, construir el mapa a partir de sus mediciones
-  y ubicar al robot dentro del mapa sin leer posiciones internas de Isaac.
-  Flujo previsto:
+- **Mapeo, ubicación y navegación como en el G1 real**: la demo actual usa
+  coordenadas conocidas de Isaac. Es un escalón válido para probar locomoción,
+  pero no la arquitectura final. Unitree declara cámara de profundidad y LiDAR
+  3D en el G1 EDU; el modelo exacto, su driver y sus topics deberán confirmarse
+  contra la unidad que se compre. NVIDIA permite que el LiDAR simulado publique
+  mensajes ROS 2 estándar `PointCloud2` y `LaserScan`, por lo que el simulador
+  puede reproducir la frontera real sin entregar posiciones perfectas.
 
-  1. recorrer la habitación y guardar un mapa;
-  2. en cada encendido, cargarlo y localizar al robot;
-  3. usar el LiDAR para geometría y obstáculos;
-  4. usar la cámara para reconocer reloj, color de mesa y objetos;
-  5. guardar los objetos encontrados en un mapa con nombres.
-  El LiDAR no identifica por sí solo que una forma es un reloj. Para una primera
-  referencia compatible con Nav2, evaluar `SLAM Toolbox` y la conversión del
-  LiDAR 3D a la representación necesaria; antes de implementarlo, confirmar
-  los topics y drivers exactos entregados con la versión del G1 EDU comprada.
-  Se hará después de cerrar visualmente locomoción, cámara y llegada al reloj.
+  Camino de implementación y prueba, una frontera por vez:
+
+  1. hacer que el LiDAR aislado entregue una nube no vacía, con frecuencia,
+     alcance y referencias espaciales medidos;
+  2. publicar la cadena completa de referencias espaciales
+     `map → odom → base_link → lidar` y comprobarla en RViz;
+  3. convertir el LiDAR 3D a la vista 2D que consuma la primera integración,
+     sin leer geometría interna de Isaac;
+  4. construir y guardar el mapa con `SLAM Toolbox`, la opción recomendada por
+     Nav2 para este caso;
+  5. volver a encender en otra pose y localizarse sobre el mapa guardado;
+  6. integrar Nav2 con mapa global, mapa local de obstáculos, planificación de
+     ruta y evasión de obstáculos;
+  7. conectar la salida de Nav2 como solicitante de `mobility_authority`; Nav2
+     nunca publicará por fuera del único dueño de movimiento;
+  8. reemplazar el navegador simple detrás de la misma Action
+     `NavigateToPose`, sin cambiar al agente;
+  9. agregar puntos de observación alcanzables para buscar objetos y la
+     capacidad `relocate_viewpoint`;
+  10. mostrar en el tablero la nube del LiDAR, el mapa, la ubicación estimada,
+      la ruta, los obstáculos y la incertidumbre.
+
+  Reparto de responsabilidades que no se debe mezclar: LiDAR mide paredes y
+  obstáculos; SLAM arma el mapa y ubica al robot; Nav2 decide por dónde llegar a
+  una coordenada; la cámara reconoce que algo es un reloj o una mesa; el agente
+  decide cuál de esos lugares visitar; la policy de locomoción convierte la
+  orden de velocidad en pasos estables.
+
+  La primera meta no será “Nav2 completo”, sino una prueba discriminante: mapa
+  hecho sólo con sensores, reinicio en otra pose, localización correcta y viaje
+  al reloj sin usar ninguna coordenada interna del simulador. Después se agrega
+  la búsqueda de mesas no registradas en posiciones de observación seguras.
 - **Lectura visual en Azure AI Foundry, integrada**: el detector de la Jetson
   manda sólo el recorte JPEG al servidor externo; éste usa la API `v1` y una
   salida con formato estricto. `gpt-4.1-mini` leyó `09:00` 3/3 veces con red
