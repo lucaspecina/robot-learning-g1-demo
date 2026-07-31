@@ -127,4 +127,3 @@ orden semántica -> pose objetivo -> Nav2 -> autoridad -> monitor de colisión
 - [Nav2: monitor de colisiones como último filtro](https://docs.nav2.org/tutorials/docs/using_collision_monitor.html)
 - [NVIDIA Isaac Sim: LiDAR RTX y publicación ROS 2](https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_rtx_lidar.html)
 - [Unitree: SDK ROS 2 del LiDAR](https://github.com/unitreerobotics/unilidar_sdk2)
-
