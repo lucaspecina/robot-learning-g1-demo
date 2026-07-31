@@ -95,8 +95,21 @@ máximo. En esa corrida el agente se bloqueó después porque
 `align_with_table` ya está disponible mediante `DockRobot`: roja terminó a
 1,6 cm y 1,58°, y azul a 0,2 cm y 0,25° después de un reintento. El plan usa
 después `attach_payload`, una carga simulada de 0,5 kg que pasó tres caminatas
-y tres navegaciones y no se presenta como agarre. Falta ejecutar y observar
-todos esos pasos juntos en una misión completa.
+y tres navegaciones y no se presenta como agarre.
+
+El 31-jul todos esos pasos corrieron juntos por primera vez. El plan real de
+Azure guardó `home`, llegó al reloj, confirmó 0,952, leyó `09:00`, eligió la
+mesa roja, agregó un barrido al no verla, la ubicó con confianza 0,862, volvió
+a medirla en la preaproximación, encontró el objeto, alineó a 2,9 cm y 1,96°,
+aplicó 0,5 kg, puso los brazos en transporte y regresó. La alineación usó
+`requested_pose`, no una detección local fingida, y no necesitó reintentos.
+
+Esa corrida reveló a la vez que el regreso aceptaba 18,8 cm porque nuestro
+margen recordado duplicaba los 10 cm declarados. Se cambió sólo ese margen al
+valor oficial por defecto de Nav2, cero. El A/B posterior, todavía con 0,5 kg,
+regresó a 8,3 cm y 4,5°, con 0,764 m de altura. Falta que Lucas observe una
+corrida completa con este último commit; los tramos numéricos ya están
+validados.
 
 Todavía no funciona:
 
@@ -313,12 +326,14 @@ armará el plan inicial y el tablero lo mostrará. El robot:
 10. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
 
 El sistema todavía se bloqueará honestamente si no encuentra la mesa después
-del barrido, cuando necesite la alineación visual fina o cuando llegue al
-agarre. La preaproximación gruesa ya está implementada; no se presenta como
-precisión suficiente para manipular.
+del barrido o si necesita cambiar físicamente el punto de observación. La
+alineación y el transporte con carga simulada ya funcionan; el agarre real
+sigue faltando y nunca se presenta la masa agregada como prueba de dedos,
+contacto o retención.
 
-Por lo tanto, este tramo no completa aún la entrega del objeto. Convierte la
-demo de una lista rígida en una misión observable que detecta fallas, se pone
+Por lo tanto, este tramo completa el recorrido de transporte simulado, no la
+entrega física del objeto. Convierte la demo de una lista rígida en una misión
+observable que detecta fallas, se pone
 segura y puede corregir la parte ejecutable de su plan.
 
 ## Referencias oficiales usadas

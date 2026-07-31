@@ -96,6 +96,14 @@ prometedor, pero no como carga aprobada de cuerpo y brazos. No se continúa a
 `2 kg` hasta mejorar la postura o el controlador de brazos con una métrica
 declarada.
 
+El 31-jul la carga aprobada se integró en la misión completa: se aplicaron
+`0,25 kg` en cada muñeca, los brazos llegaron a transporte con `0,0287 rad` de
+error máximo y el robot volvió al inicio sin caer. La primera llegada expuso
+un margen excesivo del navegador y quedó a `18,8 cm`; después de retirar sólo
+ese margen, el verificador ida/regreso con la misma carga volvió a `8,3 cm`,
+`4,5°` y `0,764 m` de altura. La inspección visual completa de Lucas sigue
+siendo obligatoria antes de cerrar la demo.
+
 El banco aún publica `/g1/reset` sin confirmación correlacionada. Una de tres
 navegaciones comenzó a `32 cm` del origen esperado, aunque el objetivo relativo
 y la llegada fueron válidos. Antes de usar el reinicio para comparar posiciones

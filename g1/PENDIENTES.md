@@ -307,12 +307,15 @@ ocho esferas de los pies contra MuJoCo.
   `0,03–0,04`. Tres posiciones publicadas en `Detection3DArray` quedaron a
   `3,2 cm` en horizontal y `5–6 mm` en altura de la referencia física, con
   cuerpo a `0,739 m` y dueño `STAND`. Es una superficie visible para búsqueda
-  y aproximación, no la orientación completa que exige el agarre. Falta la
-  corrida integral del nuevo paso `find_object`.
+  y aproximación, no la orientación completa que exige el agarre. La corrida
+  integral encontró el objeto como `cup` con confianza `0,605`, a `28,8 cm`
+  del punto visible de la mesa, y conservó honestamente la calidad
+  `visible_surface_only`.
 - **Transporte con carga separado del agarre**: `attach_payload` agrega en
   caliente una masa absoluta y verificable entre ambas muñecas y muestra un
-  bulto sin masa adicional. La misión lo usará después de `align_with_table`;
-  todavía falta que Lucas confirme visualmente la posición del bulto. No
+  bulto sin masa adicional. La misión ya lo ejecutó después de
+  `align_with_table`, adoptó la pose de transporte y regresó a `home`; todavía
+  falta que Lucas confirme visualmente la posición del bulto. No
   valida contacto, dedos ni retención del objeto. La medición aprobó `0,5 kg`:
   tres caminatas frenaron en `0–3 cm`
   y tres navegaciones llegaron a `9–10 cm`. Con `1 kg` las piernas pasaron,

@@ -274,6 +274,13 @@ Referencias verificadas para esta decisión:
 - [NVIDIA Isaac ROS Object Detection](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html)
   delimita RT-DETR a presencia y ubicación 2D mediante cajas.
 
+La prueba integral posterior confirmó el contrato nuevo: después de preparar
+los brazos, el objeto siguió apareciendo pero la alineación no dependió de una
+caja nueva de mesa. Usó el punto vuelto a medir `(3,695; 2,696)` m, terminó en
+71,9 s a 2,9 cm y 1,96°, con 1,32 cm/s de velocidad lineal y 0,013 rad/s de
+giro en la última muestra. Informó `requested_pose`, cero refinamientos
+visuales y cero reintentos; luego la misión pudo aplicar la carga y regresar.
+
 ## Del objeto visible a una posición 3D: validado el 30 de julio de 2026
 
 El flujo oficial de manipulación de NVIDIA separa dos datos que no deben
