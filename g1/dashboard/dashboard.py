@@ -58,9 +58,10 @@ FALLEN_HEIGHT = 0.45
 OFFLINE_AFTER_S = 3.0
 OPEN_RESULT_HOLD_S = 60.0
 ANALYSIS_OFFLINE_AFTER_S = OPEN_RESULT_HOLD_S + 5.0
-# La vista superior sólo usa cajas ligadas al cuadro exacto del detector. El
-# límite corto evita congelar una detección vieja sobre un video que avanzó.
-LIVE_DETECTION_MAX_AGE_S = 2.0
+# RT-DETR tarda hoy cerca de 2,2 s por cuadro en la CPU simulada. El margen
+# medido evita parpadeos entre cuadros sin presentar una detección vieja como
+# si todavía fuera una observación actual.
+LIVE_DETECTION_MAX_AGE_S = 3.5
 
 STATE_QOS = QoSProfile(
     depth=1,

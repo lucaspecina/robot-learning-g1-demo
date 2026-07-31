@@ -470,7 +470,7 @@
           <span class="live-badge" id="live-badge">ESPERANDO</span>
         </div>
         <div class="tags" id="live-detections"></div>
-        <div class="hint">
+        <div class="hint" id="live-boxes-note">
           Éste es todo el campo visual utilizado por el robot. Si el detector
           entrega un resultado reciente, se muestra ese cuadro exacto con sus
           cajas; nunca se pegan cajas viejas sobre una imagen nueva.
@@ -1334,6 +1334,12 @@
           ? `CAJAS · ${state.live_detection_source || 'DETECTOR'}`
           : 'LIVE';
         document.getElementById('live-badge').style.color='var(--green)';
+        setText(
+          'live-boxes-note',
+          state.live_boxes_active
+            ? `Cuadro exacto analizado por ${state.live_detection_source || 'el detector'} hace ${state.live_boxes_age_s ?? 0} s. La imagen se actualiza al ritmo real del modelo.`
+            : 'Éste es todo el campo visual utilizado por el robot. Las cajas aparecen sólo sobre el cuadro exacto que produjo la detección; nunca se pegan cajas viejas sobre una imagen nueva.'
+        );
 
         document.getElementById('live-detections').innerHTML =
           Object.keys(state.detections || {}).length
