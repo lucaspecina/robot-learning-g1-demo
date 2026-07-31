@@ -10,6 +10,7 @@ duration_s="${G1_OFFICIAL_LOCOMANIP_DURATION_S:-10}"
 repetitions="${G1_OFFICIAL_LOCOMANIP_REPETITIONS:-3}"
 device="${G1_OFFICIAL_LOCOMANIP_DEVICE:-cuda:0}"
 run_walk_stop="${G1_OFFICIAL_LOCOMANIP_RUN_WALK_STOP:-1}"
+visual="${G1_OFFICIAL_LOCOMANIP_VISUAL:-0}"
 walk_command="${G1_OFFICIAL_LOCOMANIP_WALK_COMMAND:-0.30}"
 walk_duration_s="${G1_OFFICIAL_LOCOMANIP_WALK_DURATION_S:-4}"
 stop_duration_s="${G1_OFFICIAL_LOCOMANIP_STOP_DURATION_S:-4}"
@@ -60,6 +61,21 @@ elif [[ "${run_walk_stop}" != "0" ]]; then
     exit 2
 fi
 
+video_arguments=(--headless)
+if [[ "${visual}" == "1" ]]; then
+    public_ip="$(curl -s --max-time 5 https://api.ipify.org)"
+    if [[ -z "${public_ip}" ]]; then
+        echo "ERROR: no se pudo determinar la IP pública para el visor." >&2
+        exit 2
+    fi
+    export PUBLIC_IP="${public_ip}"
+    video_arguments=(--livestream 1)
+    echo "Video oficial: conectate al cliente de Isaac en ${public_ip}"
+elif [[ "${visual}" != "0" ]]; then
+    echo "ERROR: G1_OFFICIAL_LOCOMANIP_VISUAL debe ser 0 o 1" >&2
+    exit 2
+fi
+
 set +e
 ./isaaclab.sh -p "${demo_root}/tools/evaluate_official_locomanipulation.py" \
     --task "${task_id}" \
@@ -73,7 +89,7 @@ set +e
     --output "${report_path}" \
     --device "${device}" \
     --enable_pinocchio \
-    --headless \
+    "${video_arguments[@]}" \
     >"${log_path}" 2>&1
 exit_code=$?
 set -e

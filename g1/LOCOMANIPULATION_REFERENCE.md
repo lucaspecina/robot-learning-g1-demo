@@ -125,6 +125,30 @@ Esto no invalida la referencia oficial: demuestra que la policy equilibra y
 responde al mando, no que sea un controlador preciso de posición ni que siga
 perfectamente la velocidad solicitada. La navegación debe cerrar ese error.
 
+### Decisión sobre `agile_locomotion.pt`
+
+La comparación se repitió el 31 de julio sin modificar la tarea: quietud
+aprobó tres veces, con `3,06`, `6,38` y `6,38 cm` de desplazamiento máximo en
+diez segundos. Con orden frontal `0,30`, avanzó `11,94–13,88 cm` en cuatro
+segundos y recorrió `6,00–18,52 cm` después de pedir freno.
+
+No se elige este archivo para reemplazar la locomoción de la demo. El entorno
+lo conecta a `AgileTeacherPolicyObservationsCfg`, que incluye la velocidad
+lineal verdadera del cuerpo tomada del simulador. Esa medición no sale
+directamente de los sensores del G1 físico. La policy recurrente que usa la
+demo es la versión *student*: NVIDIA la destiló para trabajar con encoders de
+articulaciones e IMU disponibles en hardware. Además, en nuestra integración
+ya midió aproximadamente `0,264 m/s` para la misma orden `0,30` y frenado de
+`5–8 cm`.
+
+Por lo tanto `agile_locomotion.pt` queda como referencia oficial de
+simulación y como pareja verificada del controlador Pink, no como candidata
+principal de despliegue. Lo que corresponde trasladar a la demo es el patrón
+de muñecas por cinemática inversa, conservando la policy recurrente de
+piernas. El modo visual de la referencia se habilita con
+`G1_OFFICIAL_LOCOMANIP_VISUAL=1`; no cambia la física ni el contrato de la
+tarea.
+
 ## Orden de integración recomendado
 
 1. Reproducir quietud, caminata y frenado en la tarea oficial intacta.
@@ -143,6 +167,8 @@ perfectamente la velocidad solicitada. La navegación debe cerrar ese error.
 ## Fuentes oficiales
 
 - [Configuración G1 de locomoción y manipulación de Isaac Lab](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomanipulation/pick_place/locomanipulation_g1_env_cfg.py)
+- [Entradas de la policy de piernas usada por la tarea](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomanipulation/pick_place/configs/agile_locomotion_observation_cfg.py)
+- [Diferencia oficial entre teacher y student desplegable](https://nvidia-isaac.github.io/WBC-AGILE/tasks.html#locomotion-with-height-commands)
 - [Conversión oficial del mando de locomoción del G1](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/isaaclab/devices/openxr/retargeters/humanoid/unitree/g1_motion_controller_locomotion.py)
 - [Dependencia oficial `numpy<2` de Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/setup.py)
 - [Flujo de teleoperación e imitación fijado en Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/docs/source/overview/imitation-learning/teleop_imitation.rst)
