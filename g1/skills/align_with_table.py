@@ -43,7 +43,10 @@ RATE_HZ = 10.0
 CLAIM_RETRY_S = 0.5
 AUTHORITY_WAIT_TIMEOUT_S = 10.0
 INITIAL_PERCEPTION_TIMEOUT_S = 15.0
-DETECTION_TIMEOUT_S = 5.0
+# RT-DETR tarda 2,1--2,4 s en esta Jetson simulada. Dos cuadros que no pudieron
+# emparejar color y profundidad produjeron un hueco medido de 6,4 s; ocho
+# segundos conservan el corte seguro sin declarar caída una latencia normal.
+DETECTION_TIMEOUT_S = 8.0
 EXECUTION_TIMEOUT_S = 180.0
 SAFE_STAND_TIMEOUT_S = 3.0
 MINIMUM_BODY_HEIGHT_M = 0.60
@@ -413,7 +416,21 @@ class TableAlignment(Node):
             self.get_logger().warning(message)
         else:
             goal_handle.abort()
-            self.publish_status("fallo", error=message)
+            failure_fields = {"error": message}
+            if last_command is not None:
+                failure_fields.update(
+                    {
+                        "distance_error_m": round(
+                            last_command.distance_error_m,
+                            4,
+                        ),
+                        "yaw_error_deg": round(
+                            math.degrees(last_command.yaw_error_rad),
+                            2,
+                        ),
+                    }
+                )
+            self.publish_status("fallo", **failure_fields)
             self.get_logger().error(message)
         return result
 
@@ -489,8 +506,9 @@ def main():
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.publish_command(0.0, 0.0)
-        node.request_mobility("release", "nodo de alineación detenido")
+        if rclpy.ok():
+            node.publish_command(0.0, 0.0)
+            node.request_mobility("release", "nodo de alineación detenido")
         executor.shutdown()
         node.destroy_node()
         if rclpy.ok():

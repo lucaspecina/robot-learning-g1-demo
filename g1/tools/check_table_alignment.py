@@ -97,6 +97,7 @@ class AlignmentChecker(Node):
         if not self.wait_for_inputs():
             print("FALLA ALINEACIÓN: no llegaron posición y autoridad")
             return 1
+        start_pose = self.pose
         if not self.client.wait_for_server(timeout_sec=5.0):
             print("FALLA ALINEACIÓN: la Action DockRobot no está disponible")
             return 1
@@ -165,6 +166,15 @@ class AlignmentChecker(Node):
             f"inclinación máxima {math.degrees(self.maximum_tilt):.1f}°, "
             f"velocidad máxima {self.maximum_speed:.3f} m/s, "
             f"{self.samples} muestras"
+        )
+        displacement = math.hypot(
+            self.pose[0] - start_pose[0],
+            self.pose[1] - start_pose[1],
+        )
+        print(
+            f"base: inicio ({start_pose[0]:.3f}, {start_pose[1]:.3f}), "
+            f"final ({self.pose[0]:.3f}, {self.pose[1]:.3f}), "
+            f"recorrido neto {displacement:.3f} m"
         )
         print(
             f"visión: {status.get('detection_count', 'sin dato')} mediciones; "
