@@ -562,7 +562,8 @@
         <canvas id="map" width="480" height="430"></canvas>
         <div class="hint">
           Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
-          vigente. El mapa y la escena física comparten las mismas medidas.
+          vigente. Punto amarillo: última superficie 3D del objeto. El mapa y
+          la escena física comparten las mismas medidas.
         </div>
       </article>
     </section>
@@ -588,6 +589,7 @@
         <div class="technical-row"><span>Cámara</span><span id="camera-state">—</span></div>
         <div class="technical-row"><span>Detector local</span><span id="perception-state">—</span></div>
         <div class="technical-row"><span>Búsqueda puntual</span><span id="search-state">—</span></div>
+        <div class="technical-row"><span>Objeto 3D</span><span id="object-point-state">—</span></div>
         <div class="technical-row"><span>Red Jetson-servidor</span><span id="network-state">medición pendiente</span></div>
       </div>
     </details>
@@ -1020,6 +1022,19 @@
         context.lineTo(x,y+8);
         context.stroke();
       }
+      if(state.object_point){
+        const [x,y] = toScreen(
+          canvas,state.object_point.x,state.object_point.y);
+        context.beginPath();
+        context.arc(x,y,5,0,2*Math.PI);
+        context.fillStyle='#f4bd55';
+        context.fill();
+        context.strokeStyle='#fff0b3';
+        context.lineWidth=1;
+        context.stroke();
+        context.fillStyle='#f4d98b';
+        context.fillText('objeto medido',x+8,y-7);
+      }
       const [robotX,robotY] = toScreen(canvas,state.pose.x,state.pose.y);
       context.beginPath();
       context.arc(robotX,robotY,7,0,2*Math.PI);
@@ -1084,6 +1099,15 @@
           : search.state === 'failed'
           ? `falló: ${search.error}`
           : search.state || '—'
+      );
+      const objectPoint=state.object_point;
+      setText(
+        'object-point-state',
+        objectPoint
+          ? `(${objectPoint.x}, ${objectPoint.y}, ${objectPoint.z}) · ` +
+            `confianza ${objectPoint.confidence} · ${objectPoint.quality} · ` +
+            `hace ${objectPoint.age_s} s`
+          : 'todavía no medido'
       );
     }
 

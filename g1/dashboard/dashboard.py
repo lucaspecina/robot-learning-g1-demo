@@ -47,7 +47,7 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 
 PORT = 8080
@@ -91,6 +91,8 @@ state = {
         "dropped_frames": 0,
     },
     "search": {"state": "ready"},
+    "object_point": None,
+    "object_point_time": 0.0,
     "pose": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
     "real_speed": 0.0,
     "fallen": False,
@@ -191,6 +193,12 @@ class DashboardNode(Node):
             Detection2DArray,
             "/g1/open_vocabulary_detections",
             self.on_open_vocabulary_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection3DArray,
+            "/g1/object_detections_3d",
+            self.on_object_detections_3d,
             qos_profile_sensor_data,
         )
         self.create_subscription(
@@ -329,6 +337,33 @@ class DashboardNode(Node):
 
     def on_open_vocabulary_detections(self, message: Detection2DArray):
         self.on_object_detections(message, "Grounding DINO")
+
+    def on_object_detections_3d(self, message: Detection3DArray):
+        candidates = [
+            detection
+            for detection in message.detections
+            if detection.results
+            and detection.results[0].hypothesis.class_id
+            == "transport_object"
+        ]
+        if not candidates:
+            return
+        best = max(
+            candidates,
+            key=lambda detection: detection.results[0].hypothesis.score,
+        )
+        point = best.bbox.center.position
+        hypothesis = best.results[0].hypothesis
+        with lock:
+            state["object_point"] = {
+                "x": round(float(point.x), 3),
+                "y": round(float(point.y), 3),
+                "z": round(float(point.z), 3),
+                "confidence": round(float(hypothesis.score), 3),
+                "frame": message.header.frame_id,
+                "quality": "superficie visible",
+            }
+            state["object_point_time"] = time.time()
 
     def on_object_detections(
         self,
@@ -552,6 +587,7 @@ class Handler(BaseHTTPRequestHandler):
                         "analysis_jpeg",
                         "analysis_hold_until",
                         "model_input_jpeg",
+                        "object_point_time",
                     }
                 }
                 data["online"] = (
@@ -585,6 +621,14 @@ class Handler(BaseHTTPRequestHandler):
                     if state["model_input_time"]
                     else None
                 )
+                if state["object_point"] is not None:
+                    data["object_point"] = {
+                        **state["object_point"],
+                        "age_s": round(
+                            now - state["object_point_time"],
+                            1,
+                        ),
+                    }
                 payload = json.dumps(
                     data,
                     ensure_ascii=False,
