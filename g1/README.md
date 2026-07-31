@@ -35,7 +35,7 @@ hasta volver a pasar las pruebas físicas.
 | Locomoción (camina, gira) | funciona — conjunto NVIDIA AGILE verificado |
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
-| Carga en las manos | integrada dinámicamente; falta validar quietud y caminata en la VM |
+| Carga en las manos | 0,5 kg aprobados en tres caminatas y tres navegaciones; 1 kg excede el margen del hombro derecho |
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
 | LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
@@ -48,8 +48,9 @@ hasta volver a pasar las pruebas físicas.
 | Barrido visual activo | funciona — cinco vistas superpuestas, confirmación remota sólo ante candidato |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
 | Preaproximación a la mesa | funciona — calcula pose desde profundidad, navega y vuelve a confirmar |
-| Ejecutor de misión | integrado hasta localizar el objeto; se bloquea antes de la alineación fina |
-| Transporte sin agarre | `attach_payload` integrado; objeto visible y masa física, pendiente de validar en VM |
+| Alineación fina a la mesa | funciona — `DockRobot`, visión continua, 3 cm y 2°; un estancamiento azul exigió un reintento |
+| Ejecutor de misión | todos los pasos están conectados; falta repetir la misión integral y validarla visualmente |
+| Transporte sin agarre | `attach_payload` con 0,5 kg físicos y visibles, validado sin afirmar agarre |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
@@ -71,7 +72,8 @@ versión anterior quedaron fuera del alcance actual.
                  [ table_localizer ]        [ adapter ] [ go_to.py ]
                          |                             |
               /g1/table_detections_3d      /g1/cmd_vel/navigation
-                                                   |
+                         |                 /g1/cmd_vel/alignment
+                  [ align_with_table ]             |
                             [ stand_hold.py ] -> [ mobility_authority.py ]
                                                           |
                                                       /cmd_vel
@@ -91,6 +93,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
 | `/g1/navigate_to_pose` | Action NavigateToPose | objetivo, progreso, resultado y cancelación de navegación |
 | `/g1/spin` | Action Spin | giro relativo, progreso angular, resultado y cancelación |
+| `/g1/dock_to_table` | Action DockRobot | alineación fina, progreso, reintentos y resultado |
 | `/g1/navigation/goal` | PoseStamped | copia observable del objetivo para el tablero |
 | `/g1/goal` | PoseStamped | compatibilidad temporal con verificadores anteriores |
 | `/g1/nav_status` | String | relato temporal para verificadores anteriores |
@@ -107,7 +110,8 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/arm_pose` | String | el agente |
 | `/g1/payload_request` | String (JSON) | agente o verificador; agrega o retira carga |
 | `/g1/payload_status` | String (JSON) | robot; masa aplicada y puntos físicos releídos |
-| `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
+| `/g1/alignment_status` | String (JSON) | mediciones y fase de la alineación fina |
+| `/g1/cmd_vel/{stand,navigation,alignment,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
 | `/g1/mobility/status` | String (JSON) | el árbitro de movilidad |
 | `/cmd_vel` | Twist | sólo `mobility_authority.py` |
@@ -146,6 +150,8 @@ ejecución honestamente al llegar a ellas.
 | `navigation_core.py` | cálculo puro de movimiento y verificación de progreso |
 | `execution_core.py` | vigilancia común de plazo y pérdida de respuesta |
 | `skills/go_to.py` | servidor cancelable de navegación con contrato de Nav2 |
+| `skills/align_with_table.py` | corrección visual fina con contrato `DockRobot` |
+| `table_alignment_core.py` | control puro y tolerancias de alineación |
 | `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |
 | `stand_hold.py` | mantiene una pose durante una espera; no navega |
 | `skills/object_detector.py` | RT-DETR local con salida estándar de ROS 2 |
@@ -198,8 +204,12 @@ control visual fino. Nuestra primera prueba intentó confirmar la mesa a 0,9 m:
 una corrida quedó a 0,543 m y otras perdieron el mueble por debajo de la
 cámara. La pose gruesa quedó por eso a 2,2 m del punto de superficie medido.
 La validación integral la confirmó a 1,968 m, con 9,8 cm de error de
-navegación, confianza 0,94 y cuerpo a 0,737 m. Esta etapa no autoriza el
-agarre; `align_with_table` sigue separado y pendiente.
+navegación, confianza 0,94 y cuerpo a 0,737 m. Desde allí,
+`align_with_table` actualiza continuamente la mesa y corrige como máximo a
+0,15 m/s. Rojo terminó a 1,6 cm y 1,58°; azul a 0,2 cm y 0,25°. Una primera
+corrida azul se estancó y el reintento idéntico pasó, por lo que existe un
+único reintento observable. Alinearse habilita la prueba de carga, no afirma
+que las manos hayan agarrado.
 
 **Una caja y profundidad no son una pose de agarre.** El objeto simulado es
 un cilindro liso que RT-DETR reconoce de forma estable como `cup`, no como
@@ -274,14 +284,12 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Ejecutar la misión integral con `find_object`**, cuya detección y posición
-   3D ya pasaron por separado.
-2. **Implementar `align_with_table`**, el control visual fino posterior a la
-   preaproximación ya validada. Debe medir base, mesa y objeto continuamente;
-   no puede convertir una tolerancia gruesa en permiso para agarrar.
-3. **Agregar 0,5 kg con `attach_payload` y regresar** dentro de una misión.
-   Ese peso ya pasó tres caminatas y tres navegaciones; 1 kg movió la base,
-   pero el hombro derecho no sostuvo la pose dentro de tolerancia.
+1. **Ejecutar la misión integral**: `find_object`, alineación, 0,5 kg y regreso
+   ya pasaron por partes; falta observarlos y medirlos en una misma corrida.
+2. **Validar visualmente con Lucas** la separación final, el bulto entre las
+   manos y el regreso cargado. Los números no sustituyen esa inspección.
+3. **Medir la confiabilidad de la alineación**: una de tres aproximaciones
+   largas se estancó y pasó en el primer reintento idéntico.
 4. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
 5. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,

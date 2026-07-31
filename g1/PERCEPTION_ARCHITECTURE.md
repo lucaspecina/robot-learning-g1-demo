@@ -212,11 +212,11 @@ calcula una pose de espera que todavía deja el objetivo visible, navega hasta
 ella, vuelve a detectar y recién después entra en un lazo de control visual
 que actualiza el objetivo continuamente.
 
-Nuestra adaptación implementa sólo esa primera etapa. La profundidad entrega
-un punto de la parte visible de la mesa, no su centro ni su orientación
-completa. La base se coloca sobre la línea robot–punto a 2,2 m, queda mirando
-hacia él y exige una detección nueva antes de declarar éxito. Un máximo duro de
-dos intentos no puede ser eludido por una revisión del LLM.
+Nuestra adaptación implementa las dos etapas con contratos separados. La
+profundidad entrega un punto de la parte visible de la mesa, no su centro ni
+su orientación completa. La base primero se coloca sobre la línea
+robot–punto a 2,2 m y exige una detección nueva. Luego `DockRobot` sigue las
+mediciones locales y conserva 0,70 m desde esa superficie visible.
 
 La distancia no se copió de Nav2: se midió con esta cámara. A 0,9 m, una prueba
 terminó a 0,543 m y otras perdieron la mesa del cuadro. En la validación
@@ -226,12 +226,14 @@ integral, la nueva etapa:
 - volvió a ubicar la superficie a 1,968 m y confianza 0,94;
 - conservó 0,737 m de altura y terminó en `STAND`;
 - preparó los brazos con 0,0254 rad de error máximo;
-- se bloqueó honestamente antes de `align_with_table`, todavía pendiente.
+- la alineación roja terminó a 0,016 m y 1,58°;
+- la azul se estancó una vez y el reintento idéntico terminó a 0,002 m y
+  0,25°.
 
 Esto coincide con la separación oficial entre llegada gruesa y control visual
-refinado. No es el servidor Docking de Nav2 ni una alineación de agarre: el
-navegador actual sólo funciona en la habitación despejada y todavía no tiene
-mapa local de obstáculos.
+refinado. Usa la Action `DockRobot`, filtro 0,1, máximo 0,15 m/s y un único
+reintento medido. No es el servidor completo de Nav2 ni una alineación de
+agarre: el navegador actual todavía no tiene mapa local de obstáculos.
 
 ## Del objeto visible a una posición 3D: validado el 30 de julio de 2026
 

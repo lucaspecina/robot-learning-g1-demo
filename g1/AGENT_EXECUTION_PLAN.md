@@ -92,8 +92,11 @@ con 9,8 cm de error, volvió a detectar la mesa a 1,968 m con confianza 0,94,
 conservó 0,737 m de altura y preparó los brazos con 0,0254 rad de error
 máximo. En esa corrida el agente se bloqueó después porque
 `align_with_table` y `grasp_object` estaban declaradas como no disponibles.
-El plan actual mantiene pendiente la alineación y usa después
-`attach_payload`, una carga simulada explícita que no se presenta como agarre.
+`align_with_table` ya está disponible mediante `DockRobot`: roja terminó a
+1,6 cm y 1,58°, y azul a 0,2 cm y 0,25° después de un reintento. El plan usa
+después `attach_payload`, una carga simulada de 0,5 kg que pasó tres caminatas
+y tres navegaciones y no se presenta como agarre. Falta ejecutar y observar
+todos esos pasos juntos en una misión completa.
 
 Todavía no funciona:
 

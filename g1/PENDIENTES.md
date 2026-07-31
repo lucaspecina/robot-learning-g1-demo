@@ -289,8 +289,13 @@ ocho esferas de los pies contra MuJoCo.
   gruesa del control fino, siguiendo el patrón del servidor de docking de
   Nav2. Con `2,2 m` desde la superficie detectada, la corrida integral llegó
   con `9,8 cm` de error, reconfirmó la mesa a `1,968 m`, confianza `0,94`,
-  cuerpo a `0,737 m` y brazos listos con `0,0254 rad` de error. Falta
-  `align_with_table`; esa etapa deberá exigir los `2–3 cm` definidos arriba.
+  cuerpo a `0,737 m` y brazos listos con `0,0254 rad` de error.
+- **Alineación visual fina, implementada y medida**: expone la Action estándar
+  `DockRobot`, sigue mediciones locales nuevas y entrega siempre la movilidad
+  a `STAND`. Desde lejos, roja terminó a `1,6 cm` y `1,58°`; azul se estancó
+  una vez a `1,39 m` y el reintento idéntico terminó a `0,2 cm` y `0,25°`.
+  Nav2 admite tres reintentos; esta adaptación permite sólo uno porque es lo
+  medido. Falta la corrida integral y la confirmación visual de Lucas.
 - **Objeto sobre la mesa, localizado en 3D**: el cilindro liso de la escena se
   reconoce como `cup`, no como `bottle`. Con el umbral general sin cambios,
   seis cuadros positivos dieron `0,49–0,62` y cinco controles sin objeto
