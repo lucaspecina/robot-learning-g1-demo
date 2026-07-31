@@ -584,6 +584,7 @@
         <div class="technical-row"><span>Orden de velocidad</span><span id="velocity-command">—</span></div>
         <div class="technical-row"><span>Dueño de movilidad</span><span id="mobility-owner">—</span></div>
         <div class="technical-row"><span>Navegación</span><span id="navigation-state">—</span></div>
+        <div class="technical-row"><span>Alineación con mesa</span><span id="alignment-state">—</span></div>
         <div class="technical-row"><span>Objetivo</span><span id="navigation-goal">—</span></div>
         <div class="technical-row"><span>Brazos</span><span id="arm-state">—</span></div>
         <div class="technical-row"><span>Carga simulada</span><span id="payload-state">—</span></div>
@@ -1072,6 +1073,15 @@
         `${state.mobility.owner}:${state.mobility.requester} · ${state.mobility.transition_reason}`
       );
       setText('navigation-state',state.nav);
+      const alignment=state.alignment || {};
+      let alignmentText=alignment.state || 'inactivo';
+      if(alignment.distance_error_m != null){
+        alignmentText += ` · error ${alignment.distance_error_m} m`;
+      }
+      if(alignment.yaw_error_deg != null){
+        alignmentText += ` · ${alignment.yaw_error_deg}°`;
+      }
+      setText('alignment-state',alignmentText);
       setText(
         'navigation-goal',
         state.goal ? `(${state.goal.x}, ${state.goal.y})` : '—'

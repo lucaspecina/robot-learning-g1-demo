@@ -105,6 +105,7 @@ state = {
     },
     "goal": None,
     "nav": "-",
+    "alignment": {"state": "inactivo"},
     "arms": "reposo",
     "payload": {
         "state": "detached",
@@ -246,6 +247,12 @@ class DashboardNode(Node):
             10,
         )
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
+        self.create_subscription(
+            String,
+            "/g1/alignment_status",
+            self.on_alignment,
+            10,
+        )
         self.create_subscription(
             String,
             "/g1/mission_status",
@@ -465,6 +472,9 @@ class DashboardNode(Node):
 
     def on_mobility(self, message: String):
         self.update_json("mobility", message.data)
+
+    def on_alignment(self, message: String):
+        self.update_json("alignment", message.data)
 
     def on_goal(self, message: PoseStamped):
         with lock:

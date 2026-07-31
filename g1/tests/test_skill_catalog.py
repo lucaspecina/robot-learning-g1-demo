@@ -50,9 +50,9 @@ class SkillCatalogTest(unittest.TestCase):
             next(
                 step
                 for step in validated
-                if step["id"] == "align_with_table"
+            if step["id"] == "align_with_table"
             )["availability"],
-            "placeholder",
+            "ready",
         )
         self.assertEqual(
             next(

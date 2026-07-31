@@ -21,6 +21,7 @@ robot y conserva, por separado, tres tipos de evidencia:
 
   usa:     /g1/navigate_to_pose           tarea de navegación cancelable
            /g1/spin                       giro relativo cancelable
+           /g1/dock_to_table              alineación fina cancelable
 
   publica: /g1/arm_pose                   postura pedida a los brazos
            /g1/payload_request            pedido explícito de carga simulada
@@ -51,7 +52,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import NavigateToPose, Spin
+from nav2_msgs.action import DockRobot, NavigateToPose, Spin
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -193,6 +194,7 @@ class Agent(Node):
         self.arm_status = None
         self.payload_status = None
         self.search_status = None
+        self.alignment_status = None
         self.localized_tables = {}
         self.localized_objects = []
         self.mission_thread = None
@@ -214,6 +216,11 @@ class Agent(Node):
             self,
             Spin,
             "/g1/spin",
+        )
+        self.alignment_client = ActionClient(
+            self,
+            DockRobot,
+            "/g1/dock_to_table",
         )
         self.arms_pub = self.create_publisher(String, "/g1/arm_pose", 10)
         self.payload_pub = self.create_publisher(
@@ -298,6 +305,12 @@ class Agent(Node):
             String,
             "/g1/perception/search_status",
             self.on_search_status,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/alignment_status",
+            self.on_alignment_status,
             10,
         )
         self.create_subscription(
@@ -404,6 +417,12 @@ class Agent(Node):
     def on_search_status(self, message: String):
         try:
             self.search_status = json.loads(message.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_alignment_status(self, message: String):
+        try:
+            self.alignment_status = json.loads(message.data)
         except json.JSONDecodeError:
             pass
 
@@ -1007,13 +1026,7 @@ class Agent(Node):
         if skill == "find_object":
             return self.find_object()
         if skill == "align_with_table":
-            return blocked(
-                "falta la alineación visual fina de la base con la mesa",
-                blocker={
-                    "type": "missing_skill",
-                    "skill": "align_with_table",
-                },
-            )
+            return self.align_with_table(str(argument))
         if skill == "grasp_object":
             return blocked(
                 "el agarre todavía no está implementado; será una policy aparte"
@@ -1737,6 +1750,164 @@ class Agent(Node):
             f"quedó en preaproximación de {target} y volvió a confirmarla",
             measurements,
         )
+
+    def align_with_table(self, target: str) -> dict:
+        """Pide la corrección fina mediante la interfaz DockRobot de Nav2."""
+        table_point = self.mission_context.get("table_point")
+        if (
+            target not in ("red_table", "blue_table")
+            or not isinstance(table_point, dict)
+            or table_point.get("class_id") != target
+            or table_point.get("coordinate_frame", "map") != "map"
+        ):
+            return failed("no existe una medición válida de la mesa elegida")
+
+        server_wait_s = float(
+            os.environ.get("ALIGN_ACTION_SERVER_WAIT_S", "5")
+        )
+        if not self.alignment_client.wait_for_server(
+            timeout_sec=server_wait_s
+        ):
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                "el servidor local de alineación no está disponible" + suffix
+            )
+
+        request = DockRobot.Goal()
+        request.use_dock_id = False
+        request.dock_pose.header.stamp = self.get_clock().now().to_msg()
+        request.dock_pose.header.frame_id = "map"
+        request.dock_pose.pose.position.x = float(table_point["x"])
+        request.dock_pose.pose.position.y = float(table_point["y"])
+        request.dock_pose.pose.position.z = float(table_point.get("z", 0.0))
+        request.dock_pose.pose.orientation.w = 1.0
+        request.dock_type = target
+        request.navigate_to_staging_pose = False
+        request.max_staging_time = 0.0
+        self.alignment_status = None
+
+        watchdog = FeedbackWatchdog(
+            deadline_s=float(os.environ.get("ALIGN_TIMEOUT_S", "200")),
+            silence_timeout_s=float(
+                os.environ.get("ALIGN_FEEDBACK_TIMEOUT_S", "6")
+            ),
+        )
+        watchdog.start(time.monotonic())
+        measurements = {
+            "requested_table_x_m": round(float(table_point["x"]), 3),
+            "requested_table_y_m": round(float(table_point["y"]), 3),
+            "distance_tolerance_m": 0.03,
+            "yaw_tolerance_deg": 2.0,
+        }
+        feedback_names = {
+            DockRobot.Feedback.NAV_TO_STAGING_POSE: "preaproximación",
+            DockRobot.Feedback.INITIAL_PERCEPTION: "percepción_inicial",
+            DockRobot.Feedback.CONTROLLING: "corrigiendo",
+            DockRobot.Feedback.WAIT_FOR_CHARGE: "verificación_final",
+            DockRobot.Feedback.RETRY: "reintento",
+        }
+
+        def on_feedback(message):
+            feedback = message.feedback
+            watchdog.record_feedback(time.monotonic())
+            measurements["phase"] = feedback_names.get(
+                int(feedback.state),
+                f"estado_{int(feedback.state)}",
+            )
+            measurements["alignment_time_s"] = round(
+                self.duration_seconds(feedback.docking_time),
+                3,
+            )
+            measurements["retries"] = int(feedback.num_retries)
+            status = self.alignment_status or {}
+            for key in (
+                "distance_error_m",
+                "yaw_error_deg",
+                "linear_speed_mps",
+                "angular_speed_radps",
+                "detection_count",
+            ):
+                if key in status:
+                    measurements[key] = status[key]
+
+        try:
+            send_future = self.alignment_client.send_goal_async(
+                request,
+                feedback_callback=on_feedback,
+            )
+            if not self.wait_for_future(send_future, timeout_s=server_wait_s):
+                safe = self.wait_for_stand(timeout_s=3.0)
+                suffix = "" if safe else "; no se confirmó STAND"
+                return failed(
+                    "la alineación no confirmó si aceptó el objetivo" + suffix,
+                    measurements,
+                )
+            goal_handle = send_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"falló el envío de la alineación: {error}{suffix}",
+                measurements,
+            )
+
+        if goal_handle is None or not goal_handle.accepted:
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                "el controlador rechazó la alineación" + suffix,
+                measurements,
+            )
+
+        result_future = goal_handle.get_result_async()
+        while not result_future.done():
+            decision = watchdog.check(time.monotonic())
+            if decision is not None:
+                cancel_confirmed = self.cancel_navigation(goal_handle)
+                safe = self.wait_for_stand(timeout_s=3.0)
+                details = [decision.reason]
+                if not cancel_confirmed:
+                    details.append("no se confirmó la cancelación")
+                if not safe:
+                    details.append("no se confirmó STAND")
+                return failed("; ".join(details), measurements)
+            time.sleep(0.05)
+
+        try:
+            wrapped = result_future.result()
+        except Exception as error:  # noqa: BLE001
+            safe = self.wait_for_stand(timeout_s=3.0)
+            suffix = "" if safe else "; no se confirmó STAND"
+            return failed(
+                f"se perdió el resultado de alineación: {error}{suffix}",
+                measurements,
+            )
+
+        status = self.alignment_status or {}
+        for key in ("distance_error_m", "yaw_error_deg"):
+            if key in status:
+                measurements[key] = status[key]
+        safe = self.wait_for_stand(timeout_s=3.0)
+        if not safe:
+            return failed(
+                "la alineación terminó pero no devolvió la movilidad a STAND",
+                measurements,
+            )
+        if (
+            wrapped.status == GoalStatus.STATUS_SUCCEEDED
+            and wrapped.result.success
+        ):
+            return succeeded(
+                f"quedó alineado con {target} dentro de tolerancia",
+                measurements,
+            )
+
+        error_message = str(wrapped.result.error_msg).strip()
+        if not error_message:
+            error_message = "la alineación no alcanzó la tolerancia"
+        measurements["error_code"] = int(wrapped.result.error_code)
+        return failed(error_message, measurements)
 
     def wait_for_local_detection_updates(
         self,

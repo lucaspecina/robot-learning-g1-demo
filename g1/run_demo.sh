@@ -59,7 +59,7 @@ launch() {   # nombre archivo_log script
 
 stop_layers() {
     sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
+        "mobility_authority.py|stand_hold.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
         2>/dev/null
 }
 
@@ -69,6 +69,7 @@ start_layers() {
     launch "autoridad"            mobility.log          mobility_authority.py
     launch "quieto"               stand.log             stand_hold.py
     launch "navegacion"           goto.log              skills/go_to.py
+    launch "alineacion fina"      alignment.log         skills/align_with_table.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
@@ -340,7 +341,7 @@ status)
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
-    for p in mobility_authority stand_hold go_to object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
+    for p in mobility_authority stand_hold go_to align_with_table object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
         if sudo docker exec jetson \
             pgrep -f "^python3 .*/$p.py$" >/dev/null 2>&1; then
             echo "  $p: corriendo"

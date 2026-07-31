@@ -211,11 +211,11 @@ SKILL_CATALOG = [
         "name": "align_with_table",
         "description": (
             "Ajusta finamente la base usando nuevas mediciones de la mesa y "
-            "del objeto hasta quedar dentro de la tolerancia de agarre. El "
-            "contrato existe, pero el control visual todavía no está "
-            "implementado."
+            "del objeto hasta quedar dentro de 3 cm y 2 grados, casi inmóvil. "
+            "Usa la Action DockRobot y devuelve el movimiento a STAND ante "
+            "éxito, cancelación o falla."
         ),
-        "availability": "placeholder",
+        "availability": "ready",
         "variants": [
             {
                 "argument": "$selected_table",

@@ -15,6 +15,7 @@ class MobilitySource(str, Enum):
 
     STAND = "stand"
     NAVIGATION = "navigation"
+    ALIGNMENT = "alignment"
     MANUAL = "manual"
     TEST = "test"
 
@@ -163,4 +164,3 @@ class MobilityAuthority:
         self.lease_renewed_at = float("inf")
         self.transition_reason = reason
         self.transition_count += 1
-

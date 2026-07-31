@@ -5,6 +5,7 @@ Entradas separadas:
 
   /g1/cmd_vel/stand
   /g1/cmd_vel/navigation
+  /g1/cmd_vel/alignment
   /g1/cmd_vel/manual
   /g1/cmd_vel/test
 
