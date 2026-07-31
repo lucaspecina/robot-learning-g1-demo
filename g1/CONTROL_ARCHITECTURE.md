@@ -154,6 +154,12 @@ sujeto, se reposiciona explícitamente y se reintenta.
 Son requisitos iniciales, no números sagrados. Cada uno se reemplaza por un
 valor medido cuando conozcamos el margen real de percepción y agarre.
 
+El verificador de llegada usa la opción con memoria de Nav2 para terminar la
+orientación después de entrar en la distancia pedida, pero sin margen extra de
+posición. El margen anterior de 10 cm permitió una llegada a `home` de 18,8 cm
+y fue retirado: el estado recordado se borra apenas el robot vuelve a superar
+los 10 cm.
+
 Para considerar estable una espera:
 
 - medir al menos 30 s de tiempo simulado después del transitorio inicial;

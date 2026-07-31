@@ -128,7 +128,10 @@ class NavigationController:
     def __init__(
         self,
         tolerance_m: float = 0.10,
-        position_latch_buffer_m: float = 0.10,
+        # El valor oficial por defecto de Nav2 es cero. Los 10 cm anteriores
+        # permitieron que una vuelta a home terminara a 18,8 cm mientras el
+        # bípedo giraba; la histéresis no puede duplicar el contrato declarado.
+        position_latch_buffer_m: float = 0.0,
         final_yaw_tolerance_rad: float = math.radians(5.0),
         heading_tolerance_rad: float = 0.25,
         linear_velocity: float = 0.30,

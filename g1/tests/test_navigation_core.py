@@ -51,6 +51,21 @@ class NavigationControllerTest(unittest.TestCase):
         )
         self.assertTrue(done.goal_reached)
 
+    def test_reacquires_position_if_the_final_turn_drifts_outside_tolerance(self):
+        goal = NavigationGoal(0.0, 0.0, math.pi / 2.0)
+        final_turn = self.controller.step(
+            NavigationPose(0.05, 0.0, 0.0),
+            goal,
+        )
+        drifted = self.controller.step(
+            NavigationPose(0.15, 0.0, math.pi / 2.0),
+            goal,
+        )
+
+        self.assertEqual(final_turn.phase, "final_turn")
+        self.assertFalse(drifted.goal_reached)
+        self.assertGreater(drifted.distance_remaining, 0.10)
+
 
 class ProgressCheckerTest(unittest.TestCase):
     def setUp(self):
