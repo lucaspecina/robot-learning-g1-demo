@@ -4,6 +4,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 import unittest
 
+from dashboard_state import measured_arm_label, mission_scope_changed
+
 
 DASHBOARD_HTML = (
     Path(__file__).resolve().parents[1] / "dashboard" / "index.html"
@@ -49,6 +51,36 @@ class DashboardContractTest(unittest.TestCase):
     def test_live_view_explains_timestamp_matched_boxes(self):
         self.assertIn("nunca se pegan cajas viejas", DASHBOARD_HTML)
         self.assertIn("state.live_boxes_active", DASHBOARD_HTML)
+
+    def test_new_mission_has_its_own_history(self):
+        self.assertTrue(
+            mission_scope_changed(
+                {"mission_id": "mission_a"},
+                {"mission_id": "mission_b"},
+            )
+        )
+        self.assertTrue(
+            mission_scope_changed(
+                {"mission_id": "mission_a"},
+                {"mission_id": None, "state": "idle"},
+            )
+        )
+        self.assertFalse(
+            mission_scope_changed(
+                {"mission_id": "mission_a"},
+                {"mission_id": "mission_a"},
+            )
+        )
+
+    def test_arm_label_comes_from_measured_status(self):
+        self.assertEqual(
+            measured_arm_label({"pose": "transporte", "reached": True}),
+            "transporte · confirmada",
+        )
+        self.assertEqual(
+            measured_arm_label({"pose": "listo", "reached": False}),
+            "listo · moviéndose",
+        )
 
 
 if __name__ == "__main__":

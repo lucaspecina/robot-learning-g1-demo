@@ -365,13 +365,19 @@ ocho esferas de los pies contra MuJoCo.
 - **Transporte con carga separado del agarre**: `attach_payload` agrega en
   caliente una masa absoluta y verificable entre ambas muñecas y muestra un
   bulto sin masa adicional. La misión ya lo ejecutó después de
-  `align_with_table`, adoptó la pose de transporte y regresó a `home`; todavía
-  falta que Lucas confirme visualmente la posición del bulto. No
+  `align_with_table`, adoptó la pose de transporte y regresó a `home`. La
+  revisión visual posterior **rechazó** esa pose: el bulto aparece sobre la
+  zona de la pelvis y los brazos no representan un transporte creíble. No
   valida contacto, dedos ni retención del objeto. La medición aprobó `0,5 kg`:
   tres caminatas frenaron en `0–3 cm`
   y tres navegaciones llegaron a `9–10 cm`. Con `1 kg` las piernas pasaron,
   pero el hombro derecho quedó a `1,9°` del objetivo contra `1,7°` permitidos;
   por eso la misión queda en `0,5 kg` y no se sube a `2 kg`.
+- **Tablero entre misiones, corregido localmente**: el proceso conservaba la
+  historia y los eventos del modelo aunque el agente se reiniciara. También
+  mostraba la última orden de brazos en vez de la pose medida. La corrección
+  separa por `mission_id`, limpia los datos al volver a `idle` y usa
+  `/g1/arm_status`. Falta desplegarla y comprobarla en el navegador.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso

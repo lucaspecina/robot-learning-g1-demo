@@ -104,6 +104,15 @@ ese margen, el verificador ida/regreso con la misma carga volvió a `8,3 cm`,
 `4,5°` y `0,764 m` de altura. La inspección visual completa de Lucas sigue
 siendo obligatoria antes de cerrar la demo.
 
+La inspección visual del 31-jul rechazó la postura aunque las articulaciones
+llegaron al objetivo numérico: el bulto quedó superpuesto con la zona de la
+pelvis y los brazos no parecían sostener un objeto transportable. Esto no
+invalida la medición de locomoción con masa repartida en las muñecas, pero sí
+invalida llamar “aprobada” a la pose de transporte o a su representación. Los
+ángulos son una adaptación nuestra, no una pose oficial de NVIDIA. Antes de
+otra misión integral se probará la nueva pose con el robot congelado, se
+medirá la posición de ambas muñecas y Lucas deberá aprobarla visualmente.
+
 El banco aún publica `/g1/reset` sin confirmación correlacionada. Una de tres
 navegaciones comenzó a `32 cm` del origen esperado, aunque el objetivo relativo
 y la llegada fueron válidos. Antes de usar el reinicio para comparar posiciones

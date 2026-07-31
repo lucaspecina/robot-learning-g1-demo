@@ -26,6 +26,10 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 from scene_layout import DASHBOARD_SCENE  # noqa: E402
+from dashboard_state import (  # noqa: E402
+    measured_arm_label,
+    mission_scope_changed,
+)
 from visual_evidence import (  # noqa: E402
     MODEL_INPUT_TOPIC,
     image_ref,
@@ -113,7 +117,7 @@ state = {
     "goal": None,
     "nav": "-",
     "alignment": {"state": "inactivo"},
-    "arms": "reposo",
+    "arms": "reposo · esperando medición",
     "payload": {
         "state": "detached",
         "attached": False,
@@ -278,7 +282,12 @@ class DashboardNode(Node):
             self.on_model_event,
             MODEL_EVENT_QOS,
         )
-        self.create_subscription(String, "/g1/arm_pose", self.on_arms, 10)
+        self.create_subscription(
+            String,
+            "/g1/arm_status",
+            self.on_arm_status,
+            10,
+        )
         self.create_subscription(
             String,
             "/g1/payload_status",
@@ -502,9 +511,13 @@ class DashboardNode(Node):
             if message.data in ("llegue", "cancelado"):
                 state["goal"] = None
 
-    def on_arms(self, message: String):
+    def on_arm_status(self, message: String):
+        try:
+            status = json.loads(message.data)
+        except json.JSONDecodeError:
+            return
         with lock:
-            state["arms"] = message.data
+            state["arms"] = measured_arm_label(status)
 
     def on_payload(self, message: String):
         self.update_json("payload", message.data)
@@ -538,6 +551,21 @@ class DashboardNode(Node):
         ):
             return
         with lock:
+            if mission_scope_changed(state["mission_state"], mission_state):
+                # Una misión nueva no puede heredar explicaciones, decisiones
+                # ni imágenes del modelo que pertenecen a la anterior.
+                state["mission_events"].clear()
+                state["model_events"].clear()
+                state["model_input_jpeg"] = None
+                state["model_input_time"] = 0.0
+                state["model_input_event_id"] = None
+                state["goal"] = None
+                state["nav"] = "-"
+                state["alignment"] = {"state": "inactivo"}
+                state["search"] = {"state": "ready"}
+                state["object_point"] = None
+                state["object_point_time"] = 0.0
+                self.model_input_cache.clear()
             state["mission_state"] = mission_state
 
     def on_model_event(self, message: String):

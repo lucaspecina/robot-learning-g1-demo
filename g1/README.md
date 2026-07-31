@@ -35,7 +35,7 @@ hasta volver a pasar las pruebas físicas.
 | Locomoción (camina, gira) | funciona — conjunto NVIDIA AGILE verificado |
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
-| Carga en las manos | 0,5 kg aprobados en tres caminatas y tres navegaciones; 1 kg excede el margen del hombro derecho |
+| Carga en las muñecas | 0,5 kg estables en tres caminatas y tres navegaciones; la pose y el bulto fueron rechazados visualmente |
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
 | LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
@@ -50,7 +50,7 @@ hasta volver a pasar las pruebas físicas.
 | Preaproximación a la mesa | funciona — calcula pose desde profundidad, navega y vuelve a confirmar |
 | Alineación fina a la mesa | funciona — `DockRobot`, visión continua, 3 cm y 2°; un estancamiento azul exigió un reintento |
 | Ejecutor de misión | todos los pasos están conectados; falta repetir la misión integral y validarla visualmente |
-| Transporte sin agarre | `attach_payload` con 0,5 kg físicos y visibles, validado sin afirmar agarre |
+| Transporte sin agarre | la masa de 0,5 kg es estable; falta corregir y aprobar visualmente la pose y el bulto |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
