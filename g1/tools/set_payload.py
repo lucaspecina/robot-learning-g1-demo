@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Agrega o retira carga y exige confirmación de la masa física."""
 import json
+from pathlib import Path
 import sys
 import time
 import uuid
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
 
 import rclpy
 from rclpy.node import Node
