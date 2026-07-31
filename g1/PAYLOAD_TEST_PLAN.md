@@ -76,6 +76,31 @@ El orden no se salta:
 Cada prueba se repite tres veces. Se guardan el caso medio y el peor, no sólo
 el promedio.
 
+## Resultado medido del 31-jul-2026
+
+La masa se releyó en las dos muñecas antes de cada corrida.
+
+- Con `0,5 kg`, tres caminatas avanzaron `1,77–2,08 m`, se desviaron
+  `12–16 cm` y frenaron en `0–3 cm`, sin caídas. Tres navegaciones relativas
+  terminaron a `9–10 cm` del objetivo.
+- Con `1,0 kg`, tres caminatas avanzaron `2,11–2,19 m`, se desviaron
+  `10–17 cm` y frenaron en `1–2 cm`, sin caídas. Una navegación terminó a
+  `9 cm` del objetivo.
+- Sin embargo, con `1,0 kg` el hombro derecho sostuvo `-12,5°` frente a
+  `-14,3°` pedidos: `1,9°` de error contra `1,7°` permitidos. El fallo se
+  mantuvo durante 40 s y no se relajó la tolerancia.
+
+Por eso la misión usa `0,5 kg`, que coincide con el objeto de la escena y
+aprobó el sistema completo. Un kilogramo queda como límite de locomoción
+prometedor, pero no como carga aprobada de cuerpo y brazos. No se continúa a
+`2 kg` hasta mejorar la postura o el controlador de brazos con una métrica
+declarada.
+
+El banco aún publica `/g1/reset` sin confirmación correlacionada. Una de tres
+navegaciones comenzó a `32 cm` del origen esperado, aunque el objetivo relativo
+y la llegada fueron válidos. Antes de usar el reinicio para comparar posiciones
+absolutas se agregará una respuesta explícita del robot.
+
 ## Mediciones
 
 - caídas;

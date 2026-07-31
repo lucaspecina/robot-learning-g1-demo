@@ -95,8 +95,8 @@ def build_demo_plan() -> list[dict]:
         {
             "id": "attach_payload",
             "skill": "attach_payload",
-            "argument": 1.0,
-            "label": "Agregar 1 kg como carga simulada",
+            "argument": 0.5,
+            "label": "Agregar 0,5 kg como carga simulada",
         },
         {
             "id": "transport_pose",

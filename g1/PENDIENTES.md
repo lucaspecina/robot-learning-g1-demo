@@ -302,8 +302,12 @@ ocho esferas de los pies contra MuJoCo.
 - **Transporte con carga separado del agarre**: `attach_payload` agrega en
   caliente una masa absoluta y verificable entre ambas muñecas y muestra un
   bulto sin masa adicional. La misión lo usará después de `align_with_table`;
-  todavía falta probar en Isaac que aparezca bien y ejecutar la escalera de
-  0,5 kg y 1 kg. No valida contacto, dedos ni retención del objeto.
+  todavía falta que Lucas confirme visualmente la posición del bulto. No
+  valida contacto, dedos ni retención del objeto. La medición aprobó `0,5 kg`:
+  tres caminatas frenaron en `0–3 cm`
+  y tres navegaciones llegaron a `9–10 cm`. Con `1 kg` las piernas pasaron,
+  pero el hombro derecho quedó a `1,9°` del objetivo contra `1,7°` permitidos;
+  por eso la misión queda en `0,5 kg` y no se sube a `2 kg`.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso

@@ -241,9 +241,10 @@ SKILL_CATALOG = [
         "availability": "ready",
         "variants": [
             {
-                "argument": 1.0,
+                "argument": 0.5,
                 "argument_description": (
-                    "Carga inicial de un kilogramo, confirmada por PhysX."
+                    "Carga de medio kilogramo, confirmada por PhysX y por "
+                    "la estabilidad medida de los brazos."
                 ),
                 "preconditions": [
                     "at_selected_table",

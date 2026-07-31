@@ -279,8 +279,9 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 2. **Implementar `align_with_table`**, el control visual fino posterior a la
    preaproximación ya validada. Debe medir base, mesa y objeto continuamente;
    no puede convertir una tolerancia gruesa en permiso para agarrar.
-3. **Agregar 0,5 kg con `attach_payload` y regresar** dentro de una misión;
-   si pasa quietud y caminata, repetir con 1 kg.
+3. **Agregar 0,5 kg con `attach_payload` y regresar** dentro de una misión.
+   Ese peso ya pasó tres caminatas y tres navegaciones; 1 kg movió la base,
+   pero el hombro derecho no sostuvo la pose dentro de tolerancia.
 4. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
 5. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
