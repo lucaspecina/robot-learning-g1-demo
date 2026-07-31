@@ -6,9 +6,11 @@ y locomocion — igual que el robot real es una unidad. Su interfaz con el resto
 del sistema es la misma que tendra el robot fisico:
 
   recibe:  /cmd_vel          (geometry_msgs/Twist — a que velocidad ir)
+           /g1/payload_request (std_msgs/String — agregar o retirar carga)
   publica: /g1/odom          (nav_msgs/Odometry — donde esta el cuerpo)
            /g1/joint_states  (sensor_msgs/JointState — estado del cuerpo completo)
            /g1/arm_status    (std_msgs/String — orden y medición de los brazos)
+           /g1/payload_status (std_msgs/String — masa física verificada)
 
 Por que fisica y locomocion van juntas: un bipedo necesita que la decision de
 la policy y el paso de fisica esten sincronizados. Separarlos en procesos
@@ -186,6 +188,7 @@ enable_extension("isaacsim.ros2.bridge")
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
+from pxr import Gf, UsdGeom
 
 import rclpy
 from rclpy.node import Node
@@ -210,6 +213,116 @@ from locomotion import (  # noqa: E402
     WbcAgileLocomotion,
     gravity_in_body_frame,
 )
+from payload_core import (  # noqa: E402
+    parse_payload_request,
+    payload_mass_values,
+    select_payload_body_indices,
+)
+
+
+class PayloadMassController:
+    """Cambia masa real en dos muñecas sin acumular órdenes repetidas."""
+
+    def __init__(self, robot):
+        self.robot = robot
+        self.body_indices = select_payload_body_indices(robot.body_names)
+        self.body_names = [
+            robot.body_names[index]
+            for index in self.body_indices
+        ]
+        self.baseline_masses = (
+            robot.root_physx_view.get_masses()[0].detach().clone()
+        )
+        self.current_mass_kg = 0.0
+
+    def set_mass(self, mass_kg: float) -> dict:
+        target_values = payload_mass_values(
+            self.baseline_masses.cpu().tolist(),
+            self.body_indices,
+            mass_kg,
+        )
+        masses = self.robot.root_physx_view.get_masses()
+        masses[0] = torch.tensor(
+            target_values,
+            dtype=masses.dtype,
+            device=masses.device,
+        )
+        self.robot.root_physx_view.set_masses(masses, torch.arange(1))
+        verified = self.robot.root_physx_view.get_masses()[0]
+        baseline_total = float(
+            self.baseline_masses[self.body_indices].sum().item()
+        )
+        final_total = float(verified[self.body_indices].sum().item())
+        applied_mass_kg = final_total - baseline_total
+        if abs(applied_mass_kg - mass_kg) > 1e-4:
+            raise RuntimeError(
+                f"se pidieron {mass_kg:.3f} kg pero Isaac aplicó "
+                f"{applied_mass_kg:.3f} kg"
+            )
+        self.current_mass_kg = float(mass_kg)
+        return {
+            "state": "attached" if mass_kg > 0.0 else "detached",
+            "attached": mass_kg > 0.0,
+            "requested_mass_kg": round(float(mass_kg), 3),
+            "applied_mass_kg": round(applied_mass_kg, 3),
+            "mass_per_point_kg": round(float(mass_kg) / 2.0, 3),
+            "attachment_points": self.body_names,
+            "physical_model": "mass_split_between_wrists",
+            "grasp_validated": False,
+        }
+
+
+class PayloadVisual:
+    """Muestra el bulto entre las muñecas sin duplicar su masa física."""
+
+    PRIM_PATH = "/World/carried_payload_visual"
+
+    @classmethod
+    def spawn(cls):
+        cfg = sim_utils.CuboidCfg(
+            size=(0.20, 0.14, 0.14),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.95, 0.58, 0.10),
+            ),
+        )
+        cfg.func(cls.PRIM_PATH, cfg, translation=(0.0, 0.0, -10.0))
+        return cls()
+
+    def __init__(self):
+        import omni.usd
+
+        prim = omni.usd.get_context().get_stage().GetPrimAtPath(self.PRIM_PATH)
+        if not prim.IsValid():
+            raise RuntimeError("no se pudo crear el objeto visual transportado")
+        self.imageable = UsdGeom.Imageable(prim)
+        xformable = UsdGeom.Xformable(prim)
+        self.translation_op = next(
+            (
+                operation
+                for operation in xformable.GetOrderedXformOps()
+                if operation.GetOpType() == UsdGeom.XformOp.TypeTranslate
+            ),
+            None,
+        )
+        if self.translation_op is None:
+            self.translation_op = xformable.AddTranslateOp()
+        self.attached = False
+        self.imageable.MakeInvisible()
+
+    def set_attached(self, attached: bool):
+        self.attached = bool(attached)
+        if self.attached:
+            self.imageable.MakeVisible()
+        else:
+            self.imageable.MakeInvisible()
+
+    def update(self, wrist_positions):
+        if not self.attached:
+            return
+        midpoint = wrist_positions.mean(dim=0).detach().cpu().numpy()
+        self.translation_op.Set(
+            Gf.Vec3d(float(midpoint[0]), float(midpoint[1]), float(midpoint[2]))
+        )
 
 
 def euler_from_quaternion(quaternion):
@@ -408,6 +521,7 @@ class G1RobotNode(Node):
         self.last_cmd_time = 0.0
 
         self.arm_pose_request = None   # lo lee el lazo principal
+        self.payload_request = None    # la física sólo cambia en el lazo principal
         self.reset_request = False     # idem
 
         # El robot nace CONGELADO: cargado, de pie y quieto, sin que la policy
@@ -424,8 +538,17 @@ class G1RobotNode(Node):
         self.pub_robot_status = self.create_publisher(
             RosString, "/g1/robot_status", 10
         )
+        self.pub_payload_status = self.create_publisher(
+            RosString, "/g1/payload_status", 10
+        )
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)
+        self.create_subscription(
+            RosString,
+            "/g1/payload_request",
+            self.on_payload_request,
+            10,
+        )
         self.create_subscription(RosString, "/g1/reset", self.on_reset, 10)
         self.create_subscription(RosString, "/g1/control", self.on_control, 10)
 
@@ -436,14 +559,41 @@ class G1RobotNode(Node):
             self.frozen = False
         elif order == "freeze":
             self.frozen = True
+            self.payload_request = {
+                "request_id": "robot_freeze",
+                "command": "detach",
+                "mass_kg": 0.0,
+            }
 
     def on_reset(self, msg: RosString):
         """Pide devolver el robot al punto de partida."""
         self.reset_request = True
+        self.payload_request = {
+            "request_id": "robot_reset",
+            "command": "detach",
+            "mass_kg": 0.0,
+        }
 
     def on_arm_pose(self, msg: RosString):
         """Pide una pose de brazos por nombre: reposo | listo | transporte."""
         self.arm_pose_request = msg.data.strip()
+
+    def on_payload_request(self, msg: RosString):
+        """Valida la orden aquí; aplicar masa dentro del callback sería asíncrono."""
+        try:
+            self.payload_request = parse_payload_request(msg.data)
+        except ValueError as error:
+            self.publish_payload_status({
+                "state": "failed",
+                "attached": False,
+                "error": str(error),
+                "grasp_validated": False,
+            })
+
+    def publish_payload_status(self, status: dict):
+        self.pub_payload_status.publish(
+            RosString(data=json.dumps(status, ensure_ascii=False))
+        )
 
     def on_cmd_vel(self, msg: Twist):
         self.command = np.array([
@@ -621,6 +771,7 @@ def main():
         build_demo_scene()
 
     robot = Articulation(robot_cfg)
+    payload_visual = PayloadVisual.spawn()
 
     # Los ojos: se crean con la escena, antes del reset.
     camera = None
@@ -762,44 +913,33 @@ def main():
     else:
         arm_ids, arms = None, None
 
-    # --- carga en las manos (para medir cuanto tolera la locomocion) ---
-    if args_cli.payload_kg > 0 and tiene_brazos:
-        hand_ids = [
-            index
-            for index, name in enumerate(robot.body_names)
-            if "rubber_hand" in name or "wrist_yaw_link" in name
-        ]
-        if len(hand_ids) != 2:
-            raise RuntimeError(
-                "la prueba de carga esperaba dos puntos físicos de mano o muñeca y encontró "
-                f"{len(hand_ids)}; se cancela para no fingir que aplicó el peso"
-            )
-        masses = robot.root_physx_view.get_masses()
-        initial_hand_mass = float(masses[0, hand_ids].sum())
-        extra_per_hand = args_cli.payload_kg / len(hand_ids)
-        for hand_id in hand_ids:
-            masses[0, hand_id] += extra_per_hand
-        robot.root_physx_view.set_masses(masses, torch.arange(1))
-        verified_masses = robot.root_physx_view.get_masses()
-        final_hand_mass = float(verified_masses[0, hand_ids].sum())
-        applied_payload = final_hand_mass - initial_hand_mass
-        if abs(applied_payload - args_cli.payload_kg) > 1e-4:
-            raise RuntimeError(
-                f"se pidieron {args_cli.payload_kg:.3f} kg pero Isaac aplicó "
-                f"{applied_payload:.3f} kg"
-            )
-        hand_names = [robot.body_names[index] for index in hand_ids]
+    # La masa se aplica a las dos muñecas porque este cuerpo oficial desactiva
+    # los dedos. El bulto visible es sólo una representación: separar ambos
+    # modelos evita contar su peso dos veces y deja explícito que no hay agarre.
+    payload_controller = None
+    if tiene_brazos:
+        payload_controller = PayloadMassController(robot)
+        initial_payload_status = payload_controller.set_mass(args_cli.payload_kg)
+        payload_visual.set_attached(args_cli.payload_kg > 0.0)
         print(
-            f"[robot] carga verificada: {applied_payload:.2f} kg en "
-            f"{hand_names}, {extra_per_hand:.2f} kg por mano "
-            f"(masa conjunta {initial_hand_mass:.2f} -> {final_hand_mass:.2f} kg)",
+            f"[robot] carga inicial verificada: "
+            f"{initial_payload_status['applied_mass_kg']:.2f} kg en "
+            f"{initial_payload_status['attachment_points']}",
             flush=True,
         )
+    elif args_cli.payload_kg > 0.0:
+        raise RuntimeError("no se puede aplicar carga a un cuerpo sin brazos")
 
     rclpy.init()
     # joint_states representa al robot completo. Publicar sólo las piernas
     # ocultaba si una orden de brazos se había ejecutado realmente.
     node = G1RobotNode(cfg, robot.joint_names)
+    if payload_controller is not None:
+        node.publish_payload_status({
+            "request_id": "startup",
+            **initial_payload_status,
+            "visual_object": args_cli.payload_kg > 0.0,
+        })
     cam_pub = CameraPublisher(node, camera) if camera is not None else None
     if cam_pub is not None:
         print("[robot] camara de cabeza publicando en /g1/head_cam/image", flush=True)
@@ -848,6 +988,44 @@ def main():
         except ValueError as error:
             print(f"\n[robot] brazos: {error}", flush=True)
 
+    def consume_payload_request():
+        """Aplica y relee la masa dentro del mismo lazo que avanza PhysX."""
+        request = node.payload_request
+        if request is None:
+            return
+        node.payload_request = None
+        if payload_controller is None:
+            node.publish_payload_status({
+                "request_id": request["request_id"],
+                "state": "failed",
+                "attached": False,
+                "error": "el cuerpo activo no tiene dos puntos de carga",
+                "grasp_validated": False,
+            })
+            return
+        try:
+            status = payload_controller.set_mass(request["mass_kg"])
+            payload_visual.set_attached(status["attached"])
+            status.update({
+                "request_id": request["request_id"],
+                "visual_object": status["attached"],
+            })
+            node.publish_payload_status(status)
+            print(
+                f"\n[robot] carga -> {status['state']}: "
+                f"{status['applied_mass_kg']:.2f} kg verificados en "
+                f"{status['attachment_points']}",
+                flush=True,
+            )
+        except (RuntimeError, ValueError) as error:
+            node.publish_payload_status({
+                "request_id": request["request_id"],
+                "state": "failed",
+                "attached": payload_controller.current_mass_kg > 0.0,
+                "error": str(error),
+                "grasp_validated": False,
+            })
+
     while simulation_app.is_running():
         # --- congelado: clavado en el punto de partida, la policy no toca ---
         # La fisica sigue corriendo (para dibujar y para la camara), pero en
@@ -857,6 +1035,12 @@ def main():
             if was_frozen is not True:
                 if arms is not None:
                     arms.reset()
+                if payload_controller is not None:
+                    node.payload_request = {
+                        "request_id": "robot_freeze",
+                        "command": "detach",
+                        "mass_kg": 0.0,
+                    }
                 print("\n[robot] CONGELADO en el punto de partida. "
                       "Soltar con: run_demo.sh start", flush=True)
                 was_frozen = True
@@ -865,6 +1049,8 @@ def main():
                 # determinista, sin confundirla con una prueba de estabilidad.
                 consume_arm_pose_request()
                 arms.compute(control_dt)
+            if step % steps_per_control == 0:
+                consume_payload_request()
             robot.write_root_pose_to_sim(home_root_state[:, :7])
             robot.write_root_velocity_to_sim(
                 torch.zeros_like(home_root_state[:, 7:]))
@@ -883,6 +1069,10 @@ def main():
             robot.write_data_to_sim()
             sim.step(render=(step % render_every == 0))
             robot.update(physics_dt)
+            if payload_controller is not None:
+                payload_visual.update(
+                    robot.data.body_pos_w[0, payload_controller.body_indices]
+                )
             step += 1
             if camera is not None:
                 camera.update(physics_dt)
@@ -984,6 +1174,7 @@ def main():
                 controller.reset()
                 if arms is not None:
                     arms.reset()
+                consume_payload_request()
                 print("\n[robot] reiniciado en el punto de partida", flush=True)
 
             # Los brazos, en paralelo: su propio controlador, sus propias
@@ -993,6 +1184,7 @@ def main():
                 arm_target = torch.tensor(arms.compute(control_dt), dtype=torch.float32,
                                           device=args_cli.device).unsqueeze(0)
                 robot.set_joint_position_target(arm_target, joint_ids=arm_ids)
+            consume_payload_request()
 
         # --- avanzar la fisica ---
         # render=False en la mayoria de los pasos: dibujar la escena cuesta
@@ -1001,6 +1193,10 @@ def main():
         robot.write_data_to_sim()
         sim.step(render=(step % render_every == 0))
         robot.update(physics_dt)
+        if payload_controller is not None:
+            payload_visual.update(
+                robot.data.body_pos_w[0, payload_controller.body_indices]
+            )
         step += 1
 
         # --- publicar estado y atender ROS (al ritmo del control) ---

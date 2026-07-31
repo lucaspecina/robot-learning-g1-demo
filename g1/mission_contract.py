@@ -93,10 +93,10 @@ def build_demo_plan() -> list[dict]:
             "label": "Alinearse con precisión para agarrar",
         },
         {
-            "id": "grasp_object",
-            "skill": "grasp_object",
-            "argument": None,
-            "label": "Agarrar el objeto",
+            "id": "attach_payload",
+            "skill": "attach_payload",
+            "argument": 1.0,
+            "label": "Agregar 1 kg como carga simulada",
         },
         {
             "id": "transport_pose",

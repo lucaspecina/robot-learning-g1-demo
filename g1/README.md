@@ -35,7 +35,7 @@ hasta volver a pasar las pruebas físicas.
 | Locomoción (camina, gira) | funciona — conjunto NVIDIA AGILE verificado |
 | Cuerpo con brazos (29 articulaciones) | funciona — modelo oficial del G1 |
 | Control de brazos (poses) | funciona — `/g1/arm_pose` |
-| Carga en las manos | pendiente de repetir con AGILE; ver `PAYLOAD_TEST_PLAN.md` |
+| Carga en las manos | integrada dinámicamente; falta validar quietud y caminata en la VM |
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
 | LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
@@ -48,7 +48,8 @@ hasta volver a pasar las pruebas físicas.
 | Barrido visual activo | funciona — cinco vistas superpuestas, confirmación remota sólo ante candidato |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
 | Preaproximación a la mesa | funciona — calcula pose desde profundidad, navega y vuelve a confirmar |
-| Ejecutor de misión | integrado hasta preparar los brazos frente a la mesa; se bloquea antes de la alineación fina |
+| Ejecutor de misión | integrado hasta localizar el objeto; se bloquea antes de la alineación fina |
+| Transporte sin agarre | `attach_payload` integrado; objeto visible y masa física, pendiente de validar en VM |
 | Agarrar | pendiente (lo hará un VLA) |
 
 La misión vigente está definida en [`DEMO_TARGET.md`](DEMO_TARGET.md): guardar
@@ -104,6 +105,8 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/perception/evidence/compressed` | CompressedImage | cuadro exacto enlazado a una detección |
 | `/g1/model_input/compressed` | CompressedImage | agente o detector puntual; sólo la imagen realmente enviada al modelo |
 | `/g1/arm_pose` | String | el agente |
+| `/g1/payload_request` | String (JSON) | agente o verificador; agrega o retira carga |
+| `/g1/payload_status` | String (JSON) | robot; masa aplicada y puntos físicos releídos |
 | `/g1/cmd_vel/{stand,navigation,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
 | `/g1/mobility/status` | String (JSON) | el árbitro de movilidad |
@@ -207,6 +210,13 @@ agarre; la etapa actual no inventa esos datos faltantes. Tres mediciones 3D
 quedaron a 3,2 cm en horizontal y 5–6 mm en altura de la referencia física;
 el control del detector dio 6/6 positivos y 0/5 falsos.
 
+**Carga simulada no significa agarre.** `attach_payload` puede agregar masa
+física verificada a las dos muñecas después de la alineación y mostrar un
+bulto naranja entre ellas. Esto permite medir quietud, caminata, frenado y
+regreso cargado antes de tener Dex3. El tablero lo marca como “agarre NO
+validado”; el objeto visible no tiene una segunda masa ni colisión. Es una
+adaptación temporal, no el flujo oficial de manipulación de NVIDIA.
+
 **Los plazos medidos en tiempo real no sirven** con el simulador corriendo al
 20 %: recorrer 8 m lleva más de dos minutos de reloj de pared. La solución de
 fondo es el reloj simulado de ROS 2 (`/clock` + `use_sim_time`).
@@ -269,11 +279,12 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 2. **Implementar `align_with_table`**, el control visual fino posterior a la
    preaproximación ya validada. Debe medir base, mesa y objeto continuamente;
    no puede convertir una tolerancia gruesa en permiso para agarrar.
-3. **Guardar `home` y regresar** sin carga dentro de la misión completa.
+3. **Agregar 0,5 kg con `attach_payload` y regresar** dentro de una misión;
+   si pasa quietud y caminata, repetir con 1 kg.
 4. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
-5. **Probar `transporte` caminando**: quieto ya es estable, pero falta medir rumbo;
-   probar una postura más cercana a neutral y luego la escalera de cargas.
+5. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
+   caminata y frenado; probar una postura más cercana a neutral si falla.
 6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
    verificador; hasta entonces la profundidad de cámara mide objetos, no crea
    una falsa localización perfecta.

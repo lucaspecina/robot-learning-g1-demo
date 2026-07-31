@@ -26,7 +26,9 @@ class MissionContractTest(unittest.TestCase):
         self.assertIn("scan_for_table", ids)
         self.assertIn("find_object", ids)
         self.assertIn("align_with_table", ids)
+        self.assertIn("attach_payload", ids)
         self.assertIn("return_home", ids)
+        self.assertNotIn("grasp_object", ids)
         self.assertNotIn("search_person", ids)
 
     def test_tracks_a_successful_step_without_parsing_logs(self):
@@ -70,10 +72,10 @@ class MissionContractTest(unittest.TestCase):
     def test_blocked_step_stops_the_mission_honestly(self):
         self.tracker.begin("Traé el objeto", "rules")
         self.tracker.set_plan(build_demo_plan())
-        self.tracker.start_step("grasp_object")
+        self.tracker.start_step("align_with_table")
         state = self.tracker.stop_step(
-            "grasp_object",
-            "el agarre todavía no está implementado",
+            "align_with_table",
+            "la alineación fina todavía no está implementada",
             blocked=True,
         )
 
@@ -82,7 +84,7 @@ class MissionContractTest(unittest.TestCase):
             next(
                 step
                 for step in state["steps"]
-                if step["id"] == "grasp_object"
+                if step["id"] == "align_with_table"
             )["state"],
             "blocked",
         )

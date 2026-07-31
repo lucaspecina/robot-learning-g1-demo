@@ -16,7 +16,8 @@ G1 físico.
 7. Las mesas no figuran por nombre ni posición en el mapa: debe buscar la mesa
    elegida con sus sensores.
 8. Se acerca en dos etapas: navegación general y alineación fina.
-9. Agarra el objeto presente sobre la mesa.
+9. En el tramo actual, aparece un bulto de masa conocida entre las muñecas;
+   más adelante, las manos deben agarrar físicamente el objeto de la mesa.
 10. Adopta una postura estable de transporte y regresa a `home`.
 
 Las personas de la versión anterior quedan fuera de alcance hasta completar
@@ -74,8 +75,9 @@ localización, obstáculos y recuperación estén medidos.
 5. Construir/cargar el mapa y localizarse usando sensores simulados.
 6. Buscar una mesa de color cuya posición no recibe el agente.
 7. Navegar hasta una posición cercana y alinearse a `2–3 cm`.
-8. Completar primero un agarre simulado para desbloquear la misión completa.
-9. Reemplazarlo por agarre físico y medir repetibilidad.
+8. Agregar una carga física simulada después de alinearse, sin presentarla
+   como agarre, para desbloquear y medir el regreso cargado.
+9. Reemplazar esa adaptación por manos, contacto y agarre físico repetible.
 10. Transportar cargas crecientes y regresar a `home`.
 11. Activar la misma misión por voz.
 12. Repetir con latencia, ancho de banda limitado y cortes de red.

@@ -8,6 +8,7 @@
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh table red  mira una mesa desde una pose sólo de prueba
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
+#   bash run_demo.sh payload attach KG  agrega carga física; detach la retira
 #   bash run_demo.sh mission     le da la misión completa al planificador
 #   bash run_demo.sh layers      reinicia sólo las capas de la Jetson
 #   bash run_demo.sh status      como viene todo
@@ -165,6 +166,28 @@ pose)
     # ángulos reales de las catorce articulaciones.
     sudo docker exec jetson bash -c \
         "$ROS && python3 $D/tools/set_arm_pose.py $POSE"
+    ;;
+
+payload)
+    ACTION="${2:-}"
+    case "$ACTION" in
+    attach)
+        [ -n "${3:-}" ] || {
+            echo "uso: bash run_demo.sh payload attach <kg>"
+            exit 1
+        }
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/set_payload.py attach '$3'"
+        ;;
+    detach)
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/set_payload.py detach"
+        ;;
+    *)
+        echo "uso: bash run_demo.sh payload {attach <kg>|detach}"
+        exit 1
+        ;;
+    esac
     ;;
 
 tablero)
@@ -353,5 +376,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

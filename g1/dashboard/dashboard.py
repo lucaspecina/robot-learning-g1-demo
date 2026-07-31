@@ -106,6 +106,12 @@ state = {
     "goal": None,
     "nav": "-",
     "arms": "reposo",
+    "payload": {
+        "state": "detached",
+        "attached": False,
+        "applied_mass_kg": 0.0,
+        "grasp_validated": False,
+    },
     "mission_state": {
         "schema_version": 1,
         "mission_id": None,
@@ -259,6 +265,12 @@ class DashboardNode(Node):
             MODEL_EVENT_QOS,
         )
         self.create_subscription(String, "/g1/arm_pose", self.on_arms, 10)
+        self.create_subscription(
+            String,
+            "/g1/payload_status",
+            self.on_payload,
+            10,
+        )
         self.get_logger().info(
             f"tablero escuchando; sirve en el puerto {PORT}"
         )
@@ -470,6 +482,9 @@ class DashboardNode(Node):
     def on_arms(self, message: String):
         with lock:
             state["arms"] = message.data
+
+    def on_payload(self, message: String):
+        self.update_json("payload", message.data)
 
     def on_mission_event(self, message: String):
         with lock:

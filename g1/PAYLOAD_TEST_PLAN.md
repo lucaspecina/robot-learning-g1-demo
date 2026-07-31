@@ -21,6 +21,34 @@ carga pero no demuestra que la aplicó.
 Esto mide equilibrio con peso. No demuestra que exista un agarre ni reproduce
 todavía la distancia exacta entre la muñeca y el centro del objeto.
 
+La misión puede pedirlo en caliente mediante `attach_payload`: PhysX modifica
+la masa absoluta de ambas muñecas, la relee y publica la confirmación. Un bulto
+naranja sin colisión sigue visualmente el punto medio entre ellas. Ese dibujo
+no aporta otra masa; separar la representación de la carga evita contarla dos
+veces. Es una adaptación propia y temporal porque el cuerpo AGILE activo no
+incluye los dedos Dex3. El flujo final de NVIDIA la reemplazará por el objeto
+dinámico unido a la mano después de confirmar un agarre.
+
+Referencias oficiales consultadas:
+
+- Isaac Sim documenta uniones fijas físicamente simuladas entre cuerpos:
+  <https://docs.isaacsim.omniverse.nvidia.com/latest/robot_setup/assemble_robots.html>
+- El flujo de pick-and-place separa estimación de pose, aproximación, agarre,
+  retracción y objeto sujeto durante el transporte:
+  <https://nvidia-isaac-ros.github.io/concepts/manipulation/pick_and_place.html>
+- El flujo G1 de NVIDIA usa manos Dex3 y teleoperación para reunir las
+  demostraciones del agarre real:
+  <https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_physical_ai/tutorials/tutorials.html>
+
+Comandos de prueba, con el robot ya suelto y en `STAND`:
+
+```bash
+bash run_demo.sh payload attach 0.5
+bash run_demo.sh check stand
+bash run_demo.sh check walk
+bash run_demo.sh payload detach
+```
+
 ## Escalera obligatoria
 
 Cada nivel se prueba por separado y sólo se avanza si el anterior es estable:

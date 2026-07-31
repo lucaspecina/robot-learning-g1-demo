@@ -90,8 +90,10 @@ dedicada de cámara ya había medido que la vista estable estaba cerca de 2,5 m
 del centro. Con 2,2 m desde la superficie visible, una misión integral llegó
 con 9,8 cm de error, volvió a detectar la mesa a 1,968 m con confianza 0,94,
 conservó 0,737 m de altura y preparó los brazos con 0,0254 rad de error
-máximo. El agente se bloqueó después porque `align_with_table` y
-`grasp_object` siguen declaradas como no disponibles.
+máximo. En esa corrida el agente se bloqueó después porque
+`align_with_table` y `grasp_object` estaban declaradas como no disponibles.
+El plan actual mantiene pendiente la alineación y usa después
+`attach_payload`, una carga simulada explícita que no se presenta como agarre.
 
 Todavía no funciona:
 
@@ -199,6 +201,7 @@ Ejemplos iniciales:
 | `approach_table` | baja la distancia a la pose gruesa y llega una detección nueva | superficie a 1,8–2,8 m, base orientada y cuerpo en pie | volver a `STAND`; como máximo dos intentos por misión |
 | `set_arm_pose` | disminuye el error de articulaciones | pose medida dentro de tolerancia | detener el pedido de brazo sin iniciar locomoción |
 | `find_object` | llega una detección 3D posterior al inicio del paso | superficie visible a menos de 0,75 m del punto de la mesa | fallar sin mover la base; nunca convertir el punto en una pose de agarre |
+| `attach_payload` | llega una confirmación con el mismo `request_id` | PhysX relee la masa pedida en exactamente dos puntos | rechazar la misión; nunca afirmar que hubo agarre |
 
 Los plazos se medirán con reloj simulado cuando esté disponible. Mientras el
 simulador siga lento, cada prueba declarará explícitamente si usa tiempo de

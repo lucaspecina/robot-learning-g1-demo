@@ -149,7 +149,7 @@ sujeto, se reposiciona explícitamente y se reintenta.
 | Aproximación a mesa | 8–10 cm | 5° | terminar navegación |
 | Alineación para agarrar | 3–5 cm | 2–3° | habilitar el agarre |
 | Durante el agarre | máximo 5 cm | máximo 5° | abortar y reposicionar |
-| Regreso a `home` | 8–10 cm | 5° | confirmar llegada sin carga antes de transportar |
+| Regreso a `home` | 8–10 cm | 5° | confirmar llegada conservando la carga |
 
 Son requisitos iniciales, no números sagrados. Cada uno se reemplaza por un
 valor medido cuando conozcamos el margen real de percepción y agarre.

@@ -586,6 +586,7 @@
         <div class="technical-row"><span>Navegación</span><span id="navigation-state">—</span></div>
         <div class="technical-row"><span>Objetivo</span><span id="navigation-goal">—</span></div>
         <div class="technical-row"><span>Brazos</span><span id="arm-state">—</span></div>
+        <div class="technical-row"><span>Carga simulada</span><span id="payload-state">—</span></div>
         <div class="technical-row"><span>Cámara</span><span id="camera-state">—</span></div>
         <div class="technical-row"><span>Detector local</span><span id="perception-state">—</span></div>
         <div class="technical-row"><span>Búsqueda puntual</span><span id="search-state">—</span></div>
@@ -1076,6 +1077,15 @@
         state.goal ? `(${state.goal.x}, ${state.goal.y})` : '—'
       );
       setText('arm-state',state.arms);
+      const payload=state.payload || {};
+      setText(
+        'payload-state',
+        payload.attached
+          ? `${payload.applied_mass_kg} kg físicos · agarre NO validado`
+          : payload.state === 'failed'
+          ? `falló: ${payload.error || 'sin detalle'}`
+          : 'sin carga'
+      );
       setText(
         'camera-state',
         `${state.frames} cuadros${state.video_online ? '' : ' · detenida'}`

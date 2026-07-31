@@ -299,6 +299,11 @@ ocho esferas de los pies contra MuJoCo.
   cuerpo a `0,739 m` y dueño `STAND`. Es una superficie visible para búsqueda
   y aproximación, no la orientación completa que exige el agarre. Falta la
   corrida integral del nuevo paso `find_object`.
+- **Transporte con carga separado del agarre**: `attach_payload` agrega en
+  caliente una masa absoluta y verificable entre ambas muñecas y muestra un
+  bulto sin masa adicional. La misión lo usará después de `align_with_table`;
+  todavía falta probar en Isaac que aparezca bien y ejecutar la escalera de
+  0,5 kg y 1 kg. No valida contacto, dedos ni retención del objeto.
 - **Planificador semántico y ejecución adaptable integrados**:
   `gpt-4.1-mini` recibe un catálogo explicado, propone el plan en JSON y el
   servidor y la Jetson lo validan independientemente. Después de cada paso

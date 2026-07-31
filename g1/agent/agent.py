@@ -12,6 +12,7 @@ robot y conserva, por separado, tres tipos de evidencia:
            /g1/odom                       ubicación medida del cuerpo
            /g1/mobility/status            confirmación de espera segura
            /g1/arm_status                 medición real de los brazos
+           /g1/payload_status             masa de transporte verificada
            /g1/perception/local_detection_status
                                           resultado nuevo del detector local
            /g1/perception/search_status   resultado de búsqueda puntual
@@ -22,6 +23,7 @@ robot y conserva, por separado, tres tipos de evidencia:
            /g1/spin                       giro relativo cancelable
 
   publica: /g1/arm_pose                   postura pedida a los brazos
+           /g1/payload_request            pedido explícito de carga simulada
            /g1/perception/search_request  categoría visual acotada
            /g1/model_input/compressed      JPEG exacto enviado a un modelo
            /g1/mission_status             relato humano, sólo para el historial
@@ -189,6 +191,7 @@ class Agent(Node):
         self.current_pose = None
         self.mobility_owner = None
         self.arm_status = None
+        self.payload_status = None
         self.search_status = None
         self.localized_tables = {}
         self.localized_objects = []
@@ -213,6 +216,11 @@ class Agent(Node):
             "/g1/spin",
         )
         self.arms_pub = self.create_publisher(String, "/g1/arm_pose", 10)
+        self.payload_pub = self.create_publisher(
+            String,
+            "/g1/payload_request",
+            10,
+        )
         self.search_pub = self.create_publisher(
             String,
             "/g1/perception/search_request",
@@ -278,6 +286,12 @@ class Agent(Node):
             String,
             "/g1/arm_status",
             self.on_arm_status,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/g1/payload_status",
+            self.on_payload_status,
             10,
         )
         self.create_subscription(
@@ -378,6 +392,12 @@ class Agent(Node):
     def on_arm_status(self, message: String):
         try:
             self.arm_status = json.loads(message.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_payload_status(self, message: String):
+        try:
+            self.payload_status = json.loads(message.data)
         except json.JSONDecodeError:
             pass
 
@@ -998,6 +1018,8 @@ class Agent(Node):
             return blocked(
                 "el agarre todavía no está implementado; será una policy aparte"
             )
+        if skill == "attach_payload":
+            return self.attach_payload(float(argument))
         return failed(f"skill desconocida: {skill}")
 
     # ---------- skills ----------
@@ -1911,6 +1933,61 @@ class Agent(Node):
         return failed(
             "no apareció un objeto transportable sobre la mesa elegida",
             {"timeout_s": OBJECT_LOCALIZATION_TIMEOUT_S},
+        )
+
+    def attach_payload(self, mass_kg: float) -> dict:
+        """Agrega carga física sin afirmar que las manos ejecutaron un agarre."""
+        if not self.wait_for_stand(timeout_s=3.0):
+            return failed("no se confirmó STAND antes de agregar la carga")
+        if self.current_pose is None or self.current_pose[2] < MIN_SAFE_BODY_HEIGHT_M:
+            return failed("el robot no está de pie para recibir la carga")
+
+        request_id = str(uuid.uuid4())
+        self.payload_pub.publish(String(data=json.dumps({
+            "request_id": request_id,
+            "command": "attach",
+            "mass_kg": mass_kg,
+        })))
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            status = self.payload_status or {}
+            if status.get("request_id") != request_id:
+                time.sleep(0.05)
+                continue
+            if status.get("state") != "attached":
+                return failed(
+                    status.get("error", "el robot rechazó la carga simulada")
+                )
+            applied_mass_kg = float(status.get("applied_mass_kg", -1.0))
+            if abs(applied_mass_kg - mass_kg) > 1e-3:
+                return failed(
+                    "la masa confirmada no coincide con la solicitada",
+                    {
+                        "requested_mass_kg": mass_kg,
+                        "applied_mass_kg": applied_mass_kg,
+                    },
+                )
+            attachment_points = status.get("attachment_points") or []
+            if len(attachment_points) != 2:
+                return failed(
+                    "la carga no confirmó dos puntos físicos de apoyo"
+                )
+            self.mission_context["payload"] = status
+            return succeeded(
+                f"carga simulada de {applied_mass_kg:.1f} kg confirmada; "
+                "esto prueba transporte, no agarre",
+                {
+                    "requested_mass_kg": round(mass_kg, 3),
+                    "applied_mass_kg": round(applied_mass_kg, 3),
+                    "attachment_points": attachment_points,
+                    "physical_model": status.get("physical_model"),
+                    "visual_object": bool(status.get("visual_object")),
+                    "grasp_validated": False,
+                },
+            )
+        return failed(
+            "el robot no confirmó si aplicó la carga",
+            {"timeout_s": 10.0, "requested_mass_kg": mass_kg},
         )
 
     # ---------- esperas ----------

@@ -54,6 +54,14 @@ class SkillCatalogTest(unittest.TestCase):
             )["availability"],
             "placeholder",
         )
+        self.assertEqual(
+            next(
+                step
+                for step in validated
+                if step["id"] == "attach_payload"
+            )["availability"],
+            "ready",
+        )
 
     def test_rejects_a_skill_invented_by_the_model(self):
         with self.assertRaisesRegex(ValueError, "skill no permitida"):

@@ -184,7 +184,7 @@ SKILL_CATALOG = [
                 "argument_description": (
                     "Coloca los brazos en la postura prevista para transportar."
                 ),
-                "preconditions": ["object_grasped"],
+                "preconditions": ["object_secured"],
                 "effects": ["transport_pose_set"],
             },
         ],
@@ -232,6 +232,32 @@ SKILL_CATALOG = [
         ],
     },
     {
+        "name": "attach_payload",
+        "description": (
+            "Agrega una masa física conocida entre las dos muñecas y hace "
+            "aparecer un bulto visible. Es la adaptación temporal aprobada "
+            "para probar transporte: no afirma que exista un agarre real."
+        ),
+        "availability": "ready",
+        "variants": [
+            {
+                "argument": 1.0,
+                "argument_description": (
+                    "Carga inicial de un kilogramo, confirmada por PhysX."
+                ),
+                "preconditions": [
+                    "at_selected_table",
+                    "arms_ready",
+                    "object_location_known",
+                ],
+                "effects": [
+                    "object_secured",
+                    "simulated_payload_attached",
+                ],
+            }
+        ],
+    },
+    {
         "name": "grasp_object",
         "description": (
             "Agarra el objeto de la mesa. El contrato existe para planificar "
@@ -244,7 +270,7 @@ SKILL_CATALOG = [
                 "argument": None,
                 "argument_description": "No recibe argumento.",
                 "preconditions": ["at_selected_table", "arms_ready"],
-                "effects": ["object_grasped"],
+                "effects": ["object_grasped", "object_secured"],
             }
         ],
     },
