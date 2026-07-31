@@ -68,7 +68,9 @@ class TableAlignmentController:
         distance_tolerance_m: float = 0.03,
         yaw_tolerance_rad: float = math.radians(2.0),
         stable_duration_s: float = 1.5,
-        stopped_linear_speed_mps: float = 0.02,
+        # Nav2 usa 0,25 m/s por defecto. El límite menor conserva margen para
+        # manipular sin confundir el balanceo instantáneo del torso con avance.
+        stopped_linear_speed_mps: float = 0.10,
         stopped_angular_speed_radps: float = 0.03,
         minimum_linear_speed_mps: float = 0.10,
         maximum_linear_speed_mps: float = 0.15,

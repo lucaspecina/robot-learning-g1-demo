@@ -72,7 +72,7 @@ class TableAlignmentControllerTest(unittest.TestCase):
 
     def test_requires_pose_speed_and_time(self):
         moving = self.controller.step(
-            pose(x=1.30, linear=0.03),
+            pose(x=1.30, linear=0.11),
             self.target,
             0.0,
         )
