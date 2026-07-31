@@ -30,6 +30,7 @@
 # movimientos del operador. No mover /head_cam: es la cámara física del robot.
 set -uo pipefail
 
+HOST_DEMO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 D=/workspace/g1          # ruta dentro del contenedor jetson
 ROS="source /opt/ros/jazzy/setup.bash"
 
@@ -267,7 +268,9 @@ reset)
 
 status)
     echo "== la versión =="
-    if repo_root=$(git -C "$D" rev-parse --show-toplevel 2>/dev/null); then
+    if repo_root=$(
+        git -C "$HOST_DEMO_DIR" rev-parse --show-toplevel 2>/dev/null
+    ); then
         branch=$(git -C "$repo_root" branch --show-current)
         commit=$(git -C "$repo_root" rev-parse --short=12 HEAD)
         if [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
