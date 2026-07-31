@@ -43,9 +43,8 @@ Referencias oficiales consultadas:
 Comandos de prueba, con el robot ya suelto y en `STAND`:
 
 ```bash
-bash run_demo.sh payload attach 0.5
-bash run_demo.sh check stand
-bash run_demo.sh check walk
+bash run_demo.sh check stand 0.5
+bash run_demo.sh check walk 0.5
 bash run_demo.sh payload detach
 ```
 

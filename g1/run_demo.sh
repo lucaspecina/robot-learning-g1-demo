@@ -231,7 +231,13 @@ check)
     # La confirmación se publica desde el lazo de física; el proceso de prueba
     # no debe ganarle la carrera y leer todavía el estado congelado anterior.
     sleep 2
-    sudo docker exec jetson bash -c         "$ROS && python3 $D/tools/checks.py ${2:-all}"
+    if [ -n "${3:-}" ]; then
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/checks.py ${2:-all} '$3'"
+    else
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/checks.py ${2:-all}"
+    fi
     ;;
 
 clock)

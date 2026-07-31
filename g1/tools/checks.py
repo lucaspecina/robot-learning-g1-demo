@@ -23,6 +23,7 @@ import json
 import math
 import sys
 import time
+import uuid
 
 import rclpy
 from rclpy.node import Node
@@ -50,18 +51,25 @@ TURN_MIN_RESPONSE_DEG = 5.0
 
 
 class Checker(Node):
-    def __init__(self):
+    def __init__(self, payload_kg: float = None):
         super().__init__("checks")
         self.pose = None
         self.nav = None
         self.mobility_owner = None
         self.robot_mode = None
+        self.arm_status = None
+        self.payload_status = None
+        self.test_payload_kg = payload_kg
         self.pub_cmd = self.create_publisher(Twist, "/g1/cmd_vel/test", 10)
         self.pub_mobility = self.create_publisher(
             String, "/g1/mobility/request", 10
         )
         self.pub_goal = self.create_publisher(PoseStamped, "/g1/goal", 10)
         self.pub_reset = self.create_publisher(String, "/g1/reset", 10)
+        self.pub_arm_pose = self.create_publisher(String, "/g1/arm_pose", 10)
+        self.pub_payload = self.create_publisher(
+            String, "/g1/payload_request", 10
+        )
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
         self.create_subscription(String, "/g1/nav_status", self.on_nav, 10)
         self.create_subscription(
@@ -74,6 +82,13 @@ class Checker(Node):
             String,
             "/g1/robot_status",
             self.on_robot_status,
+            10,
+        )
+        self.create_subscription(String, "/g1/arm_status", self.on_arm_status, 10)
+        self.create_subscription(
+            String,
+            "/g1/payload_status",
+            self.on_payload_status,
             10,
         )
 
@@ -96,6 +111,18 @@ class Checker(Node):
         try:
             self.robot_mode = json.loads(msg.data)["mode"]
         except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    def on_arm_status(self, msg: String):
+        try:
+            self.arm_status = json.loads(msg.data)
+        except json.JSONDecodeError:
+            pass
+
+    def on_payload_status(self, msg: String):
+        try:
+            self.payload_status = json.loads(msg.data)
+        except json.JSONDecodeError:
             pass
 
     def spin_for(self, seconds: float):
@@ -141,12 +168,59 @@ class Checker(Node):
         self.request_mobility("release", reason)
         self.spin_for(0.25)
 
+    def prepare_payload(self, timeout_s: float = 40.0) -> bool:
+        """Restaura pose y masa porque reset las elimina deliberadamente."""
+        if self.test_payload_kg is None:
+            return True
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self.pub_arm_pose.publish(String(data="transporte"))
+            self.spin_for(0.2)
+            status = self.arm_status or {}
+            if status.get("pose") == "transporte" and status.get("reached"):
+                break
+        else:
+            print("  FALLA: los brazos no confirmaron la pose transporte")
+            return False
+
+        request_id = str(uuid.uuid4())
+        command = "attach" if self.test_payload_kg > 0.0 else "detach"
+        request = String(data=json.dumps({
+            "request_id": request_id,
+            "command": command,
+            "mass_kg": self.test_payload_kg,
+        }))
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            self.pub_payload.publish(request)
+            self.spin_for(0.25)
+            status = self.payload_status or {}
+            if status.get("request_id") != request_id:
+                continue
+            applied = float(status.get("applied_mass_kg", -1.0))
+            expected_state = "attached" if self.test_payload_kg > 0.0 else "detached"
+            valid = status.get("state") == expected_state and abs(
+                applied - self.test_payload_kg
+            ) <= 1e-3
+            if valid:
+                print(
+                    f"  carga confirmada: {applied:.2f} kg en "
+                    f"{status.get('attachment_points', [])}"
+                )
+                return True
+            print(f"  FALLA: carga rechazada: {status.get('error', status)}")
+            return False
+        print("  FALLA: el robot no confirmó la carga después del reinicio")
+        return False
+
     def reset_robot(self):
         """Devuelve el banco al origen para no encadenar posiciones peligrosas."""
         self.pub_reset.publish(String(data="prueba reproducible"))
         # El reinicio se aplica dentro del lazo de física. Esperar también deja
         # que navegación detecte el salto y entregue cualquier concesión vieja.
         self.spin_for(2.0)
+        if not self.prepare_payload():
+            raise RuntimeError("no se restauró la carga experimental")
 
     def send_cmd(self, vx=0.0, vy=0.0, vyaw=0.0):
         t = Twist()
@@ -459,8 +533,17 @@ def main():
         print(f"uso: checks.py {{{'|'.join(CHECKS)}|all}}")
         return 1
 
+    try:
+        payload_kg = float(sys.argv[2]) if len(sys.argv) > 2 else None
+    except ValueError:
+        print("la carga debe expresarse en kilogramos")
+        return 1
+    if payload_kg is not None and (payload_kg < 0.0 or payload_kg > 3.0):
+        print("la carga debe estar entre 0 y 3 kg")
+        return 1
+
     rclpy.init()
-    c = Checker()
+    c = Checker(payload_kg=payload_kg)
     try:
         if not c.wait_for_pose():
             print("\n  NO LLEGA /g1/odom: el robot no esta corriendo.\n")
@@ -474,6 +557,9 @@ def main():
                 "\n  ROBOT NO ACTIVO: la prueba no vale si está congelado. "
                 "Ejecutá primero: bash run_demo.sh start\n"
             )
+            return 1
+
+        if not c.prepare_payload():
             return 1
 
         secuencia = list(CHECKS) if cual == "all" else [cual]
