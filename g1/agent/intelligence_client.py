@@ -191,6 +191,32 @@ def validate_review(
             raise RemoteIntelligenceError(
                 "el modelo intentó continuar sin la skill faltante"
             )
+    if (
+        isinstance(blocker, dict)
+        and blocker.get("type") == "recoverable_with_skill"
+    ):
+        recovery_skill = blocker.get("skill")
+        available = any(
+            item.get("name") == recovery_skill
+            and item.get("availability") == "ready"
+            for item in (skill_catalog or [])
+            if isinstance(item, dict)
+        )
+        if not available:
+            raise RemoteIntelligenceError(
+                "la recuperación declarada no está disponible"
+            )
+        if decision != "revise":
+            raise RemoteIntelligenceError(
+                "el modelo ignoró una recuperación disponible"
+            )
+        if (
+            not review["revised_steps"]
+            or review["revised_steps"][0].get("skill") != recovery_skill
+        ):
+            raise RemoteIntelligenceError(
+                "el plan revisado no comienza con la recuperación indicada"
+            )
     return review
 
 

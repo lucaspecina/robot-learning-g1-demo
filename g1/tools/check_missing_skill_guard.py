@@ -14,23 +14,29 @@ def main():
     outcome = {
         "state": "blocked",
         "message": (
-            "la mesa no apareció; falta el barrido visual activo"
+            "el objeto está ubicado, pero falta alinear la base para agarrar"
         ),
         "blocker": {
             "type": "missing_skill",
-            "skill": "scan_for_table",
+            "skill": "align_with_table",
         },
     }
     review = IntelligenceClient().review_step(
-        command="Encontrá la mesa roja.",
+        command="Alineate con la mesa para agarrar el objeto.",
         skill_catalog=skill_catalog_for_model(),
-        world_facts=["robot_pose_known", "selected_table_known"],
+        world_facts=[
+            "robot_pose_known",
+            "selected_table_known",
+            "at_table_staging",
+            "arms_ready",
+            "object_location_known",
+        ],
         completed_steps=[],
         last_step={
-            "id": "search_table",
-            "skill": "search_table",
-            "argument": "$selected_table",
-            "label": "Buscar la mesa roja",
+            "id": "find_object",
+            "skill": "find_object",
+            "argument": None,
+            "label": "Ubicar el objeto",
         },
         outcome=outcome,
         pending_steps=[],

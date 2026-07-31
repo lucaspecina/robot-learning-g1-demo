@@ -1305,7 +1305,7 @@ class Agent(Node):
                 "visualmente la habitación",
                 outcome.get("measurements"),
                 blocker={
-                    "type": "missing_skill",
+                    "type": "recoverable_with_skill",
                     "skill": "scan_for_table",
                 },
             )

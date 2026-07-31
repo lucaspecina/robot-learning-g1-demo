@@ -376,6 +376,32 @@ def validate_generated_review(
             raise InvalidModelResponseError(
                 "la revisión intenta continuar sin la skill faltante"
             )
+    if (
+        isinstance(blocker, dict)
+        and blocker.get("type") == "recoverable_with_skill"
+    ):
+        recovery_skill = blocker.get("skill")
+        available = any(
+            item.get("name") == recovery_skill
+            and item.get("availability") == "ready"
+            for item in skill_catalog
+            if isinstance(item, dict)
+        )
+        if not available:
+            raise InvalidModelResponseError(
+                "la recuperación declarada no está disponible"
+            )
+        if decision != "revise":
+            raise InvalidModelResponseError(
+                "la recuperación disponible exige revisar el plan"
+            )
+        if (
+            not revised_steps
+            or revised_steps[0].get("skill") != recovery_skill
+        ):
+            raise InvalidModelResponseError(
+                "el plan revisado no comienza con la recuperación indicada"
+            )
     return review
 
 
@@ -896,7 +922,11 @@ class MissionPlanner:
                     "blocker.type=missing_skill y esa skill no figura como "
                     "ready en el catálogo, elegí ask_human o stop; no la "
                     "reemplaces por movimientos que no producen esa "
-                    "capacidad.\n\n"
+                    "capacidad. Si blocker.type=recoverable_with_skill, la "
+                    "skill indicada sí está disponible: elegí revise y "
+                    "hacé que sea el primer paso del nuevo plan pendiente; "
+                    "no pidas ayuda humana para una recuperación que el "
+                    "robot ya sabe ejecutar.\n\n"
                     "CATÁLOGO DE SKILLS:\n"
                     + json.dumps(
                         skill_catalog,

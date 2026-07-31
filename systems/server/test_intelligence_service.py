@@ -372,6 +372,72 @@ class IntelligenceServiceTests(unittest.TestCase):
                 },
             )
 
+    def test_reviewer_uses_a_declared_recovery_skill(self):
+        catalog = [
+            {
+                "name": "scan_for_table",
+                "description": "Barre la sala hasta encontrar la mesa.",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": "$selected_table",
+                        "preconditions": ["selected_table_known"],
+                        "effects": ["table_location_known"],
+                    }
+                ],
+            }
+        ]
+        review = {
+            "decision": "revise",
+            "reason": "La vista actual falló; corresponde barrer la sala.",
+            "revised_steps": [
+                {
+                    "id": "scan_table_recovery",
+                    "skill": "scan_for_table",
+                    "argument": "$selected_table",
+                    "label": "Buscar activamente la mesa",
+                }
+            ],
+            "question": None,
+        }
+        outcome = {
+            "state": "blocked",
+            "message": "la mesa no apareció en la vista actual",
+            "blocker": {
+                "type": "recoverable_with_skill",
+                "skill": "scan_for_table",
+            },
+        }
+
+        self.assertEqual(
+            validate_generated_review(
+                review,
+                catalog,
+                ["selected_table_known"],
+                outcome,
+                {"search_table"},
+                [],
+            ),
+            review,
+        )
+        with self.assertRaisesRegex(
+            InvalidModelResponseError,
+            "exige revisar",
+        ):
+            validate_generated_review(
+                {
+                    "decision": "ask_human",
+                    "reason": "Pedir ayuda.",
+                    "revised_steps": [],
+                    "question": "¿Dónde está la mesa?",
+                },
+                catalog,
+                ["selected_table_known"],
+                outcome,
+                {"search_table"},
+                [],
+            )
+
     def test_external_validator_rejects_missing_preconditions(self):
         catalog = [
             {

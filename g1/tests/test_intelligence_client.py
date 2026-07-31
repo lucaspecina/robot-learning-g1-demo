@@ -418,6 +418,60 @@ class IntelligenceClientTests(unittest.TestCase):
                 [],
             )
 
+    def test_requires_the_ready_recovery_as_first_revised_step(self):
+        catalog = [
+            {
+                "name": "scan_for_table",
+                "availability": "ready",
+                "variants": [
+                    {
+                        "argument": "$selected_table",
+                        "preconditions": ["selected_table_known"],
+                        "effects": ["table_location_known"],
+                    }
+                ],
+            }
+        ]
+        outcome = {
+            "state": "blocked",
+            "blocker": {
+                "type": "recoverable_with_skill",
+                "skill": "scan_for_table",
+            },
+        }
+        review = {
+            "decision": "revise",
+            "reason": "La vista actual falló; hay que barrer la sala.",
+            "revised_steps": [
+                {
+                    "id": "scan_table_recovery",
+                    "skill": "scan_for_table",
+                    "argument": "$selected_table",
+                    "label": "Buscar activamente la mesa",
+                }
+            ],
+            "question": None,
+        }
+
+        self.assertEqual(
+            validate_review(review, outcome, catalog),
+            review,
+        )
+        with self.assertRaisesRegex(
+            RemoteIntelligenceError,
+            "ignoró una recuperación",
+        ):
+            validate_review(
+                {
+                    "decision": "ask_human",
+                    "reason": "Pedir ayuda.",
+                    "revised_steps": [],
+                    "question": "¿Dónde está la mesa?",
+                },
+                outcome,
+                catalog,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
