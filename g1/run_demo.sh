@@ -7,6 +7,7 @@
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh table red  mira una mesa desde una pose sólo de prueba
+#   bash run_demo.sh align-table red  alinea desde una mesa ya visible
 #   bash run_demo.sh pose NOMBRE  mueve brazos: reposo | listo | transporte
 #   bash run_demo.sh payload attach KG  agrega carga física; detach la retira
 #   bash run_demo.sh mission     le da la misión completa al planificador
@@ -287,6 +288,12 @@ table)
         "$ROS && python3 $D/tools/check_table_detection.py '$COLOR'"
     ;;
 
+align-table)
+    COLOR="${2:-red}"
+    sudo docker exec jetson bash -c \
+        "$ROS && python3 $D/tools/check_table_alignment.py '$COLOR'"
+    ;;
+
 search-table)
     COLOR="${2:-red}"
     sudo docker exec jetson bash -c \
@@ -309,10 +316,11 @@ reset)
     # para poder repetir la mision desde cero sin relanzar el simulador.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
     sudo docker exec jetson pkill -f \
-        "go_to.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
+        "go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
         2>/dev/null
     sleep 2
     launch "navegacion"           goto.log              skills/go_to.py
+    launch "alineacion fina"      alignment.log         skills/align_with_table.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
