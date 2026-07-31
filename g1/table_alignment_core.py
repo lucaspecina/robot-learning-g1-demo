@@ -70,6 +70,7 @@ class TableAlignmentController:
         stable_duration_s: float = 1.5,
         stopped_linear_speed_mps: float = 0.02,
         stopped_angular_speed_radps: float = 0.03,
+        minimum_linear_speed_mps: float = 0.08,
         maximum_linear_speed_mps: float = 0.12,
         maximum_angular_speed_radps: float = 0.20,
     ):
@@ -80,6 +81,7 @@ class TableAlignmentController:
             "tiempo estable": stable_duration_s,
             "velocidad lineal detenida": stopped_linear_speed_mps,
             "velocidad angular detenida": stopped_angular_speed_radps,
+            "velocidad lineal mínima": minimum_linear_speed_mps,
             "velocidad lineal máxima": maximum_linear_speed_mps,
             "velocidad angular máxima": maximum_angular_speed_radps,
         }
@@ -92,6 +94,7 @@ class TableAlignmentController:
         self.stable_duration_s = float(stable_duration_s)
         self.stopped_linear_speed_mps = float(stopped_linear_speed_mps)
         self.stopped_angular_speed_radps = float(stopped_angular_speed_radps)
+        self.minimum_linear_speed_mps = float(minimum_linear_speed_mps)
         self.maximum_linear_speed_mps = float(maximum_linear_speed_mps)
         self.maximum_angular_speed_radps = float(maximum_angular_speed_radps)
         self.stable_since = None
@@ -183,7 +186,7 @@ class TableAlignmentController:
         if abs(distance_error) > self.distance_tolerance_m:
             linear = self._bounded_with_minimum(
                 0.35 * distance_error,
-                minimum_magnitude=0.04,
+                minimum_magnitude=self.minimum_linear_speed_mps,
                 maximum_magnitude=self.maximum_linear_speed_mps,
             )
         if abs(yaw_error) <= self.yaw_tolerance_rad:

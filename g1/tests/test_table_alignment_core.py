@@ -61,6 +61,10 @@ class TableAlignmentControllerTest(unittest.TestCase):
         self.assertGreater(command.linear_x, 0.0)
         self.assertLessEqual(command.linear_x, 0.12)
 
+    def test_uses_measured_minimum_near_the_goal(self):
+        command = self.controller.step(pose(x=1.19), self.target, 0.0)
+        self.assertAlmostEqual(command.linear_x, 0.08)
+
     def test_backs_up_when_too_close(self):
         command = self.controller.step(pose(x=1.5), self.target, 0.0)
         self.assertEqual(command.phase, "backing_up")
