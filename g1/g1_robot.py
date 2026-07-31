@@ -192,6 +192,7 @@ from pxr import Gf, UsdGeom
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState
 from nav_msgs.msg import Odometry
@@ -217,6 +218,13 @@ from payload_core import (  # noqa: E402
     parse_payload_request,
     payload_mass_values,
     select_payload_body_indices,
+)
+
+
+PAYLOAD_STATE_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
 )
 
 
@@ -539,7 +547,7 @@ class G1RobotNode(Node):
             RosString, "/g1/robot_status", 10
         )
         self.pub_payload_status = self.create_publisher(
-            RosString, "/g1/payload_status", 10
+            RosString, "/g1/payload_status", PAYLOAD_STATE_QOS
         )
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(RosString, "/g1/arm_pose", self.on_arm_pose, 10)

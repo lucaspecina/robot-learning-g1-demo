@@ -269,7 +269,7 @@ class DashboardNode(Node):
             String,
             "/g1/payload_status",
             self.on_payload,
-            10,
+            STATE_QOS,
         )
         self.get_logger().info(
             f"tablero escuchando; sirve en el puerto {PORT}"

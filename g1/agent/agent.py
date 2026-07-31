@@ -292,7 +292,7 @@ class Agent(Node):
             String,
             "/g1/payload_status",
             self.on_payload_status,
-            10,
+            STATE_QOS,
         )
         self.create_subscription(
             String,
