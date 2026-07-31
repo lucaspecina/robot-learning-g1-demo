@@ -71,7 +71,7 @@ class TableAlignmentController:
         stopped_linear_speed_mps: float = 0.02,
         stopped_angular_speed_radps: float = 0.03,
         minimum_linear_speed_mps: float = 0.10,
-        maximum_linear_speed_mps: float = 0.12,
+        maximum_linear_speed_mps: float = 0.15,
         maximum_angular_speed_radps: float = 0.20,
     ):
         positive = {
