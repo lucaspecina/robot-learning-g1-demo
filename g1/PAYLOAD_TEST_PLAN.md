@@ -113,6 +113,14 @@ invalida llamar “aprobada” a la pose de transporte o a su representación. L
 otra misión integral se probará la nueva pose con el robot congelado, se
 medirá la posición de ambas muñecas y Lucas deberá aprobarla visualmente.
 
+La primera candidata posterior quedó implementada en `498a15d`. Es un espejo
+bilateral del brazo de transporte del cuadro 178 de una demostración NVIDIA,
+no una pose oficial completa. En vista previa congelada llegó con `1,1°` de
+error máximo; las muñecas quedaron separadas `42,2 cm` y el centro del bulto a
+`26,9 cm` delante y `8,3 cm` por encima de la pelvis. La sesión terminó antes
+de la aprobación visual. No se ejecutaron `stand`, `walk` ni navegación con
+esta candidata.
+
 El banco aún publica `/g1/reset` sin confirmación correlacionada. Una de tres
 navegaciones comenzó a `32 cm` del origen esperado, aunque el objetivo relativo
 y la llegada fueron válidos. Antes de usar el reinicio para comparar posiciones

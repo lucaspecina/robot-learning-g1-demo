@@ -7,6 +7,54 @@ Este documento existe para poder retomar el trabajo en una sesión nueva sin
 reconstruir decisiones desde el chat. Describe el estado actual, el diseño que
 vamos a implementar y lo que permitirá demostrar.
 
+## Cierre de sesión del 31-jul-2026
+
+Último código probado: `498a15d`. La VM se apagó después de este cierre.
+
+La misión integral llegó a ejecutar alineación, carga de `0,5 kg`, pose de
+transporte y regreso. La inspección de Lucas encontró dos defectos que los
+verificadores numéricos no detectaban:
+
+1. el tablero mezclaba la historia de misiones anteriores;
+2. la pose que nosotros llamábamos `transporte` llevaba el bulto contra la
+   pelvis y no parecía un transporte real, aunque las articulaciones hubieran
+   alcanzado exactamente esos ángulos.
+
+El tablero quedó corregido y comprobado en vivo: cambia de historia al cambiar
+`mission_id`, vuelve a cero en `idle` y muestra `/g1/arm_status`, la medición
+real, en vez de repetir la orden. Pasaron `122` pruebas de `g1` y `21` del
+servidor, `143` en total. Antes de apagar, el tablero mostraba cero eventos,
+`reposo · confirmada` y carga retirada.
+
+NVIDIA no ofrece una pose fija llamada transporte en este flujo: su entorno
+oficial de locomanipulación controla la posición de ambas muñecas mediante
+cinemática inversa. Como escalón temporal sin manos, se creó una candidata
+bilateral espejando el brazo que transporta un objeto en el cuadro 178 de la
+demostración oficial
+`object_pick_and_place_retarget_motion_g1_3finger_hands.yaml`.
+
+La vista previa congelada de esa candidata midió:
+
+- error articular máximo: `1,1°`;
+- separación entre muñecas: `42,2 cm`;
+- centro del bulto: `26,9 cm` delante y `8,3 cm` por encima de la pelvis;
+- distancia total entre pelvis y centro del bulto: `28,1 cm`;
+- masa: `0,50 kg`, `0,25 kg` verificados en cada muñeca.
+
+**La candidata todavía no está aprobada visualmente ni físicamente.** Lucas
+pidió apagar antes de juzgarla. Al retomar:
+
+1. encender VM, abrir Isaac y el tablero;
+2. con el robot congelado, ejecutar `pose transporte` y `payload attach 0.5`;
+3. Lucas debe confirmar que el bulto está realmente entre las manos, delante
+   del cuerpo y sin atravesarlo;
+4. si aprueba visualmente, retirar la vista previa y ejecutar quietud, caminata
+   y frenado con `0,5 kg`;
+5. recién después repetir navegación y la misión integral.
+
+No lanzar directamente otra misión completa: cambiar los ángulos de brazos es
+un cambio físico y debe volver a pasar esa escalera.
+
 ## Decisión resumida
 
 El modelo crea un plan inicial, pero el robot no lo obedece completo a ciegas.

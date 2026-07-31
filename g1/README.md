@@ -296,21 +296,24 @@ lanzamiento normal.
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Ejecutar la misión integral**: `find_object`, alineación, 0,5 kg y regreso
-   ya pasaron por partes; falta observarlos y medirlos en una misma corrida.
-2. **Validar visualmente con Lucas** la separación final, el bulto entre las
-   manos y el regreso cargado. Los números no sustituyen esa inspección.
-3. **Medir la confiabilidad de la alineación**: una de tres aproximaciones
+1. **Validar la nueva pose congelada con Lucas**: mostrar `transporte` con
+   `0,5 kg` sin lanzar una misión. La candidata quedó a `26,9 cm` delante de la
+   pelvis, pero todavía no tiene aprobación visual.
+2. **Repetir quietud, caminata y frenado** con la pose nueva. Un objetivo
+   articular alcanzado no demuestra equilibrio ni que la postura tenga sentido.
+3. **Ejecutar la misión integral** sólo si los dos pasos anteriores pasan;
+   observar alineación, bulto, postura y regreso en una misma corrida.
+4. **Medir la confiabilidad de la alineación**: una de tres aproximaciones
    largas se estancó y pasó en el primer reintento idéntico.
-4. **Migrar el barrido completo a una Action cancelable**, conservando el
+5. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
-5. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
+6. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
    caminata y frenado; probar una postura más cercana a neutral si falla.
-6. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
+7. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
    verificador; hasta entonces la profundidad de cámara mide objetos, no crea
    una falsa localización perfecta.
-7. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
+8. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
    de simulación.
-8. **El agarre** con un VLA entrenado por nosotros.
-9. **Voz** para reemplazar la publicación manual de texto; el planificador
+9. **El agarre** con un VLA entrenado por nosotros.
+10. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.
