@@ -142,6 +142,7 @@ cualquier Jetson.
 | resolución oficial 640×480 | reloj 3/3, 0/3 falsos, RTF 0,23–0,24; la mesa entró completa pero RT-DETR quedó debajo del umbral |
 | confianza cruda de RT-DETR sobre la mesa | `diningtable` fue la mejor clase, 0,574, con la caja correcta; también reveló una diferencia de nombre corregida |
 | Grounding DINO pequeño, consulta “mesa roja / mesa azul” | mesa roja correcta a 0,618; 18,9 s en los dos CPU simulados, demasiado lento para ejecutarlo continuamente a bordo |
+| Grounding DINO después de reconstruir el servidor, primer pedido | carga perezosa confirmada: dos mesas a 0,798 y 0,636; 20,2 s de inferencia y 36,4 s totales; `/health` pasó de `ready=false` a `ready=true` |
 | servidor separado, consulta genérica “mesa” | mesa roja 0,897; evita confiar en el atributo de color del modelo |
 | navegación + mesa roja + servidor | llegada a 0,115 m y 4,9°; roja 3/3, azul 0/3; 17,05 s |
 | navegación + mesa azul + servidor | llegada a 0,104 m y 5,0°; azul 3/3, roja 0/3; 16,78 s |

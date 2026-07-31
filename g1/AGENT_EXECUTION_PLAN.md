@@ -1,7 +1,7 @@
 # Plan de ejecución adaptable del agente
 
 Estado de esta decisión: **ejecución adaptable con evidencia visual puntual y
-búsqueda activa implementada y verificada**, 30-jul-2026.
+búsqueda activa implementada y verificada**, 31-jul-2026.
 
 Este documento existe para poder retomar el trabajo en una sesión nueva sin
 reconstruir decisiones desde el chat. Describe el estado actual, el diseño que
@@ -58,9 +58,16 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
-Las 87 pruebas locales de `g1` y las 18 del servicio externo pasan juntas.
+Las 94 pruebas locales de `g1` y las 19 del servicio externo pasan juntas.
 El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
 servidor y mantiene un estado vacío estable.
+
+El 31-jul se volvió a probar el ciclo contra Azure, sin respuestas simuladas.
+`gpt-4.1-mini` armó un plan de un paso para “recordá este lugar”, la Jetson
+guardó `home`, el modelo revisó la medición y cerró la misión con `complete`.
+El tablero recibió dos eventos reales —planificación y revisión— con entrada,
+salida literal y resultado validado; no expuso nombres de variables secretas
+ni claves. La aprobación visual de Lucas continúa pendiente.
 
 La misión completa hasta localizar la mesa pasó dos veces. En la primera
 corrida llegó al reloj con 11,7 cm de error, confirmó el reloj con 0,949, leyó
@@ -125,9 +132,13 @@ control del cuerpo.
 
 La misma corrida encontró un límite útil: al faltar el barrido visual, el
 modelo intentó sustituirlo por navegación entre puntos conocidos. Era un plan
-formalmente válido pero físicamente inútil. Las fallas ahora pueden declarar
-una `missing_skill`; si esa capacidad no figura como lista, las dos
-validaciones sólo aceptan pedir ayuda o detener la misión.
+formalmente válido pero físicamente inútil. Ahora se distinguen dos casos. Si
+una capacidad realmente falta (`missing_skill`), servidor y Jetson sólo
+aceptan pedir ayuda o detener la misión. Si existe una recuperación declarada
+(`recoverable_with_skill`), ambos exigen `revise` y que el plan nuevo comience
+con esa capacidad. Una llamada real cambió `search_table` por
+`scan_for_table`; otra pidió ayuda correctamente cuando `align_with_table`
+seguía como `placeholder`.
 
 ## Arquitectura objetivo de este tramo
 
@@ -326,6 +337,11 @@ segura y puede corregir la parte ejecutable de su plan.
   https://docs.nav2.org/tutorials/docs/using_docking.html
 - Nav2, plazos, reintentos y separación configurable de la pose de espera:
   https://docs.nav2.org/configuration/packages/configuring-docking-server.html
+- Nav2, recuperación y replanificación mediante Behavior Trees:
+  https://docs.nav2.org/behavior_trees/index.html
+- Google SayCan, selección de capacidades limitada por lo que el robot puede
+  ejecutar realmente:
+  https://research.google/blog/towards-helpful-robots-grounding-language-in-robotic-affordances/
 
 ## Qué es oficial y qué es adaptación propia
 
