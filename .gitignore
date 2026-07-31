@@ -227,3 +227,7 @@ g1/assets/
 # telemetría cruda de Isaac; los resultados resumidos viven en la documentación
 g1/tools/wbc_*.csv
 g1/logs/
+
+# trazas binarias que el cliente WebRTC/NvStreamer escribe en el directorio
+# actual; no son código ni evidencia resumida del experimento
+NvStreamer-*.etli
