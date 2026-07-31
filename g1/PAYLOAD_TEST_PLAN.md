@@ -121,6 +121,43 @@ error máximo; las muñecas quedaron separadas `42,2 cm` y el centro del bulto a
 de la aprobación visual. No se ejecutaron `stand`, `walk` ni navegación con
 esta candidata.
 
+### Medición posterior de balanceo
+
+Lucas aprobó la forma congelada de esa candidata, pero rechazó visualmente la
+caminata cargada: el torso se balanceaba demasiado. Para cuantificarlo se
+agregaron métricas de movimiento al peldaño `walk` y se hicieron tres parejas
+deterministas. En cada pareja se mantuvieron pose, velocidad, duración y punto
+inicial; la única variable fue la masa.
+
+| Métrica al caminar (mediana; peor caso) | 0 kg | 0,5 kg |
+| --- | ---: | ---: |
+| Balance lateral central | `8,7°; 9,3°` | `8,3°; 9,7°` |
+| Balance frontal central | `2,6°; 3,7°` | `3,1°; 3,2°` |
+| Inclinación p95 | `5,8°; 5,9°` | `5,8°; 6,0°` |
+| Oscilación angular RMS | `0,41; 0,42 rad/s` | `0,42; 0,43 rad/s` |
+| Rebote vertical central | `2,0; 2,3 cm` | `2,3; 2,4 cm` |
+| Desvío lateral final | `4; 12 cm` | `8; 8 cm` |
+| Error final de rumbo | `1°; 9°` | `6°; 8°` |
+
+Al frenar, el balance lateral mediano fue `5,4°` sin carga y `5,1°` con carga;
+los peores casos fueron `6,4°` y `6,3°`. La distancia mediana de frenado pasó
+de `6 cm` a `7 cm`. Con carga, las muñecas también sostuvieron un error estable
+de aproximadamente `4,3°`, por lo que la forma visual congelada no equivale a
+una postura bien sostenida bajo gravedad.
+
+La carga empeora modestamente el balance frontal y la precisión del recorrido,
+pero no es la causa principal del movimiento lateral: la referencia sin peso
+ya oscila `8–10°`. Por lo tanto, el resultado es **fallo de transporte por
+calidad visual**, aunque no haya caída. No se elevarán límites para convertirlo
+en éxito.
+
+Este diagnóstico sigue el patrón oficial de AGILE: escenarios deterministas
+con la misma secuencia de comandos y diagnósticos de calidad del movimiento,
+incluida la velocidad angular de la base:
+
+- <https://nvidia-isaac.github.io/WBC-AGILE/tasks.html>
+- <https://arxiv.org/abs/2603.20147>
+
 El banco aún publica `/g1/reset` sin confirmación correlacionada. Una de tres
 navegaciones comenzó a `32 cm` del origen esperado, aunque el objetivo relativo
 y la llegada fueron válidos. Antes de usar el reinicio para comparar posiciones

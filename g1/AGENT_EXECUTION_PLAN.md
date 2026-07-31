@@ -7,6 +7,32 @@ Este documento existe para poder retomar el trabajo en una sesión nueva sin
 reconstruir decisiones desde el chat. Describe el estado actual, el diseño que
 vamos a implementar y lo que permitirá demostrar.
 
+## Actualización posterior: balanceo de transporte cuantificado
+
+Último código probado: `b192999`. La VM quedó encendida, Isaac activo, el
+robot congelado en el origen y la carga retirada.
+
+Lucas aprobó la forma congelada de la nueva pose, pero rechazó visualmente la
+caminata con `0,5 kg` por balanceo excesivo. El recorrido y el frenado pasaban
+los límites viejos, que no medían la calidad del movimiento del torso. Por eso
+`checks.py walk` ahora registra inclinación lateral y frontal, velocidad
+angular y rebote vertical durante caminata y frenado. Pasaron `125` pruebas de
+`g1` y `21` del servidor, `146` en total.
+
+Se hicieron tres parejas controladas con la misma pose, velocidad y duración;
+la única variable fue `0` frente a `0,5 kg`. La mediana del balance lateral al
+caminar fue `8,7°` sin peso y `8,3°` con peso; los peores casos fueron `9,3°` y
+`9,7°`. La inclinación total p95 tuvo la misma mediana (`5,8°`) y el peso elevó
+el balance frontal mediano de `2,6°` a `3,1°`. La desviación lateral mediana sí
+empeoró de `4 cm` a `8 cm`, y el rumbo final mediano de `1°` a `6°`.
+
+Conclusión: el peso degrada algo la precisión, pero no explica el balanceo
+grande. La marcha base con esta pose ya oscila aproximadamente `8–10°` de lado
+a lado. La locomoción no se cayó, pero la prueba integral de transporte queda
+**rechazada visualmente** y no debe lanzarse otra misión completa. El próximo
+experimento debe separar pose de brazos y carga: medir `reposo`, `transporte`
+sin carga y `transporte` con `0,5 kg`, sin cambiar otra variable.
+
 ## Cierre de sesión del 31-jul-2026
 
 Último código probado: `498a15d`. La VM se apagó después de este cierre.
