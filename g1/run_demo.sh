@@ -305,11 +305,33 @@ status)
         echo "  detector SIN DATOS: el proceso existe pero no respondió en 5 s"
     fi
     echo "== la mision =="
-    # El cierre normal de ROS deja una traza técnica en el archivo. Mostrar
-    # sólo los mensajes del agente evita presentar ese residuo como una falla.
-    sudo docker exec jetson sh -c \
-        "grep -F '[agent]:' /tmp/agent.log 2>/dev/null | tail -6" \
-        | sed 's/\[INFO\] \[[0-9.]*\] \[agent\]: /  /'
+    mission_state=$(
+        sudo docker exec jetson bash -lc \
+            "$ROS && timeout 5 ros2 topic echo --once --field data /g1/mission_state" \
+            2>/dev/null | head -1
+    )
+    mission_phase=$(
+        printf '%s' "$mission_state" | python3 -c \
+            'import json, sys; print(json.load(sys.stdin).get("state", ""))' \
+            2>/dev/null || true
+    )
+    active_step=$(
+        printf '%s' "$mission_state" | python3 -c \
+            'import json, sys; print(json.load(sys.stdin).get("active_step_id") or "")' \
+            2>/dev/null || true
+    )
+    if [ "$mission_phase" = "idle" ]; then
+        echo "  sin misión activa; el agente está esperando"
+    elif [ -n "$mission_phase" ]; then
+        echo "  estado vivo: $mission_phase"
+        if [ -n "$active_step" ]; then
+            echo "  paso activo: $active_step"
+        fi
+    else
+        # Un archivo de log puede contener una misión vieja. Si el mensaje
+        # vivo falta, es más honesto declararlo que mostrar historia obsoleta.
+        echo "  SIN DATOS VIVOS del agente"
+    fi
     ;;
 
 kill)
