@@ -32,13 +32,13 @@ class DashboardContractTest(unittest.TestCase):
         ]
         self.assertEqual(duplicates, [])
 
-    def test_history_and_map_are_above_the_model_audit(self):
-        self.assertLess(
-            DASHBOARD_HTML.index('id="map"'),
-            DASHBOARD_HTML.index('class="card brain-card"'),
-        )
+    def test_history_is_with_camera_and_map_is_below_models(self):
         self.assertLess(
             DASHBOARD_HTML.index('id="mission-timeline"'),
+            DASHBOARD_HTML.index('class="card brain-card"'),
+        )
+        self.assertGreater(
+            DASHBOARD_HTML.index('id="map"'),
             DASHBOARD_HTML.index('class="card brain-card"'),
         )
         self.assertIn(

@@ -115,12 +115,13 @@
       font-weight:700;
     }
     .hint{margin-top:7px;color:var(--faint);font-size:11px}
-    .map-panel{
+    .camera-secondary{
       margin-top:16px;
       padding-top:14px;
       border-top:1px solid var(--border);
     }
-    .map-panel canvas{max-height:360px}
+    .map-card{margin-bottom:16px}
+    .map-card canvas{max-width:960px;margin:0 auto}
     .tags{margin-top:8px}
     .tag,.status-badge{
       display:inline-block;
@@ -475,12 +476,10 @@
           entrega un resultado reciente, se muestra ese cuadro exacto con sus
           cajas; nunca se pegan cajas viejas sobre una imagen nueva.
         </div>
-        <div class="map-panel">
-          <h2>Mapa y recorrido</h2>
-          <canvas id="map" width="720" height="430"></canvas>
-          <div class="hint">
-            Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
-            vigente. Punto amarillo: última superficie 3D del objeto.
+        <div class="camera-secondary">
+          <h2>Historia de la misión — quién produjo cada dato</h2>
+          <div class="timeline" id="mission-timeline">
+            <span class="empty">Todavía no hay eventos.</span>
           </div>
         </div>
       </article>
@@ -501,13 +500,6 @@
         </div>
       </article>
     </section>
-
-    <article class="card" style="margin-bottom:16px">
-      <h2>Historia de la misión — quién produjo cada dato</h2>
-      <div class="timeline" id="mission-timeline">
-        <span class="empty">Todavía no hay eventos.</span>
-      </div>
-    </article>
 
     <article class="card brain-card">
       <div class="brain-heading">
@@ -600,6 +592,15 @@
           equilibrio, las piernas ni los motores. Si no entrega un
           razonamiento interno, el tablero no lo inventa.
         </div>
+      </div>
+    </article>
+
+    <article class="card map-card">
+      <h2>Mapa y recorrido</h2>
+      <canvas id="map" width="960" height="430"></canvas>
+      <div class="hint">
+        Azul: robot y dirección. Línea: recorrido. Cruz verde: objetivo
+        vigente. Punto amarillo: última superficie 3D del objeto.
       </div>
     </article>
 
