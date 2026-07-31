@@ -232,7 +232,9 @@ ocho esferas de los pies contra MuJoCo.
   inyecciones útiles se conservarán sólo bajo un perfil `test` explícito, con
   su origen mostrado en el tablero. El cierre será una misión bajo perfil de
   despliegue, seguida por fallas inducidas de red, visión y localización; ninguna
-  deberá activar un reemplazo silencioso.
+  deberá activar un reemplazo silencioso. La clasificación, el perfil sin
+  ayudas y sus criterios están fijados en
+  [`DEPLOYMENT_READINESS_PLAN.md`](DEPLOYMENT_READINESS_PLAN.md).
 
 - **Recuperación visual desde otro lugar**: todavía no existe la capacidad
   `relocate_viewpoint`. Después de dos barridos el agente debe pedir ayuda; no
@@ -265,8 +267,9 @@ ocho esferas de los pies contra MuJoCo.
   5. volver a encender en otra pose y localizarse sobre el mapa guardado;
   6. integrar Nav2 con mapa global, mapa local de obstáculos, planificación de
      ruta y evasión de obstáculos;
-  7. conectar la salida de Nav2 como solicitante de `mobility_authority`; Nav2
-     nunca publicará por fuera del único dueño de movimiento;
+  7. conectar Nav2 como solicitante de `mobility_authority` y pasar la salida
+     autorizada por Collision Monitor, el último filtro de software antes de
+     `/cmd_vel`; ninguna fuente publicará por fuera de esa cadena;
   8. reemplazar el navegador simple detrás de la misma Action
      `NavigateToPose`, sin cambiar al agente;
   9. agregar puntos de observación alcanzables para buscar objetos y la

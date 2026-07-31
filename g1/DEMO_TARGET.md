@@ -53,6 +53,12 @@ El contrato completo y el orden de implementación están en
 [`AGENT_EXECUTION_PLAN.md`](AGENT_EXECUTION_PLAN.md). Nav2, SLAM, video
 continuo y una VLA de cuerpo completo quedan fuera de este tramo.
 
+Después de aprobar visualmente este tramo se ejecutará la auditoría de ayudas
+y el camino de LiDAR a Nav2 definidos en
+[`DEPLOYMENT_READINESS_PLAN.md`](DEPLOYMENT_READINESS_PLAN.md). Una misión con
+carga anexada puede aprobar locomoción con peso, pero no cuenta como agarre ni
+como ensayo de despliegue.
+
 ## Preparación del lugar real
 
 El mapeo no se repite obligatoriamente antes de cada misión:
