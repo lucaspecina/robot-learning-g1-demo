@@ -408,6 +408,9 @@ class TableAlignment(Node):
                     math.degrees(last_command.yaw_error_rad),
                     2,
                 ),
+                linear_speed_mps=round(pose.linear_speed, 4),
+                angular_speed_radps=round(pose.angular_speed, 4),
+                detection_count=detection_count,
             )
             self.get_logger().info(message)
         elif terminal == "canceled":
