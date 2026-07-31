@@ -315,6 +315,9 @@ def check_stand(c: Checker) -> bool:
     print("  stand_hold es el único dueño; navegación y pruebas no intervienen.")
     print("  Dura 60 s de reloj (~11 s del mundo del robot).\n")
 
+    # Cada peldaño limpia su propio estado para que repetirlo no dependa de la
+    # carga o la postura que dejó la corrida anterior.
+    c.reset_robot()
     c.spin_for(0.5)
     if c.mobility_owner != "stand":
         return veredicto(
@@ -563,9 +566,6 @@ def main():
                 "\n  ROBOT NO ACTIVO: la prueba no vale si está congelado. "
                 "Ejecutá primero: bash run_demo.sh start\n"
             )
-            return 1
-
-        if not c.prepare_payload():
             return 1
 
         secuencia = list(CHECKS) if cual == "all" else [cual]
