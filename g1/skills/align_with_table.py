@@ -51,6 +51,10 @@ EXECUTION_TIMEOUT_S = 180.0
 SAFE_STAND_TIMEOUT_S = 3.0
 MINIMUM_BODY_HEIGHT_M = 0.60
 PROGRESS_TIMEOUT_S = 35.0
+# Nav2 permite tres reintentos por defecto. Una falla azul se recuperó con el
+# primer reintento idéntico; limitarlo a uno conserva esa recuperación medida
+# sin esconder una locomoción poco confiable detrás de intentos repetidos.
+MAX_CONTROL_RETRIES = 1
 
 
 def yaw_from_quaternion(w: float, x: float, y: float, z: float) -> float:
@@ -277,6 +281,7 @@ class TableAlignment(Node):
         self.controller.reset()
         progress.reset()
         self.publish_status("esperando_percepcion")
+        retry_count = 0
 
         terminal = "failed"
         message = "la alineación terminó sin resultado"
@@ -314,6 +319,7 @@ class TableAlignment(Node):
                         goal_handle,
                         DockRobot.Feedback.INITIAL_PERCEPTION,
                         started_at,
+                        retry_count,
                     )
                     time.sleep(1.0 / RATE_HZ)
                     continue
@@ -326,6 +332,7 @@ class TableAlignment(Node):
                         goal_handle,
                         DockRobot.Feedback.INITIAL_PERCEPTION,
                         started_at,
+                        retry_count,
                     )
                     time.sleep(1.0 / RATE_HZ)
                     continue
@@ -344,6 +351,7 @@ class TableAlignment(Node):
                         goal_handle,
                         DockRobot.Feedback.CONTROLLING,
                         started_at,
+                        retry_count,
                     )
                     time.sleep(1.0 / RATE_HZ)
                     continue
@@ -355,6 +363,7 @@ class TableAlignment(Node):
                     goal_handle,
                     DockRobot.Feedback.CONTROLLING,
                     started_at,
+                    retry_count,
                 )
                 self.publish_status(
                     command.phase,
@@ -373,6 +382,36 @@ class TableAlignment(Node):
                     error_code = DockRobot.Result.NONE
                     break
                 if not progress.update(pose, now):
+                    if retry_count < MAX_CONTROL_RETRIES:
+                        retry_count += 1
+                        self.publish_status(
+                            "reintentando",
+                            reason="la base no convirtió la orden en avance",
+                            retry_count=retry_count,
+                            distance_error_m=round(
+                                command.distance_error_m,
+                                4,
+                            ),
+                        )
+                        if not self.return_to_safe_state(
+                            "pausa segura antes de reintentar alineación"
+                        ):
+                            message = (
+                                "la alineación se estancó y no pudo volver "
+                                "a STAND para reintentar"
+                            )
+                            error_code = DockRobot.Result.FAILED_TO_CONTROL
+                            break
+                        with self.state_lock:
+                            self.finishing = False
+                            self.had_authority = False
+                            self.interrupt_reason = None
+                        self.controller.reset()
+                        progress.reset()
+                        authority_deadline = (
+                            time.monotonic() + AUTHORITY_WAIT_TIMEOUT_S
+                        )
+                        continue
                     message = "la alineación no mostró progreso medible"
                     error_code = DockRobot.Result.FAILED_TO_CONTROL
                     break
@@ -391,6 +430,7 @@ class TableAlignment(Node):
                 self.interrupt_reason = None
                 self.selected_table = None
 
+        result.num_retries = retry_count
         if not safe and terminal != "canceled":
             terminal = "failed"
             message += "; no se confirmó el regreso a STAND"
@@ -411,6 +451,7 @@ class TableAlignment(Node):
                 linear_speed_mps=round(pose.linear_speed, 4),
                 angular_speed_radps=round(pose.angular_speed, 4),
                 detection_count=detection_count,
+                retry_count=retry_count,
             )
             self.get_logger().info(message)
         elif terminal == "canceled":
@@ -443,11 +484,17 @@ class TableAlignment(Node):
             self.get_logger().error(message)
         return result
 
-    def publish_feedback(self, goal_handle, state: int, started_at: float):
+    def publish_feedback(
+        self,
+        goal_handle,
+        state: int,
+        started_at: float,
+        retry_count: int,
+    ):
         feedback = DockRobot.Feedback()
         feedback.state = state
         feedback.docking_time = duration_message(time.monotonic() - started_at)
-        feedback.num_retries = 0
+        feedback.num_retries = retry_count
         goal_handle.publish_feedback(feedback)
 
     def publish_command(self, linear_x: float, angular_z: float):

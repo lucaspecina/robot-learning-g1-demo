@@ -178,6 +178,7 @@ class AlignmentChecker(Node):
         )
         print(
             f"visión: {status.get('detection_count', 'sin dato')} mediciones; "
+            f"reintentos: {wrapped.result.num_retries}; "
             f"dueño final: {self.mobility_owner}"
         )
         result = wrapped.result
