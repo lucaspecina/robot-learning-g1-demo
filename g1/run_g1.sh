@@ -116,6 +116,6 @@ export PYTHONPATH="$WBC_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 # `LISTO` de una corrida anterior si Isaac todavía no llegó a iniciar.
 : > "$LOG"
 setsid nohup ~/go2-lab/IsaacLab/isaaclab.sh -p g1_robot.py $MODO_VIDEO $ARGS \
-    > "$LOG" 2>&1 < /dev/null 9>&- &
+    > "$LOG" 2>&1 < /dev/null 8>&- 9>&- &
 echo "lanzado: modo=$MODE modelo=$MODEL carga=${PAYLOAD}kg ${EXTRA}"
 echo "seguir con: bash run_g1.sh status"
