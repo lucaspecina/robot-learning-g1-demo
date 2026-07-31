@@ -24,12 +24,18 @@ import math
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
+
+from motion_quality import motion_quality_metrics  # noqa: E402
 
 STANDING_HEIGHT_MIN = 0.60   # por debajo de esto ya no esta de pie
 STAND_MAX_ERROR_M = 0.15     # sobre de espera libre; manipular exige mucho menos
@@ -60,6 +66,8 @@ class Checker(Node):
         self.arm_status = None
         self.payload_status = None
         self.test_payload_kg = payload_kg
+        self.motion_capture_phase = None
+        self.motion_samples = {}
         self.pub_cmd = self.create_publisher(Twist, "/g1/cmd_vel/test", 10)
         self.pub_mobility = self.create_publisher(
             String, "/g1/mobility/request", 10
@@ -97,6 +105,25 @@ class Checker(Node):
         yaw = math.atan2(2.0 * (o.w * o.z + o.x * o.y),
                          1.0 - 2.0 * (o.y * o.y + o.z * o.z))
         self.pose = (p.x, p.y, p.z, yaw)
+        if self.motion_capture_phase is not None:
+            roll = math.atan2(
+                2.0 * (o.w * o.x + o.y * o.z),
+                1.0 - 2.0 * (o.x * o.x + o.y * o.y),
+            )
+            pitch_term = max(
+                -1.0,
+                min(1.0, 2.0 * (o.w * o.y - o.z * o.x)),
+            )
+            self.motion_samples.setdefault(
+                self.motion_capture_phase,
+                [],
+            ).append({
+                "roll_rad": roll,
+                "pitch_rad": math.asin(pitch_term),
+                "height_m": p.z,
+                "angular_x_radps": msg.twist.twist.angular.x,
+                "angular_y_radps": msg.twist.twist.angular.y,
+            })
 
     def on_nav(self, msg: String):
         self.nav = msg.data
@@ -235,6 +262,31 @@ class Checker(Node):
             self.send_cmd(vx=vx, vyaw=vyaw)
             self.spin_for(0.2)
         self.send_cmd()
+
+    def start_motion_capture(self, phase: str):
+        self.motion_samples = {phase: []}
+        self.motion_capture_phase = phase
+
+    def change_motion_capture_phase(self, phase: str):
+        self.motion_samples.setdefault(phase, [])
+        self.motion_capture_phase = phase
+
+    def stop_motion_capture(self):
+        self.motion_capture_phase = None
+
+
+def print_motion_quality(label: str, metrics: dict):
+    print(
+        f"  {label}: balance lateral {metrics['roll_p90_span_deg']:.1f}°, "
+        f"frontal {metrics['pitch_p90_span_deg']:.1f}°, "
+        f"inclinación p95 {metrics['tilt_p95_deg']:.1f}°"
+    )
+    print(
+        f"            oscilación angular RMS "
+        f"{metrics['angular_speed_rms_radps']:.2f} rad/s, "
+        f"rebote vertical {metrics['height_p90_span_m'] * 100:.1f} cm "
+        f"({metrics['sample_count']} muestras)"
+    )
 
 
 def veredicto(ok: bool, detalle: str) -> bool:
@@ -385,8 +437,12 @@ def check_walk(c: Checker) -> bool:
     x0, y0, z0, yaw0 = c.pose
     print(f"  arranca: altura {z0:.3f} m en ({x0:.2f}, {y0:.2f}), rumbo {math.degrees(yaw0):.0f} grados")
 
+    c.start_motion_capture("walking")
     try:
         c.drive(40.0, vx=WALK_SPEED)
+        walking_quality = motion_quality_metrics(
+            c.motion_samples["walking"]
+        )
         x1, y1, z1, yaw1 = c.pose
         dx, dy = x1 - x0, y1 - y0
         forward = dx * math.cos(yaw0) + dy * math.sin(yaw0)
@@ -404,9 +460,14 @@ def check_walk(c: Checker) -> bool:
             f"            trayectoria {path_angle:.1f} grados fuera de la recta, "
             f"cuerpo girado {walk_yaw_error:.1f} grados"
         )
+        print_motion_quality("torso caminando", walking_quality)
 
         print("  ahora comando cero: tiene que frenar y quedarse...")
+        c.change_motion_capture_phase("braking")
         c.spin_for(20.0)
+        braking_quality = motion_quality_metrics(
+            c.motion_samples["braking"]
+        )
         x2, y2, z2, yaw2 = c.pose
         despues_de_frenar = math.hypot(x2 - x1, y2 - y1)
         giro = abs(math.degrees(math.atan2(
@@ -414,7 +475,9 @@ def check_walk(c: Checker) -> bool:
         )))
         print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
               f"giro {giro:.0f} grados en total")
+        print_motion_quality("torso al frenar", braking_quality)
     finally:
+        c.stop_motion_capture()
         c.release_test_mobility("prueba de caminar terminada")
 
     if z2 <= STANDING_HEIGHT_MIN:
