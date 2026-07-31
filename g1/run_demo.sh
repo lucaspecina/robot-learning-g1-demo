@@ -266,12 +266,26 @@ reset)
     ;;
 
 status)
+    echo "== la versión =="
+    if repo_root=$(git -C "$D" rev-parse --show-toplevel 2>/dev/null); then
+        branch=$(git -C "$repo_root" branch --show-current)
+        commit=$(git -C "$repo_root" rev-parse --short=12 HEAD)
+        if [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
+            cleanliness="CON CAMBIOS LOCALES"
+        else
+            cleanliness="limpia"
+        fi
+        echo "  $branch @ $commit · $cleanliness"
+    else
+        echo "  SIN GIT: no se puede identificar el código ejecutado"
+    fi
     echo "== el robot =="
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
     for p in mobility_authority stand_hold go_to object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
-        if sudo docker exec jetson pgrep -f "$p.py" >/dev/null 2>&1; then
+        if sudo docker exec jetson \
+            pgrep -f "^python3 .*/$p.py$" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
             echo "  $p: DETENIDO"

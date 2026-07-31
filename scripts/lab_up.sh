@@ -9,6 +9,7 @@ set -euo pipefail
 RG=rg-go2-lab
 VM=vm-go2-isaac
 USER=lucas
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # PowerShell resuelve "bash" a WSL. En ese caso usamos el SSH de Windows
 # porque allí vive la clave; el SSH interno de WSL mira otro directorio.
@@ -35,6 +36,9 @@ until "${SSH[@]}" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$USER
     sleep 5; printf .
 done
 echo " ssh OK"
+
+echo ">> Sincronizando el commit publicado con la VM..."
+bash "$SCRIPT_DIR/lab_sync.sh" "$IP"
 
 echo ">> Lanzando la demo G1 completa (primer arranque ~2 min)..."
 "${SSH[@]}" "$USER@$IP" 'cd ~/go2-lab/g1 && bash run_demo.sh up'

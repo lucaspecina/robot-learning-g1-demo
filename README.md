@@ -34,9 +34,23 @@ Corre en una VM de Azure con GPU (`rg-go2-lab` / `vm-go2-isaac` — nombres
 internos de la época Go2, sin valor semántico). Encendido y apagado:
 
 ```bash
-bash scripts/lab_up.sh      # VM -> simulador -> jupyter -> túnel (la terminal queda de túnel)
+bash scripts/lab_up.sh      # GitHub -> VM -> simulador -> túnel (la terminal queda de túnel)
 bash scripts/lab_down.sh    # cierra todo y desasigna la VM (deja de facturar)
 ```
+
+El código se modifica y publica desde Windows. `lab_up.sh` verifica que el
+commit local ya exista en GitHub, exige que el clon de la VM no tenga cambios
+ocultos y lo actualiza únicamente mediante un avance directo de Git. Si sólo
+se quiere sincronizar una VM que ya está encendida:
+
+```bash
+bash scripts/lab_sync.sh
+```
+
+La copia ejecutable vive en
+`~/go2-lab/robot-learning-g1-demo`; `~/go2-lab/g1` es un enlace compatible
+para los scripts históricos. Modelos generados, logs y secretos permanecen
+ignorados por Git. Los archivos fuente no se despliegan con `scp`.
 
 - **El simulador**: fork propio de isaac-go2-ros2 porteado a Isaac Sim 5.1 /
   IsaacLab / ROS 2 Jazzy ([isaac-go2-ros2-port](https://github.com/lucaspecina/isaac-go2-ros2-port),
