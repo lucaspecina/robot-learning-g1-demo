@@ -43,10 +43,10 @@ RATE_HZ = 10.0
 CLAIM_RETRY_S = 0.5
 AUTHORITY_WAIT_TIMEOUT_S = 10.0
 INITIAL_PERCEPTION_TIMEOUT_S = 15.0
-# RT-DETR tarda 2,1--2,4 s en esta Jetson simulada. Dos cuadros que no pudieron
-# emparejar color y profundidad produjeron un hueco medido de 6,4 s; ocho
-# segundos conservan el corte seguro sin declarar caída una latencia normal.
-DETECTION_TIMEOUT_S = 8.0
+# RT-DETR tarda 2,1--2,4 s en esta Jetson simulada. Tres cuadros que no pudieron
+# emparejar color y profundidad produjeron un hueco medido de 8,57 s; once
+# segundos agregan un único ciclo y conservan un corte finito y verificable.
+DETECTION_TIMEOUT_S = 11.0
 EXECUTION_TIMEOUT_S = 180.0
 SAFE_STAND_TIMEOUT_S = 3.0
 MINIMUM_BODY_HEIGHT_M = 0.60
@@ -431,6 +431,12 @@ class TableAlignment(Node):
                             math.degrees(last_command.yaw_error_rad),
                             2,
                         ),
+                        "linear_speed_mps": round(pose.linear_speed, 4),
+                        "angular_speed_radps": round(
+                            pose.angular_speed,
+                            4,
+                        ),
+                        "detection_count": detection_count,
                     }
                 )
             self.publish_status("fallo", **failure_fields)
