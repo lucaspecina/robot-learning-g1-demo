@@ -68,7 +68,7 @@ preflight() {
     local zombis
     zombis=$(pgrep -f "g1_robot.p[y]" 2>/dev/null | wc -l)
     if [ "$zombis" -gt 0 ]; then
-        echo "   habia $zombis instancia(s) del robot dando vueltas: matando"
+        echo "   había $zombis proceso(s) de la cadena de Isaac: limpiando"
         bash ~/go2-lab/g1/run_g1.sh stop >/dev/null
     fi
     stop_layers

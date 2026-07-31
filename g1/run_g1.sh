@@ -17,6 +17,15 @@
 #   bash run_g1.sh wbc 29dof 0 --camera   con la camara publicando
 set -uo pipefail
 
+# Dos lanzadores casi simultáneos podían completar ambos su limpieza antes de
+# que cualquiera registrara el nuevo proceso. El bloqueo serializa esa zona
+# crítica; el robot queda desprendido y el archivo se libera al terminar.
+exec 9>/tmp/g1_robot_launcher.lock
+if ! flock -n 9; then
+    echo "ERROR: ya hay otro lanzador modificando el robot" >&2
+    exit 2
+fi
+
 WBC_ROOT=~/go2-lab/WBC-AGILE
 WBC_COMMIT=7259792cf10803aab814d101134d493d24c8f22f
 WBC_POLICY=$WBC_ROOT/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt
