@@ -195,6 +195,20 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, _extra = parser.parse_known_args()
 sys.argv = [sys.argv[0]] + [a for a in _extra if a.startswith("--/")]
 
+if args_cli.lidar:
+    # NVIDIA exige Motion BVH para compensar el barrido de un LiDAR que se
+    # mueve con el robot. Se solicita sólo con este sensor porque aumenta el
+    # uso de VRAM y el tiempo de render de toda la aplicación.
+    motion_bvh_args = [
+        "--/renderer/raytracingMotion/enabled=true",
+        "--/renderer/raytracingMotion/enableHydraEngineMasking=true",
+        "--/renderer/raytracingMotion/enabledForHydraEngines=0,1,2,3,4",
+    ]
+    # AppLauncher retira sus `kit_args` apenas crea la aplicación, antes de
+    # que carguemos el sensor. Dejarlos como argumentos directos mantiene los
+    # ajustes disponibles durante la carga tardía de la extensión RTX.
+    sys.argv.extend(motion_bvh_args)
+
 if args_cli.arm_controller == "pink":
     # Isaac Lab exige cargar su Pinocchio antes que Isaac Sim; de otro modo
     # ambas instalaciones registran tipos C++ incompatibles entre sí.
@@ -205,9 +219,40 @@ if args_cli.arm_controller == "pink":
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+if args_cli.lidar:
+    import carb
+
+    motion_bvh_enabled = carb.settings.get_settings().get_as_bool(
+        "/renderer/raytracingMotion/enabled"
+    )
+    print(
+        "[robot] Motion BVH solicitado: "
+        f"ajuste global {'activo' if motion_bvh_enabled else 'INACTIVO'}; "
+        "el sensor confirma el soporte al iniciar",
+        flush=True,
+    )
+    if not motion_bvh_enabled:
+        raise RuntimeError(
+            "Isaac no activó Motion BVH; no es seguro publicar un barrido "
+            "desde un LiDAR móvil"
+        )
+
 # --- 2. Ahora si, el resto ---
 import numpy as np
 import torch
+
+if args_cli.lidar:
+    compute_capability = torch.cuda.get_device_capability()
+    if compute_capability < (8, 0):
+        # La T4 acepta el ajuste global pero el plugin RTX medido rechaza la
+        # compensación al crear el LiDAR. Mantener el aviso explícito evita
+        # usar una nube móvil como si estuviera corregida.
+        print(
+            "[robot] AVISO: GPU compute "
+            f"{compute_capability[0]}.{compute_capability[1]}; "
+            "verificar el aviso del LiDAR antes de mapear en movimiento",
+            flush=True,
+        )
 
 from isaacsim.core.utils.extensions import enable_extension
 from isaacsim.core.simulation_manager import SimulationManager

@@ -13,7 +13,11 @@ LIDAR_PRIM_NAME = "lidar"
 LIDAR_FRAME = "lidar_link"
 LIDAR_TOPIC = "/g1/lidar/points"
 PROVISIONAL_PROFILE = "Example_Rotary"
-LIDAR_OFFSET = (0.0, 0.0, 0.12)
+# El perfil de 360° no puede quedar dentro de la carcasa opaca del USD. A
+# 0.12 m entregó 0 puntos; a 0.35 m recuperó los 9.216 puntos del caso fijo.
+# Es un montaje de simulación provisional hasta confirmar el LiDAR y soporte
+# mecánico exactos del G1 EDU que se compre.
+LIDAR_OFFSET = (0.0, 0.0, 0.35)
 POINT_CLOUD_ANNOTATOR = "IsaacExtractRTXSensorPointCloudNoAccumulator"
 
 
