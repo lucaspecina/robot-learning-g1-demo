@@ -213,6 +213,11 @@ from isaacsim.core.utils.extensions import enable_extension
 from isaacsim.core.simulation_manager import SimulationManager
 
 enable_extension("isaacsim.ros2.bridge")
+if args_cli.lidar:
+    # AppLauncher usa una experiencia mínima y no carga sensores RTX por
+    # transitividad. NVIDIA exige habilitar la extensión antes de importar su
+    # API; confiar en la aplicación completa ocultaba esta dependencia.
+    enable_extension("isaacsim.sensors.rtx")
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation

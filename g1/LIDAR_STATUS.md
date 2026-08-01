@@ -1,6 +1,6 @@
 # Estado del LiDAR simulado
 
-Fecha de corte: 2026-07-30.
+Fecha de corte: 2026-08-01.
 
 ## Para qué lo queremos
 
@@ -32,11 +32,21 @@ configuraciones EDU.
 | Optimización Fabric apagada | 0; 178 vacíos |
 | Lectura interna, antes del puente ROS | 0 sostenido |
 | Aplicación completa de Isaac Sim | prueba inválida: el puente ROS se cayó al iniciar |
+| Misma referencia mínima con `AppLauncher`, sin extensión RTX explícita | falla al importar `isaacsim.sensors.rtx` |
+| `AppLauncher` con `isaacsim.sensors.rtx` habilitada | **72.841 puntos**, después de 1 cuadro vacío |
 
 La ausencia de paredes era un defecto real de la escena anterior, pero **no**
 era la causa de la nube vacía: una pared aislada no cambió el resultado. La
 lectura interna en cero también descarta que ROS estuviera perdiendo puntos ya
 calculados.
+
+El caso mínimo con `AppLauncher` encontró una dependencia que antes quedaba
+oculta: la experiencia liviana de Isaac Lab no carga la extensión
+`isaacsim.sensors.rtx`. La documentación oficial exige habilitarla antes de
+usar el sensor. Al hacerlo, la misma pared produjo `72.841` puntos. Esto
+demuestra que `AppLauncher` no es incompatible con el LiDAR y deja un cambio
+concreto para la integración del G1: habilitar la extensión antes de importar
+`LidarRtx` y volver a ejecutar la puerta ROS completa.
 
 ## Decisión
 
@@ -52,11 +62,17 @@ calculados.
 
 ## Próximo experimento útil
 
-No repetir combinaciones sobre el G1. Preparar un caso mínimo con
-`AppLauncher` de IsaacLab, una pared y el LiDAR, y reportarlo a NVIDIA si
-reproduce el cero. En paralelo se puede evaluar una versión de Isaac Sim donde
-los problemas de RTX LiDAR estén corregidos, pero en una rama separada: una
-actualización no puede poner en riesgo la locomoción AGILE ya verificada.
+Ejecutar el G1 quieto con una sola diferencia respecto de la integración que
+publicaba vacío: `isaacsim.sensors.rtx` habilitada explícitamente. La prueba
+debe pasar `tools/check_lidar.py`, que exige tres nubes completas, puntos
+finitos, horas distintas y el marco `lidar_link`. Si pasa, habilitar Motion BVH
+—la representación de movimiento que NVIDIA exige para corregir barridos de
+un sensor móvil— y recién después repetir quietud, caminata y frenado.
+
+Isaac Sim 5.1 ya figura como versión sin soporte. Una prueba posterior sobre
+una versión nueva queda justificada si la integración continúa fallando, pero
+siempre en una rama o instalación separada: una actualización no puede poner
+en riesgo la locomoción AGILE ya verificada.
 
 Después de recuperar puntos crudos:
 
@@ -71,6 +87,7 @@ Después de recuperar puntos crudos:
 ## Fuentes primarias y confiables
 
 - [NVIDIA: tutorial ROS 2 para RTX LiDAR](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_rtx_lidar.html)
+- [NVIDIA: extensión RTX y Motion BVH](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_rtx.html)
 - [NVIDIA Isaac Sim 5.1: notas de versión](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/release_notes.html)
 - [Unitree G1: página oficial del producto](https://www.unitree.com/g1)
 - [Unitree LiDAR SDK: salida PointCloud2 oficial](https://github.com/unitreerobotics/unilidar_sdk2)

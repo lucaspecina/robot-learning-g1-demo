@@ -19,6 +19,14 @@ simulation_app = app_launcher.app
 import numpy as np  # noqa: E402
 from isaacsim.core.api import World  # noqa: E402
 from isaacsim.core.api.objects import FixedCuboid  # noqa: E402
+from isaacsim.core.utils.extensions import enable_extension  # noqa: E402
+
+
+# La experiencia mínima de AppLauncher no incluye sensores RTX. Habilitar la
+# extensión explícitamente reproduce el contrato que debe usar g1_robot.py.
+enable_extension("isaacsim.sensors.rtx")
+
+
 from isaacsim.sensors.rtx import LidarRtx  # noqa: E402
 
 
