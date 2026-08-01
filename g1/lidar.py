@@ -14,6 +14,7 @@ LIDAR_FRAME = "lidar_link"
 LIDAR_TOPIC = "/g1/lidar/points"
 PROVISIONAL_PROFILE = "Example_Rotary"
 LIDAR_OFFSET = (0.0, 0.0, 0.12)
+POINT_CLOUD_ANNOTATOR = "IsaacExtractRTXSensorPointCloudNoAccumulator"
 
 
 class LidarBridge:
@@ -39,13 +40,34 @@ class LidarBridge:
         )
         self.profile = profile
         self.initialized = False
+        self.best_internal_points = 0
+        self.rendered_frames = 0
 
     def initialize(self):
         """Termina de iniciar el sensor después del primer reset físico."""
         self.sensor.initialize()
+        # Medir antes de ROS separa un sensor vacío de un puente que pierde
+        # datos ya calculados. Es el mismo lector de la referencia positiva.
+        self.sensor.attach_annotator(POINT_CLOUD_ANNOTATOR)
         self.sensor.attach_writer(
             "RtxLidarROS2PublishPointCloud",
             topicName=LIDAR_TOPIC,
             frameId=LIDAR_FRAME,
         )
         self.initialized = True
+
+    def record_internal_points(self) -> tuple[int, bool]:
+        """Devuelve puntos crudos y avisa sólo cuando aparece un nuevo máximo."""
+        payload = self.sensor.get_current_frame().get(
+            POINT_CLOUD_ANNOTATOR,
+            {},
+        )
+        points = np.asarray(payload.get("data", []))
+        point_count = int(points.size // 3)
+        self.rendered_frames += 1
+        improved = point_count > self.best_internal_points
+        self.best_internal_points = max(
+            self.best_internal_points,
+            point_count,
+        )
+        return point_count, improved

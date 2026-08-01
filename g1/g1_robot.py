@@ -1295,8 +1295,22 @@ def main():
         # tanto como la fisica y no aporta nada al control. Se renderiza cada
         # render_every pasos, suficiente para mirar por el visor.
         robot.write_data_to_sim()
-        sim.step(render=(step % render_every == 0))
+        rendered = step % render_every == 0
+        sim.step(render=rendered)
         robot.update(physics_dt)
+        if lidar_bridge is not None and rendered:
+            point_count, improved = lidar_bridge.record_internal_points()
+            if improved:
+                print(
+                    f"[robot] LiDAR interno: {point_count} puntos "
+                    f"en cuadro renderizado {lidar_bridge.rendered_frames}",
+                    flush=True,
+                )
+            elif lidar_bridge.rendered_frames == 100:
+                print(
+                    "[robot] LiDAR interno: 0 puntos después de 100 cuadros",
+                    flush=True,
+                )
         if payload_controller is not None:
             payload_visual.update(
                 robot.data.body_pos_w[0, payload_controller.body_indices]
