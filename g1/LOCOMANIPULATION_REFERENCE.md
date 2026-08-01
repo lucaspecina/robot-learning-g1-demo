@@ -192,6 +192,36 @@ Son una ejecución por condición: sirven para descartar una rotura gruesa, no
 para afirmar que Pink reduce el balanceo. Falta repetir y, de manera obligatoria,
 aprobar visualmente la forma de los brazos y el movimiento con carga.
 
+### Repetición cuantitativa de transporte
+
+El 1 de agosto se repitieron quietud, caminata y frenado tres veces con la
+postura `transporte`, primero sin carga y después agregando `0,5 kg` totales:
+`0,25 kg` en cada muñeca. El cubo visible no tiene masa propia y no duplica la
+carga. Isaac confirmó la masa aplicada leyendo nuevamente la física.
+
+| Métrica, promedio de 3 corridas | `0 kg` | `0,5 kg` |
+|---|---:|---:|
+| Error máximo durante quietud | `8,3 cm` | `8,3 cm` |
+| Avance con la misma orden | `1,977 m` | `1,817 m` |
+| Desvío lateral absoluto | `7,0 cm` | `10,0 cm` |
+| Balance lateral del torso | `8,3°` | `7,8°` |
+| Inclinación p95 del torso | `7,5°` | `8,1°` |
+| Distancia de frenado | `3,0 cm` | `2,3 cm` |
+
+La carga redujo el avance un `8,1%` y aumentó el desvío lateral medio `3 cm`.
+No aumentó el balance lateral del torso: el movimiento grande que se ve al
+caminar ya está presente sin peso. Para no ocultar un posible movimiento de
+los brazos dentro de una métrica del torso, se agregó medición directa del
+seguimiento de las muñecas respecto de la pelvis. En una comparación A/B con
+centenares de muestras por condición, el error de posición p95 pasó de
+`1,8 cm` a `1,9 cm`, el de orientación de `4,1°` a `5,0°`, y el tiempo dentro
+de tolerancia de `99%` a `95%`. El máximo de posición fue `2,1 cm` en ambos.
+
+Los números descartan una pérdida gruesa de Pink con `0,5 kg`, pero no aprueban
+la apariencia del movimiento ni la seguridad cerca de personas. Esa aceptación
+visual sigue pendiente. Tampoco convierten la masa repartida entre muñecas en
+un agarre real: continúa siendo únicamente un ensayo de locomoción con carga.
+
 La parte alineada con NVIDIA es el resolvedor Pink, los pesos de sus tareas,
 los objetivos de muñeca relativos a la pelvis, el orden temprano de carga de
 Pinocchio y la compensación de gravedad en Isaac. Son adaptaciones nuestras el
