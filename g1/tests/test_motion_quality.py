@@ -2,7 +2,7 @@
 import math
 import unittest
 
-from motion_quality import motion_quality_metrics
+from motion_quality import arm_tracking_metrics, motion_quality_metrics
 
 
 class MotionQualityTest(unittest.TestCase):
@@ -44,6 +44,34 @@ class MotionQualityTest(unittest.TestCase):
             math.degrees(0.18),
         )
         self.assertAlmostEqual(metrics["height_p90_span_m"], 0.018)
+
+    def test_reports_wrist_tracking_in_task_space(self):
+        samples = [
+            {
+                "position_error_m": value / 1000.0,
+                "orientation_error_deg": float(value),
+                "joint_error_rad": value / 100.0,
+                "reached": value < 9,
+            }
+            for value in range(10)
+        ]
+
+        metrics = arm_tracking_metrics(samples)
+
+        self.assertAlmostEqual(metrics["position_error_max_m"], 0.009)
+        self.assertAlmostEqual(metrics["orientation_error_max_deg"], 9.0)
+        self.assertAlmostEqual(metrics["reached_fraction"], 0.9)
+
+    def test_wrist_tracking_requires_more_than_one_sample(self):
+        with self.assertRaisesRegex(ValueError, "dos muestras"):
+            arm_tracking_metrics([
+                {
+                    "position_error_m": 0.0,
+                    "orientation_error_deg": 0.0,
+                    "joint_error_rad": 0.0,
+                    "reached": True,
+                }
+            ])
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ from std_msgs.msg import String
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
-from motion_quality import motion_quality_metrics  # noqa: E402
+from motion_quality import arm_tracking_metrics, motion_quality_metrics  # noqa: E402
 
 STANDING_HEIGHT_MIN = 0.60   # por debajo de esto ya no esta de pie
 STAND_MAX_ERROR_M = 0.15     # sobre de espera libre; manipular exige mucho menos
@@ -68,6 +68,7 @@ class Checker(Node):
         self.test_payload_kg = payload_kg
         self.motion_capture_phase = None
         self.motion_samples = {}
+        self.arm_motion_samples = {}
         self.pub_cmd = self.create_publisher(Twist, "/g1/cmd_vel/test", 10)
         self.pub_mobility = self.create_publisher(
             String, "/g1/mobility/request", 10
@@ -144,7 +145,29 @@ class Checker(Node):
         try:
             self.arm_status = json.loads(msg.data)
         except json.JSONDecodeError:
-            pass
+            return
+        if (
+            self.motion_capture_phase is None
+            or self.arm_status.get("controller") != "pink"
+        ):
+            return
+        try:
+            sample = {
+                "position_error_m": float(
+                    self.arm_status["maximum_wrist_position_error_m"]
+                ),
+                "orientation_error_deg": float(
+                    self.arm_status["maximum_wrist_orientation_error_deg"]
+                ),
+                "joint_error_rad": float(self.arm_status["max_error_rad"]),
+                "reached": bool(self.arm_status["reached"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            return
+        self.arm_motion_samples.setdefault(
+            self.motion_capture_phase,
+            [],
+        ).append(sample)
 
     def on_payload_status(self, msg: String):
         try:
@@ -265,10 +288,12 @@ class Checker(Node):
 
     def start_motion_capture(self, phase: str):
         self.motion_samples = {phase: []}
+        self.arm_motion_samples = {phase: []}
         self.motion_capture_phase = phase
 
     def change_motion_capture_phase(self, phase: str):
         self.motion_samples.setdefault(phase, [])
+        self.arm_motion_samples.setdefault(phase, [])
         self.motion_capture_phase = phase
 
     def stop_motion_capture(self):
@@ -285,6 +310,26 @@ def print_motion_quality(label: str, metrics: dict):
         f"            oscilación angular RMS "
         f"{metrics['angular_speed_rms_radps']:.2f} rad/s, "
         f"rebote vertical {metrics['height_p90_span_m'] * 100:.1f} cm "
+        f"({metrics['sample_count']} muestras)"
+    )
+
+
+def print_arm_tracking(label: str, samples: list[dict]):
+    if len(samples) < 2:
+        print(f"  {label}: sin suficientes muestras de Pink")
+        return
+    metrics = arm_tracking_metrics(samples)
+    print(
+        f"  {label}: error de muñeca p95 "
+        f"{metrics['position_error_p95_m'] * 100:.1f} cm / "
+        f"{metrics['orientation_error_p95_deg']:.1f}°, máximo "
+        f"{metrics['position_error_max_m'] * 100:.1f} cm / "
+        f"{metrics['orientation_error_max_deg']:.1f}°"
+    )
+    print(
+        f"            error articular p95 "
+        f"{math.degrees(metrics['joint_error_p95_rad']):.1f}°, "
+        f"dentro de tolerancia {metrics['reached_fraction'] * 100:.0f}% "
         f"({metrics['sample_count']} muestras)"
     )
 
@@ -461,6 +506,10 @@ def check_walk(c: Checker) -> bool:
             f"cuerpo girado {walk_yaw_error:.1f} grados"
         )
         print_motion_quality("torso caminando", walking_quality)
+        print_arm_tracking(
+            "muñecas caminando",
+            c.arm_motion_samples.get("walking", []),
+        )
 
         print("  ahora comando cero: tiene que frenar y quedarse...")
         c.change_motion_capture_phase("braking")
@@ -476,6 +525,10 @@ def check_walk(c: Checker) -> bool:
         print(f"  freno:   altura {z2:.3f} m, siguio {despues_de_frenar:.2f} m mas, "
               f"giro {giro:.0f} grados en total")
         print_motion_quality("torso al frenar", braking_quality)
+        print_arm_tracking(
+            "muñecas al frenar",
+            c.arm_motion_samples.get("braking", []),
+        )
     finally:
         c.stop_motion_capture()
         c.release_test_mobility("prueba de caminar terminada")
