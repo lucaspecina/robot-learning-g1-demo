@@ -30,6 +30,7 @@ WBC_ROOT=~/go2-lab/WBC-AGILE
 WBC_COMMIT=7259792cf10803aab814d101134d493d24c8f22f
 WBC_POLICY=$WBC_ROOT/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt
 WBC_DESCRIPTOR=$WBC_ROOT/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.yaml
+ARM_URDF=~/go2-lab/unitree_rl_gym/resources/robots/g1_description/g1_29dof.urdf
 LEGACY_POLICY=~/go2-lab/unitree_rl_gym/deploy/pre_train/g1/motion.pt
 LOG=~/g1.log
 MODE="${1:-wbc}"
@@ -70,6 +71,18 @@ case "$MODE" in
             exit 1
         fi
         ARGS="--locomotion wbc --policy $WBC_POLICY --policy-descriptor $WBC_DESCRIPTOR --model 29dof --payload_kg $PAYLOAD $EXTRA"
+        case "$EXTRA" in
+            *--arm-controller\ pink*)
+                case "$EXTRA" in
+                    *--arm-urdf*) ;;
+                    *) ARGS="$ARGS --arm-urdf $ARM_URDF" ;;
+                esac
+                case "$EXTRA" in
+                    *--arm-gravity-compensation*) ;;
+                    *) ARGS="$ARGS --arm-gravity-compensation" ;;
+                esac
+                ;;
+        esac
         ;;
     legacy|policy)
         ARGS="--locomotion legacy --policy $LEGACY_POLICY --model $MODEL --payload_kg $PAYLOAD $EXTRA"

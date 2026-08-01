@@ -104,7 +104,7 @@ class PoseArmController:
     def llego(self, tolerancia_rad: float = 0.02) -> bool:
         return bool(np.max(np.abs(self.objetivo - self.actual)) < tolerancia_rad)
 
-    def compute(self, dt: float) -> np.ndarray:
+    def compute(self, dt: float, current_joint_positions=None) -> np.ndarray:
         """Avanza hacia el objetivo a velocidad limitada y devuelve los angulos."""
         paso = self.velocidad * dt
         delta = np.clip(self.objetivo - self.actual, -paso, paso)

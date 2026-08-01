@@ -153,6 +153,27 @@ parser.add_argument(
     help="mantener una pose de brazos durante una prueba automática",
 )
 parser.add_argument(
+    "--arm-controller",
+    choices=["pose", "pink"],
+    default="pose",
+    help="pose conserva la base verificada; pink controla ambas muñecas con Isaac Lab",
+)
+parser.add_argument(
+    "--arm-urdf",
+    default=None,
+    help="URDF cinemático requerido solamente por el controlador pink",
+)
+parser.add_argument(
+    "--arm-gravity-compensation",
+    action="store_true",
+    help="compensa en Isaac el peso propio de los brazos controlados por Pink",
+)
+parser.add_argument(
+    "--enable_pinocchio",
+    action="store_true",
+    help=argparse.SUPPRESS,
+)
+parser.add_argument(
     "--foot-contact-offset",
     type=float,
     default=None,
@@ -173,6 +194,13 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _extra = parser.parse_known_args()
 sys.argv = [sys.argv[0]] + [a for a in _extra if a.startswith("--/")]
+
+if args_cli.arm_controller == "pink":
+    # Isaac Lab exige cargar su Pinocchio antes que Isaac Sim; de otro modo
+    # ambas instalaciones registran tipos C++ incompatibles entre sí.
+    import pinocchio  # noqa: F401
+
+    args_cli.enable_pinocchio = True
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -663,6 +691,7 @@ class G1RobotNode(Node):
         joint_names,
         target,
         actual,
+        task_status=None,
     ):
         """Confirma la orden con mediciones; publicar el pedido no prueba movimiento."""
         target = np.asarray(target, dtype=np.float32)
@@ -671,6 +700,7 @@ class G1RobotNode(Node):
         tolerances = arm_tracking_tolerances(joint_names)
         max_error = float(np.max(errors))
         max_error_ratio = float(np.max(errors / tolerances))
+        joint_target_reached = max_error_ratio < 1.0
         status = {
             "pose": pose_name,
             "mode": "frozen_preview" if self.frozen else "active",
@@ -680,8 +710,13 @@ class G1RobotNode(Node):
             "tolerance_rad": tolerances.round(4).tolist(),
             "max_error_rad": round(max_error, 4),
             "max_error_ratio": round(max_error_ratio, 4),
-            "reached": max_error_ratio < 1.0,
+            "joint_target_reached": joint_target_reached,
+            "reached": joint_target_reached,
         }
+        if task_status is not None:
+            # En cinemática inversa importan las manos, no que cada articulación
+            # repita una pose semilla que admite varias soluciones equivalentes.
+            status.update(task_status)
         self.pub_arm_status.publish(
             RosString(data=json.dumps(status, ensure_ascii=False))
         )
@@ -908,12 +943,28 @@ def main():
     tiene_brazos = args_cli.locomotion == "wbc" or args_cli.model != "12dof"
     if tiene_brazos:
         arm_ids = [robot.joint_names.index(n) for n in ARM_JOINTS]
-        arms = PoseArmController()
+        if args_cli.arm_controller == "pink":
+            if not args_cli.arm_urdf:
+                raise ValueError("el controlador pink necesita --arm-urdf")
+            from pink_arm_control import PinkArmController
+
+            arms = PinkArmController(
+                urdf_path=args_cli.arm_urdf,
+                all_joint_names=robot.joint_names,
+                arm_joint_indices=arm_ids,
+                initial_joint_positions=joint_pos[0].cpu().numpy(),
+                robot_cfg=robot_cfg,
+                device=args_cli.device,
+            )
+        else:
+            arms = PoseArmController()
         if args_cli.experiment_arm_pose is not None:
             arms.set_pose(args_cli.experiment_arm_pose)
         initial_arm_pose = args_cli.experiment_arm_pose or "reposo"
         print(
             f"[robot] brazos: {len(ARM_JOINTS)} articulaciones, "
+            f"controlador {args_cli.arm_controller}, "
+            f"gravedad {'compensada' if args_cli.arm_gravity_compensation else 'sin compensar'}, "
             f"pose inicial {initial_arm_pose}",
             flush=True,
         )
@@ -1041,6 +1092,35 @@ def main():
                 "grasp_validated": False,
             })
 
+    def publish_current_arm_status():
+        if arms is None:
+            return
+        measured_full = robot.data.joint_pos[0].cpu().numpy()
+        task_status = (
+            arms.tracking_status(measured_full)
+            if hasattr(arms, "tracking_status")
+            else None
+        )
+        node.publish_arm_status(
+            arms.pose_actual,
+            ARM_JOINTS,
+            arms.objetivo,
+            measured_full[arm_ids],
+            task_status=task_status,
+        )
+
+    def apply_arm_gravity_compensation():
+        if arms is None or not args_cli.arm_gravity_compensation:
+            return
+        # Es la misma ruta que usa la acción Pink oficial de Isaac Lab. El
+        # corrimiento de seis corresponde al cuerpo flotante del humanoide.
+        # En el G1 real esta fuerza deberá venir de su modelo/controlador, no
+        # de PhysX, por lo que queda explícita como una adaptación de simulación.
+        gravity_forces = robot.root_physx_view.get_gravity_compensation_forces()[
+            :, [joint_id + 6 for joint_id in arm_ids]
+        ]
+        robot.set_joint_effort_target(gravity_forces, joint_ids=arm_ids)
+
     while simulation_app.is_running():
         # --- congelado: clavado en el punto de partida, la policy no toca ---
         # La fisica sigue corriendo (para dibujar y para la camara), pero en
@@ -1063,7 +1143,10 @@ def main():
                 # En congelado es una vista previa: movemos la pose de forma
                 # determinista, sin confundirla con una prueba de estabilidad.
                 consume_arm_pose_request()
-                arms.compute(control_dt)
+                arms.compute(
+                    control_dt,
+                    robot.data.joint_pos[0].cpu().numpy(),
+                )
             if step % steps_per_control == 0:
                 consume_payload_request()
             robot.write_root_pose_to_sim(home_root_state[:, :7])
@@ -1102,13 +1185,7 @@ def main():
                     robot.data.root_lin_vel_w[0].cpu().numpy(),
                     robot.data.root_ang_vel_w[0].cpu().numpy(),
                 )
-                if arms is not None:
-                    node.publish_arm_status(
-                        arms.pose_actual,
-                        ARM_JOINTS,
-                        arms.objetivo,
-                        robot.data.joint_pos[0, arm_ids].cpu().numpy(),
-                    )
+                publish_current_arm_status()
                 rclpy.spin_once(node, timeout_sec=0.0)
             continue
 
@@ -1196,9 +1273,16 @@ def main():
             # articulaciones. La locomocion no se entera.
             if arms is not None:
                 consume_arm_pose_request()
-                arm_target = torch.tensor(arms.compute(control_dt), dtype=torch.float32,
-                                          device=args_cli.device).unsqueeze(0)
+                arm_target = torch.tensor(
+                    arms.compute(
+                        control_dt,
+                        robot.data.joint_pos[0].cpu().numpy(),
+                    ),
+                    dtype=torch.float32,
+                    device=args_cli.device,
+                ).unsqueeze(0)
                 robot.set_joint_position_target(arm_target, joint_ids=arm_ids)
+                apply_arm_gravity_compensation()
             consume_payload_request()
 
         # --- avanzar la fisica ---
@@ -1227,13 +1311,7 @@ def main():
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
             )
-            if arms is not None:
-                node.publish_arm_status(
-                    arms.pose_actual,
-                    ARM_JOINTS,
-                    arms.objetivo,
-                    robot.data.joint_pos[0, arm_ids].cpu().numpy(),
-                )
+            publish_current_arm_status()
             if cam_pub is not None:
                 cam_pub.publish()
             rclpy.spin_once(node, timeout_sec=0.0)

@@ -149,15 +149,65 @@ piernas. El modo visual de la referencia se habilita con
 `G1_OFFICIAL_LOCOMANIP_VISUAL=1`; no cambia la física ni el contrato de la
 tarea.
 
+## Integración experimental de Pink con la policy desplegable
+
+El 31 de julio se incorporó `PinkArmController` como alternativa explícita al
+controlador de poses anterior. No se reemplazó la locomoción: las piernas
+siguen usando la policy recurrente *student* de WBC-AGILE. Pink controla sólo
+los catorce movimientos de los brazos y la cintura permanece fija para no
+sacar a la policy de piernas de la condición en la que fue entrenada.
+
+La prueba puramente matemática `tools/check_pink_wbc_contract.py` usa el URDF
+de 29 articulaciones de Unitree y la lista de articulaciones real de la policy.
+Partió de `9,60 cm` y `29,23°` de error en cada muñeca y, en 200 pasos, llegó a
+menos de `0,0001 mm` y `0,00001°`. Esta prueba encontró además que Isaac Lab
+copia sus objetos de configuración: escribir el objetivo en el molde externo
+no mueve el controlador; debe escribirse en la copia interna que Pink resuelve.
+
+La primera prueba física deliberadamente omitió compensar gravedad. Las manos
+se estabilizaron con un error todavía inaceptable de `5,35 cm` y `13,83°`.
+Isaac Lab activa oficialmente compensación de gravedad para su acción Pink;
+al agregar esa única variable el error bajó a `3,42 mm` y `1,09°`. En una
+segunda observación de ocho segundos, con el cuerpo libre, el peor error fue
+`12,8 mm` y `3,1°`, dentro del criterio provisional de `20 mm` y `5°`.
+
+Esa fuerza viene hoy del cálculo exacto de PhysX. Es correcto para reproducir
+el flujo oficial en simulación, pero no es una entrada disponible mágicamente
+en el G1 real. El despliegue deberá obtener la compensación del controlador de
+Unitree o de un modelo dinámico validado en hardware.
+
+### Pruebas físicas de la combinación
+
+Se mantuvo constante escena, policy de piernas, frecuencia y límites. Primero
+se probó transporte sin carga y sólo después se agregó `0,5 kg`:
+
+| Condición | Quietud | Avance | Costado | Ángulo de recorrido | Freno | Balance lateral |
+|---|---|---:|---:|---:|---:|---:|
+| Reposo, `0 kg` | `2 cm` máx. | `2,30 m` | `-0,14 m` | `3,5°` | `2 cm` | `9,3°` |
+| Transporte, `0 kg` | `7 cm` máx. | `1,96 m` | `-0,09 m` | `2,7°` | `2 cm` | `7,6°` |
+| Transporte, `0,5 kg` | `8 cm` máx. | `1,82 m` | `-0,15 m` | `4,7°` | `4 cm` | `9,1°` |
+
+Las tres condiciones se mantuvieron de pie y aprobaron los límites existentes.
+Son una ejecución por condición: sirven para descartar una rotura gruesa, no
+para afirmar que Pink reduce el balanceo. Falta repetir y, de manera obligatoria,
+aprobar visualmente la forma de los brazos y el movimiento con carga.
+
+La parte alineada con NVIDIA es el resolvedor Pink, los pesos de sus tareas,
+los objetivos de muñeca relativos a la pelvis, el orden temprano de carga de
+Pinocchio y la compensación de gravedad en Isaac. Son adaptaciones nuestras el
+URDF sin dedos, excluir la cintura, convertir poses con nombre en objetivos de
+muñeca y combinarlo con la policy recurrente *student*. Por eso esta combinación
+es una integración basada en el patrón oficial, no la tarea oficial intacta.
+
 ## Orden de integración recomendado
 
 1. Reproducir quietud, caminata y frenado en la tarea oficial intacta.
 2. Confirmar visualmente manos, postura y sentido de cada orden.
-3. Incorporar una variante de manos aislada en nuestra base y repetir las
-   tres pruebas físicas.
-4. Incorporar el controlador oficial de muñecas y dedos detrás de una
-   interfaz intercambiable; conservar las poses con nombre sólo para estados
-   seguros como reposo y transporte.
+3. Repetir cuantitativamente y validar visualmente Pink sin carga y con
+   `0,5 kg`; todavía no convertirlo en controlador predeterminado.
+4. Reemplazar las poses semilla por objetivos de muñeca medidos del objeto;
+   conservar las poses con nombre sólo para estados seguros como reposo y
+   transporte.
 5. Recién con la mano física elegida, agregar las cámaras de muñeca que usa
    Unitree y medir campo visual y costo de cómputo.
 6. Mantener `grasp_object` como no disponible hasta tener posición y
@@ -173,5 +223,6 @@ tarea.
 - [Dependencia oficial `numpy<2` de Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/setup.py)
 - [Flujo de teleoperación e imitación fijado en Isaac Lab 2.3.2](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/docs/source/overview/imitation-learning/teleop_imitation.rst)
 - [Configuración exacta del control de muñecas, dedos y cintura](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomanipulation/pick_place/configs/pink_controller_cfg.py)
+- [Acción Pink y compensación de gravedad de Isaac Lab](https://github.com/isaac-sim/IsaacLab/blob/v2.3.2/source/isaaclab/isaaclab/envs/mdp/actions/pink_task_space_actions.py)
 - [Suite oficial de Unitree con tareas móviles y manos](https://github.com/unitreerobotics/unitree_sim_isaaclab)
 - [Configuraciones oficiales de cámaras de muñeca de Unitree](https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/tasks/common_config/camera_configs.py)

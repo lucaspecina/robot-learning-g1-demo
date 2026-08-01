@@ -113,9 +113,14 @@ case "${1:-up}" in
 up)
     preflight
     echo ">> El robot (Isaac, ~1 min de arranque)..."
+    ARM_CONTROLLER="${G1_ARM_CONTROLLER:-pose}"
+    case "$ARM_CONTROLLER" in
+        pose|pink) ;;
+        *) echo "ERROR: G1_ARM_CONTROLLER debe ser pose o pink" >&2; exit 2 ;;
+    esac
     if ! ROBOT_LAUNCH_OUTPUT=$(
         bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 \
-            "--camera --scene --visible" 2>&1
+            "--camera --scene --visible --arm-controller $ARM_CONTROLLER" 2>&1
     ); then
         echo "$ROBOT_LAUNCH_OUTPUT" >&2
         echo "ERROR: Isaac no fue lanzado; no se acepta un log anterior" >&2

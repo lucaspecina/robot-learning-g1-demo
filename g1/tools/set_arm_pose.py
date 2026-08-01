@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pide una pose de brazos y verifica con los ángulos realmente medidos."""
+"""Pide una pose y verifica la magnitud que controla cada implementación."""
 import json
 import math
 import sys
@@ -91,6 +91,35 @@ def worst_joint(status):
     )
 
 
+def tracking_error_ratio(status):
+    """Normaliza el error de articulaciones o de muñecas según el controlador."""
+    if status.get("controller") == "pink":
+        position_ratio = (
+            status["maximum_wrist_position_error_m"]
+            / status["wrist_position_tolerance_m"]
+        )
+        orientation_ratio = (
+            status["maximum_wrist_orientation_error_deg"]
+            / status["wrist_orientation_tolerance_deg"]
+        )
+        return max(position_ratio, orientation_ratio)
+    return status["max_error_ratio"]
+
+
+def print_tracking_measurement(status, prefix="  manos"):
+    if status.get("controller") == "pink":
+        print(
+            f"{prefix}: error máximo "
+            f"{status['maximum_wrist_position_error_m'] * 1000:.1f} mm, "
+            f"{status['maximum_wrist_orientation_error_deg']:.1f}°"
+        )
+        return
+    print(
+        f"{prefix}: error máximo de articulaciones "
+        f"{math.degrees(status['max_error_rad']):.1f}°"
+    )
+
+
 def main():
     requested_pose = sys.argv[1] if len(sys.argv) > 1 else ""
     if requested_pose not in VALID_POSES:
@@ -120,11 +149,12 @@ def main():
                 continue
 
             if reached_at is not None:
-                settle_arm_error_ratios.append(status["max_error_ratio"])
+                current_ratio = tracking_error_ratio(status)
+                settle_arm_error_ratios.append(current_ratio)
                 if (
                     worst_settle_status is None
-                    or status["max_error_ratio"]
-                    > worst_settle_status["max_error_ratio"]
+                    or current_ratio
+                    > tracking_error_ratio(worst_settle_status)
                 ):
                     worst_settle_status = status
 
@@ -143,12 +173,11 @@ def main():
                     reached_at = now
                     left_elbow = joint_degrees(status, "left_elbow_joint")
                     right_elbow = joint_degrees(status, "right_elbow_joint")
-                    max_error_deg = math.degrees(status["max_error_rad"])
                     print(
                         f"  pose medida: codo izquierdo {left_elbow:+.1f}°, "
                         f"codo derecho {right_elbow:+.1f}°"
                     )
-                    print(f"  error máximo de brazos: {max_error_deg:.1f}°")
+                    print_tracking_measurement(status)
                     if status.get("mode") == "frozen_preview":
                         print(
                             f"  PASA FORMA: brazos llegaron a '{requested_pose}'. "
@@ -185,13 +214,19 @@ def main():
                     and max_ratio < 1.5
                 )
                 if not arm_ok:
-                    name, target_deg, actual_deg, error_deg = worst_joint(
-                        worst_settle_status
-                    )
-                    print(
-                        f"  FALLA BRAZOS: {name} pidió {target_deg:+.1f}° y "
-                        f"midió {actual_deg:+.1f}° (error {error_deg:.1f}°)"
-                    )
+                    if worst_settle_status.get("controller") == "pink":
+                        print_tracking_measurement(
+                            worst_settle_status,
+                            prefix="  FALLA MANOS",
+                        )
+                    else:
+                        name, target_deg, actual_deg, error_deg = worst_joint(
+                            worst_settle_status
+                        )
+                        print(
+                            f"  FALLA BRAZOS: {name} pidió {target_deg:+.1f}° y "
+                            f"midió {actual_deg:+.1f}° (error {error_deg:.1f}°)"
+                        )
                     return 1
                 if not body_ok:
                     print(
@@ -208,12 +243,13 @@ def main():
                 return 0
 
             if reached_at is None and now - last_report >= 1.0:
-                max_error_deg = math.degrees(status["max_error_rad"])
-                print(f"  moviendo... faltan como máximo {max_error_deg:.1f}°")
+                print_tracking_measurement(status, prefix="  moviendo")
                 last_report = now
 
         if not acknowledged:
             print("  FALLA: el robot nunca confirmó haber recibido la orden")
+        elif node.status.get("controller") == "pink":
+            print_tracking_measurement(node.status, prefix="  FALLA MANOS")
         else:
             name, target_deg, actual_deg, error_deg = worst_joint(node.status)
             print(
