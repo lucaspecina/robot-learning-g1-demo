@@ -31,12 +31,12 @@ hasta volver a pasar las pruebas físicas.
 | LiDAR simulado | integrado: nube 3D y vuelta 2D completas; posición del sensor corregida contra el torso físico |
 | Mapa local de obstáculos | Nav2: 3 × 3 m a 5 cm, paredes y margen de seguridad medidos |
 | Parada ante obstáculos | Collision Monitor de Nav2: 3/3, detención a 0,50–0,51 m |
-| Esquivar obstáculos | pendiente: `go_to.py` todavía no consume el mapa local |
+| Esquivar obstáculos | Nav2 completo integrado; ruta libre aprobada, rodeo físico pendiente de la próxima puerta |
 | Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
 | Lectura del reloj en servidor | funciona — 3/3 limpia y 3/3 con red mala |
-| Navegación a un punto | funciona — Action cancelable `/g1/navigate_to_pose`, con progreso y regreso a `STAND` |
+| Navegación a un punto | funciona — NavFn + DWB detrás de la Action `/g1/navigate_to_pose`, con regreso a `STAND` |
 | Giro relativo | funciona — Action estándar `/g1/spin`, cancelable y con distancia angular |
 | Barrido visual activo | funciona — cinco vistas superpuestas, confirmación remota sólo ante candidato |
 | Corte del servidor | funciona — la misión falla explícitamente y el robot queda local |
@@ -62,7 +62,8 @@ versión anterior quedaron fuera del alcance actual.
               |                                  |
               +-- [ open_vocabulary_detector.py ] [ object_detector.py ]
                          |                 \             /
-                 [ table_localizer ]        [ adapter ] [ go_to.py ]
+                 [ table_localizer ]        [ adapter ] [ nav2_adapter ]
+                         |                         [ NavFn + DWB Nav2 ]
                          |                             |
               /g1/table_detections_3d      /g1/cmd_vel/navigation
                          |                 /g1/cmd_vel/alignment
@@ -125,7 +126,7 @@ versión anterior quedaron fuera del alcance actual.
 | `/scan_raw` | LaserScan | vuelta 2D de Isaac 5.1 con metadatos sin normalizar |
 | `/scan` | LaserScan | vuelta validada que consume SLAM Toolbox |
 | `/map` | OccupancyGrid | mapa 2D construido en la Jetson |
-| `/local_costmap/costmap` | OccupancyGrid | obstáculos actuales y margen alrededor del robot |
+| `/nav2/local_costmap/costmap` | OccupancyGrid | obstáculos actuales y margen alrededor del robot |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
@@ -157,13 +158,13 @@ llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
 | `lidar.py` | nube RTX 3D y perfil 2D para navegación |
 | `navigation/laser_scan_adapter.py` | normaliza el único metadato angular inconsistente de Isaac 5.1 |
 | `config/slam_toolbox.yaml` | configuración online asíncrona basada en la oficial |
-| `config/local_costmap.yaml` | ventana local Nav2 basada en su configuración oficial |
+| `config/nav2.yaml` | planificador, controlador, mapas y recuperaciones de Nav2 |
 | `config/collision_monitor.yaml` | barrera final Nav2 y sus zonas medidas |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
-| `navigation_core.py` | cálculo puro de movimiento y verificación de progreso |
+| `navigation/nav2_stack.py` | inicia el subconjunto oficial de Nav2 usado por la demo |
 | `execution_core.py` | vigilancia común de plazo y pérdida de respuesta |
-| `skills/go_to.py` | servidor cancelable de navegación con contrato de Nav2 |
+| `skills/nav2_adapter.py` | conserva el contrato `/g1` y delega ruta y control a Nav2 |
 | `skills/align_with_table.py` | corrección visual fina con contrato `DockRobot` |
 | `table_alignment_core.py` | control puro y tolerancias de alineación |
 | `mobility_authority.py` | concede la movilidad a una sola fuente y alimenta `/cmd_vel` |

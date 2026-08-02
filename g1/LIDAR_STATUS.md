@@ -31,10 +31,12 @@ La puerta de aceptación del lanzamiento normal pasó con estas mediciones:
 | Caminata y frenado | 2,14 m, 17 cm lateral, freno en 4 cm, de pie |
 | Aproximación a una pared | 0,50 / 0,51 / 0,51 m; avance extra 2–3 cm |
 
-El mapa local representa obstáculos, pero todavía no decide el movimiento.
-`go_to.py` sigue apuntando directamente al objetivo: Collision Monitor lo
-detiene antes de una pared, pero sólo el futuro planificador/controlador de
-Nav2 podrá elegir un rodeo.
+El mapa local ya alimenta al Nav2 completo. NavFn calcula la ruta global y DWB
+elige avance y giro mirando obstáculos actuales; Collision Monitor conserva la
+última palabra antes de `/cmd_vel`. Tres navegaciones libres llegaron a 50 cm
+en dos corridas, una tercera expuso un plazo interno demasiado corto y la
+repetición con 500 ms volvió a pasar. Falta la puerta física de rodeo: todavía
+no se afirma que esquive hasta verla y medirla alrededor de un obstáculo.
 
 Se corrigió además una causa estructural: en Isaac 5.1,
 `LidarRtx.get_world_pose()` dejó de seguir al padre móvil y ubicaba falsamente
@@ -169,8 +171,9 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 
 ## Próximo bloque útil
 
-La integración, el mapa quieto, el mapa local y la barrera final están
-cerrados; la localización continua en movimiento y el rodeo de obstáculos, no.
+La integración, el mapa quieto, el mapa local, la barrera final y una llegada
+libre con Nav2 están cerrados; la localización continua en movimiento y el
+rodeo físico de obstáculos, no.
 El siguiente bloque debe seguir el orden estándar:
 
 1. repetir la misma ida y vuelta en una VM Ampere o posterior y exigir menos
@@ -178,7 +181,7 @@ El siguiente bloque debe seguir el orden estándar:
 2. si no hay GPU compatible, evaluar el LiDAR PhysX oficial en una rama
    separada, manteniendo exactamente `/scan` y la misma prueba;
 3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
-4. integrar el planificador y controlador de Nav2 con el mapa local ya medido,
+4. medir un rodeo físico con el planificador y controlador Nav2 ya integrados,
    pero no declarar despliegue transferible hasta aprobar la localización;
 5. mantener Collision Monitor como único publicador final de `/cmd_vel`.
 

@@ -1,6 +1,6 @@
 # Plan para quitar ayudas y preparar navegación real
 
-Estado: **en ejecución; sensores y barrera local validados, conductor Nav2 pendiente**.
+Estado: **en ejecución; Nav2 integrado, rodeo físico y localización real pendientes**.
 Fecha: 2-ago-2026.
 
 Este documento separa dos trabajos que no deben mezclarse: primero auditar los
@@ -16,13 +16,13 @@ sensores y física, no regalarle respuestas al agente.
 | Vista plana `/scan` | pasa: 1.066 rayos, 359,4°, tres vueltas completas | Isaac 5.1 exige un segundo perfil simulado; en el G1 real se proyectará la nube física |
 | Coordenadas del sensor | pasa quieto y caminando | Isaac entrega todavía la pose perfecta del torso; el hardware usará URDF y estimación local |
 | SLAM Toolbox quieto | pasa: 138 × 148 celdas a 5 cm | la localización móvil sobre la T4 no alcanza todavía la precisión exigida |
-| Mapa local Nav2 | pasa: 60 × 60 celdas, obstáculos y margen de seguridad | representa obstáculos, pero el navegador propio todavía no lo consulta |
+| Mapa local Nav2 | pasa: 60 × 60 celdas, obstáculos y margen de seguridad | la T4 deforma el barrido durante movimiento |
 | Collision Monitor de Nav2 | pasa: tres paradas a 0,50–0,51 m | huella fija; debe cambiar al mover brazos o transportar una carga |
-| Planificador y controlador Nav2 | pendiente | `go_to.py` sigue yendo directo al objetivo; aún no rodea obstáculos |
+| Planificador y controlador Nav2 | integrado: NavFn + DWB llega a 50 cm y vuelve a `STAND` | falta medir y mirar un rodeo físico repetido |
 
-Nada de esta tabla afirma navegación autónoma completa. Hoy el robot puede ver
-una pared y detenerse antes de golpearla. Todavía no calcula un desvío para
-rodearla.
+Nada de esta tabla afirma navegación autónoma completa. El robot ya calcula y
+ejecuta rutas libres con Nav2, pero todavía no aprobó una prueba física en la
+que el camino directo esté bloqueado y deba rodearlo.
 
 ## Qué significa "fake"
 
@@ -51,7 +51,7 @@ Cada mecanismo quedará clasificado con una de estas cuatro etiquetas:
 | Profundidad de Isaac | adaptador válido sólo si imita la cámara real | misma imagen de profundidad, calibración, marco y sincronización que el driver físico; prohibido consultar distancia interna de la escena |
 | `attach_payload` | instrumento de prueba explícito | mantenerlo únicamente para ensayos de carga; el perfil de despliegue debe detenerse en “agarre no disponible” hasta tener contacto y retención reales |
 | Publicación manual de `/g1/mission` | escalón temporal | reemplazarla por voz sin cambiar el contrato de texto que recibe el agente |
-| Navegador propio `go_to.py` | implementación provisional | conservar su Action como contrato y reemplazar el movimiento interno por Nav2 |
+| Navegador propio `go_to.py` | retirado del lanzamiento normal | `nav2_adapter.py` conserva la Action y Nav2 ejecuta ruta y movimiento |
 | Posiciones, nombres o colores de la escena usados por el tablero | instrumentación permitida | demostrar con pruebas que no entran al agente, detectores, mapa ni navegador |
 | Contenedores y degradación de red | ensayo transferible y necesario | conservarlos; seguridad, equilibrio y frenado deben seguir locales |
 

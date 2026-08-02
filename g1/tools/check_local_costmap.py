@@ -11,7 +11,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 
-COSTMAP_TOPIC = "/local_costmap/costmap"
+COSTMAP_TOPIC = "/nav2/local_costmap/costmap"
 ODOM_TOPIC = "/g1/odom"
 EXPECTED_FRAME = "odom"
 EXPECTED_RESOLUTION_M = 0.05
@@ -20,6 +20,7 @@ TIMEOUT_S = 25.0
 MIN_MAPS = 3
 MIN_LETHAL_CELLS = 2
 MIN_INFLATED_CELLS = 10
+MIN_CLEAR_RADIUS_M = 0.35
 
 
 class LocalCostmapChecker(Node):
@@ -59,6 +60,22 @@ class LocalCostmapChecker(Node):
             + height * float(message.info.resolution) / 2.0,
         )
         center_index = (height // 2) * width + width // 2
+        grid = data.reshape(height, width)
+        xs = (
+            float(message.info.origin.position.x)
+            + (np.arange(width) + 0.5) * float(message.info.resolution)
+        )
+        ys = (
+            float(message.info.origin.position.y)
+            + (np.arange(height) + 0.5) * float(message.info.resolution)
+        )
+        distance = np.hypot(
+            xs[np.newaxis, :] - self.pose[0],
+            ys[:, np.newaxis] - self.pose[1],
+        )
+        lethal_distance = distance[grid >= 99]
+        inflated_distance = distance[(grid > 0) & (grid < 99)]
+        near_robot = distance <= MIN_CLEAR_RADIUS_M
         self.maps.append(
             {
                 "frame": message.header.frame_id,
@@ -77,6 +94,17 @@ class LocalCostmapChecker(Node):
                 "inflated": int(np.count_nonzero((data > 0) & (data < 99))),
                 "unknown": int(np.count_nonzero(data < 0)),
                 "center_cost": int(data[center_index]),
+                "near_max_cost": int(np.max(grid[near_robot])),
+                "nearest_lethal": (
+                    float(np.min(lethal_distance))
+                    if lethal_distance.size
+                    else math.inf
+                ),
+                "nearest_inflated": (
+                    float(np.min(inflated_distance))
+                    if inflated_distance.size
+                    else math.inf
+                ),
             }
         )
 
@@ -122,6 +150,10 @@ def main() -> int:
             raise RuntimeError("el mapa local contiene huecos desconocidos")
         if any(sample["center_cost"] != 0 for sample in node.maps):
             raise RuntimeError("la propia huella del robot quedó ocupada")
+        if any(sample["near_max_cost"] != 0 for sample in node.maps):
+            raise RuntimeError(
+                "hay un obstáculo o margen dentro de 35 cm del robot"
+            )
         last = node.maps[-1]
         print(
             f"{len(node.maps)} mapas de {last['width']} x {last['height']} "
@@ -129,7 +161,9 @@ def main() -> int:
         )
         print(
             f"obstáculos: {last['lethal']} celdas letales y "
-            f"{last['inflated']} de margen; centro libre"
+            f"{last['inflated']} de margen; "
+            f"letal más cercano a {last['nearest_lethal']:.2f} m; "
+            f"margen más cercano a {last['nearest_inflated']:.2f} m"
         )
         print(
             "PASA: el mapa local está centrado en el robot y representa el LiDAR "

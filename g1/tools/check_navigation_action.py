@@ -136,7 +136,18 @@ class NavigationActionCheck(Node):
                     return 1
 
         if not self.wait_future(result_future, args.timeout):
-            print("FALLA: no llegó el resultado dentro del plazo de la prueba")
+            # Una prueba vencida no puede abandonar al robot con una orden
+            # activa: el mismo caso dejó a Nav2 moviéndose tras cerrar el test.
+            cancel = handle.cancel_goal_async()
+            cancel_confirmed = self.wait_future(cancel, 3.0)
+            result_confirmed = self.wait_future(result_future, 5.0)
+            safe = self.wait_stand(3.0)
+            print(
+                "FALLA: no llegó el resultado dentro del plazo; "
+                f"cancelación_confirmada={cancel_confirmed}; "
+                f"resultado_final={result_confirmed}; "
+                f"dueño_seguro={safe}"
+            )
             return 1
         wrapped = result_future.result()
         state = STATUS_NAMES.get(wrapped.status, str(wrapped.status))

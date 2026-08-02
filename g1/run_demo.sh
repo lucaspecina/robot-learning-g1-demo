@@ -82,48 +82,49 @@ start_safety() {
     echo "   seguridad de colisiones Nav2"
 }
 
-stop_local_costmap() {
-    sudo docker exec jetson pkill -f \
-        "[n]av2_costmap_2d|[l]ifecycle_manager_local_costmap" \
+stop_navigation_stack() {
+    sudo docker exec jetson pkill -INT -f \
+        "[n]avigation/nav2_stack.py" 2>/dev/null || true
+    sleep 3
+    # Launch puede morir antes que alguno de sus hijos. Limpiarlos evita dos
+    # controladores publicando tras un reinicio, justo el fallo que originó la
+    # autoridad exclusiva.
+    sudo docker exec jetson pkill -TERM -f \
+        "/nav2_controller/[c]ontroller_server|/nav2_planner/[p]lanner_server|/nav2_behaviors/[b]ehavior_server|/nav2_velocity_smoother/[v]elocity_smoother|/nav2_bt_navigator/[b]t_navigator|[l]ifecycle_manager_navigation" \
         2>/dev/null || true
 }
 
-start_local_costmap() {
-    stop_local_costmap
-    # El ejecutable independiente de costmap es un nodo de ciclo de vida,
-    # pero deliberadamente no participa del enlace de supervisión general de
-    # Nav2. Lo configuramos y activamos con sus transiciones ROS oficiales;
-    # al integrar planner/controller, ambos serán dueños de sus costmaps.
-    sudo docker exec jetson bash -c ": > /tmp/local_costmap.log"
-    sudo docker exec -d jetson bash -lc \
+navigation_is_active() {
+    sudo docker exec jetson bash -lc \
+        "$ROS && ros2 lifecycle get /nav2/bt_navigator 2>/dev/null" \
+        | grep -q "active"
+}
+
+start_navigation_stack() {
+    if navigation_is_active; then
+        echo "   Nav2 ya estaba activo"
+        return 0
+    fi
+    stop_navigation_stack
+    sudo docker exec jetson bash -c ": > /tmp/nav2_stack.log"
+    sudo docker exec -d jetson bash -c \
         "$ROS && while true; do \
-        ros2 run nav2_costmap_2d nav2_costmap_2d \
-        --ros-args -r __ns:=/local_costmap -r __node:=local_costmap \
-        --params-file $D/config/local_costmap.yaml \
-        >> /tmp/local_costmap.log 2>&1 & \
-        costmap_pid=\$!; \
-        for _ in \$(seq 1 30); do \
-            ros2 lifecycle get /local_costmap/local_costmap \
-                >/dev/null 2>&1 && break; \
-            sleep 1; \
-        done; \
-        if ! ros2 lifecycle set /local_costmap/local_costmap configure \
-            >> /tmp/local_costmap.log 2>&1; then \
-            kill \$costmap_pid 2>/dev/null || true; \
-            wait \$costmap_pid 2>/dev/null || true; sleep 3; continue; \
-        fi; \
-        if ! ros2 lifecycle set /local_costmap/local_costmap activate \
-            >> /tmp/local_costmap.log 2>&1; then \
-            kill \$costmap_pid 2>/dev/null || true; \
-            wait \$costmap_pid 2>/dev/null || true; sleep 3; continue; \
-        fi; \
-        wait \$costmap_pid; sleep 3; \
-        done"
-    echo "   mapa local de obstáculos Nav2"
+        python3 $D/navigation/nav2_stack.py \
+            --params-file $D/config/nav2.yaml \
+            >> /tmp/nav2_stack.log 2>&1; sleep 3; done"
+    for _ in $(seq 1 30); do
+        if navigation_is_active; then
+            echo "   rutas y esquive Nav2"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "ERROR: Nav2 no llegó al estado activo" >&2
+    sudo docker exec jetson tail -20 /tmp/nav2_stack.log >&2 || true
+    return 1
 }
 
 stop_mapping() {
-    stop_local_costmap
     sudo docker exec jetson pkill -f \
         "laser_scan_adapter.py|online_async_launch.py|async_slam_toolbox_node" \
         2>/dev/null || true
@@ -139,12 +140,11 @@ start_mapping() {
         slam_params_file:=$D/config/slam_toolbox.yaml use_sim_time:=true \
         >> /tmp/slam_toolbox.log 2>&1; sleep 3; done"
     echo "   mapa SLAM Toolbox"
-    start_local_costmap
 }
 
 stop_layers() {
     sudo docker exec jetson pkill -f \
-        "mobility_authority.py|stand_hold.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
+        "mobility_authority.py|stand_hold.py|nav2_adapter.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
         2>/dev/null
 }
 
@@ -154,7 +154,7 @@ start_layers() {
     start_safety
     launch "autoridad"            mobility.log          mobility_authority.py
     launch "quieto"               stand.log             stand_hold.py
-    launch "navegacion"           goto.log              skills/go_to.py
+    launch "adaptador Nav2"       nav2_adapter.log      skills/nav2_adapter.py
     launch "alineacion fina"      alignment.log         skills/align_with_table.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
@@ -175,6 +175,7 @@ preflight() {
             exit 1
         }
     fi
+    stop_navigation_stack
     stop_layers
     stop_safety
     sleep 2
@@ -250,6 +251,7 @@ layers)
     # Isaac. El robot debe seguir corriendo en el host.
     pgrep -f "g1_robot.p[y]" >/dev/null \
         || { echo "el robot no está corriendo; usar: bash run_demo.sh up"; exit 1; }
+    stop_navigation_stack
     stop_layers
     sleep 2
     if ! sudo docker exec jetson pgrep -f dashboard.py >/dev/null 2>&1; then
@@ -257,6 +259,12 @@ layers)
     fi
     start_layers
     sleep 6
+    if sudo docker exec jetson bash -lc \
+        "$ROS && timeout 5 ros2 topic echo --once /g1/odom >/dev/null"; then
+        start_navigation_stack
+    else
+        echo "Nav2 espera a que el robot sea soltado con: bash run_demo.sh start"
+    fi
     echo "capas de la Jetson reiniciadas sin recargar Isaac"
     ;;
 
@@ -270,6 +278,7 @@ map)
         echo "mapeo prendido; verificar: bash run_demo.sh map check"
         ;;
     off)
+        stop_navigation_stack
         stop_mapping
         echo "mapeo apagado"
         ;;
@@ -288,13 +297,9 @@ map)
                 echo "$process: DETENIDO"
             fi
         done
-        if sudo docker exec jetson pgrep -f \
-            "^/opt/ros/jazzy/lib/nav2_costmap_2d/nav2_costmap_2d " \
-            >/dev/null 2>&1; then
-            echo "nav2_costmap_2d: corriendo"
-        else
-            echo "nav2_costmap_2d: DETENIDO"
-        fi
+        navigation_is_active \
+            && echo "Nav2: activo" \
+            || echo "Nav2: espera al robot"
         ;;
     *) echo "uso: bash run_demo.sh map {on|off|check|status}"; exit 1 ;;
     esac
@@ -303,7 +308,19 @@ map)
 start)
     # Suelta el robot: la policy toma el control con la memoria limpia.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
-    echo "robot SOLTADO. Volver a congelarlo: bash run_demo.sh freeze"
+    echo "robot SOLTADO; espero reloj y posición antes de entregar rutas..."
+    if ! sudo docker exec jetson bash -lc \
+        "$ROS && python3 $D/tools/check_time_and_tf.py"; then
+        echo "ERROR: el robot no publicó una posición utilizable" >&2
+        exit 1
+    fi
+    if ! sudo docker exec jetson bash -lc \
+        "$ROS && timeout 20 ros2 topic echo --once /map >/dev/null"; then
+        echo "ERROR: el mapa no apareció después de soltar el robot" >&2
+        exit 1
+    fi
+    start_navigation_stack
+    echo "robot y Nav2 ACTIVOS. Congelar: bash run_demo.sh freeze"
     ;;
 
 freeze)
@@ -462,11 +479,12 @@ reset)
     # Devuelve el robot al punto de partida y reinicia las capas de arriba,
     # para poder repetir la mision desde cero sin relanzar el simulador.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
+    stop_navigation_stack
     sudo docker exec jetson pkill -f \
-        "go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
+        "nav2_adapter.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
         2>/dev/null
     sleep 2
-    launch "navegacion"           goto.log              skills/go_to.py
+    launch "adaptador Nav2"       nav2_adapter.log      skills/nav2_adapter.py
     launch "alineacion fina"      alignment.log         skills/align_with_table.py
     launch "detector RT-DETR"     object_detector.log   skills/object_detector.py
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
@@ -475,6 +493,13 @@ reset)
     launch "agente"               agent.log             agent/agent.py
     # Un teletransporte invalida el mapa anterior y su historial de poses.
     start_mapping
+    if sudo docker exec jetson bash -lc \
+        "$ROS && python3 $D/tools/check_time_and_tf.py"; then
+        start_navigation_stack
+    else
+        echo "ERROR: el reinicio no recuperó posición y coordenadas" >&2
+        exit 1
+    fi
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
     ;;
 
@@ -498,7 +523,7 @@ status)
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
-    for p in mobility_authority stand_hold go_to align_with_table object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
+    for p in mobility_authority stand_hold nav2_adapter align_with_table object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
         if sudo docker exec jetson \
             pgrep -f "^python3 .*/$p.py$" >/dev/null 2>&1; then
             echo "  $p: corriendo"
@@ -522,12 +547,10 @@ status)
             echo "  $p: DETENIDO"
         fi
     done
-    if sudo docker exec jetson pgrep -f \
-        "^/opt/ros/jazzy/lib/nav2_costmap_2d/nav2_costmap_2d " \
-        >/dev/null 2>&1; then
-        echo "  nav2_costmap_2d: corriendo"
+    if navigation_is_active; then
+        echo "  Nav2: activo (ruta global + esquive local)"
     else
-        echo "  nav2_costmap_2d: DETENIDO"
+        echo "  Nav2: DETENIDO o esperando que se suelte el robot"
     fi
     perception_status=$(
         sudo docker exec jetson bash -lc \
@@ -573,6 +596,7 @@ kill)
     # MATAR TODO: robot + capas de arriba. El tablero sigue prendido para poder
     # ver como el sistema vuelve a levantarse (se apaga con: tablero off).
     bash ~/go2-lab/g1/run_g1.sh stop
+    stop_navigation_stack
     stop_layers
     stop_safety
     stop_mapping
@@ -585,8 +609,9 @@ kill)
 down)
     # La autoridad y stand_hold pertenecen al robot a bordo: siguen activos
     # mientras el robot esté de pie. Sólo se detienen tareas y percepción.
+    stop_navigation_stack
     sudo docker exec jetson pkill -f \
-        "go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py"
+        "nav2_adapter.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py"
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
