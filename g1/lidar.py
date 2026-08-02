@@ -10,15 +10,20 @@ from isaacsim.sensors.rtx import LidarRtx
 
 LIDAR_PARENT_PRIM = "/World/G1/torso_link/head_link"
 LIDAR_PRIM_NAME = "lidar"
+NAVIGATION_LIDAR_PRIM_NAME = "navigation_lidar"
 LIDAR_FRAME = "lidar_link"
 LIDAR_TOPIC = "/g1/lidar/points"
 PROVISIONAL_PROFILE = "Example_Rotary"
+NAVIGATION_PROFILE = "Example_Rotary_2D"
 # El perfil de 360° no puede quedar dentro de la carcasa opaca del USD. A
 # 0.12 m entregó 0 puntos; a 0.35 m recuperó los 9.216 puntos del caso fijo.
 # Es un montaje de simulación provisional hasta confirmar el LiDAR y soporte
 # mecánico exactos del G1 EDU que se compre.
 LIDAR_OFFSET = (0.0, 0.0, 0.35)
 POINT_CLOUD_ANNOTATOR = "IsaacExtractRTXSensorPointCloudNoAccumulator"
+POINT_CLOUD_WRITER = "RtxLidarROS2PublishPointCloud"
+LASER_SCAN_WRITER = "RtxLidarROS2PublishLaserScan"
+LASER_SCAN_TOPIC = "/scan_raw"
 
 
 class LidarBridge:
@@ -42,6 +47,20 @@ class LidarBridge:
             ),
             config_file_name=profile,
         )
+        # Isaac 5.1 sólo acumula LaserScan con un perfil 2D. NVIDIA también
+        # separa sus sensores 3D y 2D en el tutorial oficial. Ambos comparten
+        # montaje y marco: el segundo es un adaptador del simulador, no otro
+        # dispositivo prometido para el G1 físico.
+        self.navigation_sensor = LidarRtx(
+            prim_path=f"{parent_prim}/{NAVIGATION_LIDAR_PRIM_NAME}",
+            name="g1_navigation_lidar",
+            translation=np.asarray(LIDAR_OFFSET, dtype=np.float64),
+            orientation=np.asarray(
+                [1.0, 0.0, 0.0, 0.0],
+                dtype=np.float64,
+            ),
+            config_file_name=NAVIGATION_PROFILE,
+        )
         self.profile = profile
         self.initialized = False
         self.best_internal_points = 0
@@ -50,12 +69,23 @@ class LidarBridge:
     def initialize(self):
         """Termina de iniciar el sensor después del primer reset físico."""
         self.sensor.initialize()
+        self.navigation_sensor.initialize()
         # Medir antes de ROS separa un sensor vacío de un puente que pierde
         # datos ya calculados. Es el mismo lector de la referencia positiva.
         self.sensor.attach_annotator(POINT_CLOUD_ANNOTATOR)
         self.sensor.attach_writer(
-            "RtxLidarROS2PublishPointCloud",
+            # La nube 3D conserva cada porción del giro para obstáculos y
+            # diagnóstico. El barrido 2D de abajo acumula la vuelta completa.
+            POINT_CLOUD_WRITER,
             topicName=LIDAR_TOPIC,
+            frameId=LIDAR_FRAME,
+        )
+        self.navigation_sensor.attach_writer(
+            # NVIDIA usa este escritor para alimentar navegación con un
+            # LaserScan completo; evitar una proyección propia mantiene el
+            # contrato estándar que tendrá el driver del sensor físico.
+            LASER_SCAN_WRITER,
+            topicName=LASER_SCAN_TOPIC,
             frameId=LIDAR_FRAME,
         )
         self.initialized = True

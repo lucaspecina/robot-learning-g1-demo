@@ -89,12 +89,40 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 
 ## Decisión
 
-- El lanzamiento normal todavía no habilita `--lidar`: primero se incorpora
-  el árbol de coordenadas y se mide el costo completo del mapa.
-- La nube ya puede alimentar el siguiente bloque. SLAM significa construir un
-  mapa y ubicarse dentro de él mientras el robot se mueve.
+- El lanzamiento normal habilita el LiDAR y levanta SLAM Toolbox en la Jetson.
+- La cadena validada es
+  `map → odom → base_footprint → base_link → lidar_link`. La huella plana es
+  virtual: navegación no debe interpretar la altura ni el balanceo de la
+  pelvis como altura o pendiente del piso.
+- `/clock` publica el tiempo de física. Con los dos perfiles LiDAR activos, la
+  medición fue RTF 0,32–0,33; los plazos de navegación ya no deben depender de
+  cuánto tarda Azure en simular un segundo.
+- La nube 3D se conserva por sectores en `/g1/lidar/points`. Para SLAM, Isaac
+  5.1 necesita un perfil 2D separado y publica la vuelta en `/scan_raw`.
+  `navigation/laser_scan_adapter.py` corrige sólo una inconsistencia medida del
+  ejemplo NVIDIA: declara 1.067 rayos y entrega 1.066. No altera distancias.
+- `/scan` pasó tres vueltas de 1.066 rayos, 359,4°, 758–766 retornos válidos y
+  1,03 Hz de pared. Un perfil NVIDIA/SLAMTEC de 10 Hz entregó sólo 0,34 Hz de
+  pared; falló la métrica de frescura y se revirtió.
+- Quieto, SLAM Toolbox produjo un mapa de 138 × 148 celdas a 5 cm, con 7.958
+  libres y 121 ocupadas. `map → odom` quedó en identidad, como debe ocurrir
+  contra la odometría exacta actual de Isaac.
+- La ida y vuelta física pasó dos veces. En la final se alejó 1,91 m, llegó con
+  10 cm de error y volvió con 8,6 cm, de pie a 0,77 m.
+- El mapa móvil **no pasa todavía la puerta de precisión**: después de esa ida
+  y vuelta contradijo la referencia exacta de Isaac en 0,26 m y 8,4°. La T4 no
+  soporta Motion BVH y el barrido móvil queda deformado. No se oculta ajustando
+  tolerancias de SLAM.
+- La validación final del lanzamiento normal confirmó que las dos cosas están
+  separadas: el robot avanzó 2,14 m, se desvió 13 cm y frenó en 4 cm, pero el
+  mapa terminó contradiciendo a Isaac en 0,485 m / 1,4°. Por eso locomoción
+  pasa y localización móvil falla; no se habilita Nav2 como conductor.
 - Se conserva `tools/check_lidar_standalone.py` como referencia positiva y
   `tools/check_lidar.py` como puerta obligatoria para la integración.
+- `tools/check_time_and_tf.py`, `tools/check_laser_scan.py` y
+  `tools/check_slam_map.py` verifican tiempo, coordenadas, vuelta completa y
+  calidad del mapa. La última falla si SLAM corrige más de 15 cm o 5° mientras
+  usemos la referencia perfecta de Isaac.
 - `tools/measure_lidar_wall_error.py` compara cada nube con las cuatro paredes
   físicas y deja una métrica repetible para detectar regresiones en movimiento.
 - La distancia a las mesas continúa usando RGB-D: imagen de color más
@@ -104,11 +132,16 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 
 ## Próximo bloque útil
 
-Publicar y verificar la cadena estándar de coordenadas
-`map → odom → base_link → lidar_link`, y convertir la nube 3D a un corte 2D
-`/scan` para SLAM Toolbox y Nav2. El corte debe conservar obstáculos bajos
-sin confundir piso, techo, brazos ni carga. La nube 3D se conserva para
-percepción y obstáculos elevados.
+La integración y el mapa quieto están cerrados; la localización continua en
+movimiento, no. El siguiente experimento útil debe atacar esa única métrica:
+
+1. repetir la misma ida y vuelta en una VM Ampere o posterior y exigir menos
+   de 15 cm / 5° de corrección;
+2. si no hay GPU compatible, evaluar el LiDAR PhysX oficial en una rama
+   separada, manteniendo exactamente `/scan` y la misma prueba;
+3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
+4. recién con localización móvil aprobada integrar los mapas de obstáculos y
+   el controlador de Nav2.
 
 Isaac Sim 5.1 ya figura como versión sin soporte. Una prueba posterior sobre
 una versión nueva queda justificada si la integración continúa fallando, pero
@@ -123,11 +156,15 @@ Antes de permitir que Nav2 mueva el robot:
 3. publicar y comprobar la transformación `base_link` → `lidar_link`;
 4. medir frecuencia, ancho de banda y costo en RTF con `/scan`;
 5. reemplazar la pose perfecta de Isaac por una estimación realizable;
-6. recién entonces integrar mapa, localización y Nav2.
+6. no usar todavía el mapa móvil para afirmar navegación Nav2 autónoma.
 
 ## Fuentes primarias y confiables
 
 - [NVIDIA: tutorial ROS 2 para RTX LiDAR](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_rtx_lidar.html)
+- [Nav2: transformaciones requeridas](https://docs.nav2.org/setup_guides/transformation/setup_transforms.html)
+- [Nav2: huella virtual proyectada al piso](https://docs.nav2.org/setup_guides/urdf/setup_urdf.html)
+- [SLAM Toolbox: configuración online asíncrona](https://github.com/SteveMacenski/slam_toolbox/blob/ros2/config/mapper_params_online_async.yaml)
+- [NVIDIA: fallas de LaserScan que rompen SLAM Toolbox](https://forums.developer.nvidia.com/t/ros2-laserscan-faulty-data/231738)
 - [NVIDIA: extensión RTX y Motion BVH](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_rtx.html)
 - [NVIDIA: requisito Ampere o posterior informado por su equipo](https://forums.developer.nvidia.com/t/motionbvh-for-lidar-model-not-enabled/297482)
 - [NVIDIA: la Tesla T4 pertenece a la arquitectura Turing](https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/technologies/turing-architecture/NVIDIA-Turing-Architecture-Whitepaper.pdf)

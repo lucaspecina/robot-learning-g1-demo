@@ -46,6 +46,14 @@ m='PekingU/rtdetr_r50vd'; r='df939e661d8c52e80608d1ec566561aabd25a4e7'; \
 AutoImageProcessor.from_pretrained(m, revision=r, use_fast=True); \
 RTDetrForObjectDetection.from_pretrained(m, revision=r)"
 
+# El mapa se calcula a bordo con el paquete mantenido por Nav2. Este bloque va
+# después del modelo pesado para que agregar navegación no obligue a descargar
+# otra vez varios GB de percepción en cada experimento de infraestructura.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-slam-toolbox \
+    ros-jazzy-nav2-map-server \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # El entrypoint de la imagen base ya hace `source /opt/ros/jazzy/setup.bash`

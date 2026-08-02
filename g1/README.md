@@ -3,25 +3,15 @@
 El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 
 ```bash
-# el robot (necesita GPU: corre Isaac)
-bash run_g1.sh wbc 29dof 0 "--camera --scene"
+# robot, capas de la Jetson, LiDAR y mapa
+bash run_demo.sh up
 
-# las computadoras simuladas y su red
-cd ../systems && bash systems_up.sh
+# puertas separadas del bloque de mapa
+bash run_demo.sh map status
+bash run_demo.sh map check
 
-# las capas locales del robot (dentro del contenedor jetson)
-python3 mobility_authority.py  # único dueño de /cmd_vel
-python3 stand_hold.py          # corrige la deriva durante una espera
-python3 skills/go_to.py        # navegación
-python3 skills/object_detector.py   # detector neuronal local
-python3 skills/open_vocabulary_detector.py # búsqueda puntual en el servidor
-python3 skills/table_localizer.py   # lleva una mesa detectada al mapa
-python3 skills/detection_adapter.py # cajas, color y recorte del reloj
-python3 agent/agent.py         # ejecutor local de la misión
-
-# darle una misión
-ros2 topic pub --once /g1/mission std_msgs/msg/String \
-  "{data: mira la hora y trae el objeto de la mesa que corresponda}"
+# darle una misión después de la escalera de pruebas
+bash run_demo.sh mission
 ```
 
 El lanzador requiere WBC-AGILE en `~/go2-lab/WBC-AGILE` y verifica el commit
@@ -38,7 +28,7 @@ hasta volver a pasar las pruebas físicas.
 | Carga en las muñecas | 0,5 kg estables en tres caminatas y tres navegaciones; la pose y el bulto fueron rechazados visualmente |
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
-| LiDAR simulado | experimental; aislado funciona, integrado aún entrega nubes vacías |
+| LiDAR simulado | integrado: nube 3D y vuelta 2D completas; mapa quieto pasa, precisión móvil bloqueada por T4 |
 | Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
@@ -121,7 +111,12 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/head_cam/depth` | Image 32FC1 | el robot |
 | `/g1/head_cam/camera_info` | CameraInfo | el robot |
 | `/tf`: `map` → `head_cam_optical` | TransformStamped | el robot simulado |
-| `/g1/lidar/points` | PointCloud2 | experimental; no usar hasta pasar `check_lidar.py` |
+| `/clock` | Clock | tiempo de física; no depende de la lentitud de Azure |
+| `/tf`: `odom` → `base_footprint` → `base_link` → `lidar_link` | TransformStamped | robot simulado; SLAM agrega `map` → `odom` |
+| `/g1/lidar/points` | PointCloud2 | porciones 3D del LiDAR provisional |
+| `/scan_raw` | LaserScan | vuelta 2D de Isaac 5.1 con metadatos sin normalizar |
+| `/scan` | LaserScan | vuelta validada que consume SLAM Toolbox |
+| `/map` | OccupancyGrid | mapa 2D construido en la Jetson |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
@@ -150,7 +145,9 @@ llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
 | `locomotion.py` | controladores intercambiables (NVIDIA AGILE / anterior / diagnóstico) |
 | `arm_control.py` | control de brazos por poses con nombre |
 | `perception.py` | la cámara de la cabeza y su publicación |
-| `lidar.py` | integración RTX experimental, apagada por defecto |
+| `lidar.py` | nube RTX 3D y perfil 2D para navegación |
+| `navigation/laser_scan_adapter.py` | normaliza el único metadato angular inconsistente de Isaac 5.1 |
+| `config/slam_toolbox.yaml` | configuración online asíncrona basada en la oficial |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
 | `navigation_core.py` | cálculo puro de movimiento y verificación de progreso |
@@ -284,12 +281,14 @@ abierto aunque el tablero mostrara un rectángulo. Ahora los mismos límites
 crean cuatro paredes con colisión. Quietud (error p95 de 1 cm), caminata
 (2,46 m) y frenado (2 cm) siguieron pasando con RTF 0,23.
 
-**El LiDAR no está validado dentro del G1.** El ejemplo oficial aislado produjo
-37.048 puntos, pero la integración en IsaacLab 5.1 siguió en cero incluso
-frente a una pared. Montaje, cámara, frecuencia de render, visor, Fabric y el
-puente ROS quedaron separados por experimentos. El detalle está en
-[`LIDAR_STATUS.md`](LIDAR_STATUS.md); el flag `--lidar` no forma parte del
-lanzamiento normal.
+**El LiDAR integrado ya ve, pero la T4 no corrige un barrido móvil.** La nube
+vacía era el sensor de 360° encerrado dentro de la cabeza; a 0,35 m recuperó
+10.008–23.040 puntos. La vuelta 2D alimenta SLAM Toolbox mediante la cadena
+`map → odom → base_footprint → base_link → lidar_link`. Quieto produjo el mapa
+de la habitación sin corrección global. Después de caminar 1,91 m y volver,
+SLAM contradijo la pose exacta de Isaac en 0,26 m / 8,4°: la precisión móvil
+queda rechazada hasta repetir en Ampere o evaluar otro sensor. El detalle y
+todas las negativas están en [`LIDAR_STATUS.md`](LIDAR_STATUS.md).
 
 ## Lo siguiente
 
@@ -309,11 +308,10 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
 6. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
    caminata y frenado; probar una postura más cercana a neutral si falla.
-7. **Mapa y localización**: retomar el LiDAR sólo cuando su nube cruda pase el
-   verificador; hasta entonces la profundidad de cámara mide objetos, no crea
-   una falsa localización perfecta.
-8. **Reloj simulado** (`/clock` + `use_sim_time`) para medir plazos en tiempo
-   de simulación.
+7. **Localización móvil**: repetir la puerta de 15 cm / 5° en GPU Ampere o con
+   el LiDAR PhysX, sin ajustar SLAM para esconder la deformación de la T4.
+8. **Migrar la cámara al mismo árbol de coordenadas**; hoy su vínculo directo
+   con `map` sigue siendo un adaptador de pose perfecta de Isaac.
 9. **El agarre** con un VLA entrenado por nosotros.
 10. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

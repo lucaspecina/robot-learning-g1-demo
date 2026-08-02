@@ -271,10 +271,12 @@ from pxr import Gf, UsdGeom
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped, Twist
 from sensor_msgs.msg import JointState
 from nav_msgs.msg import Odometry
+from rosgraph_msgs.msg import Clock
 from std_msgs.msg import String as RosString
+from tf2_ros import TransformBroadcaster
 
 sys.path.insert(0, _here)
 from arm_control import (  # noqa: E402
@@ -310,6 +312,93 @@ PAYLOAD_STATE_QOS = QoSProfile(
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
     reliability=ReliabilityPolicy.RELIABLE,
 )
+
+CLOCK_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.VOLATILE,
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+)
+
+
+def simulation_stamp(sim_time_s: float):
+    """Convierte segundos de física en una hora ROS sin consultar el reloj real."""
+    seconds = int(math.floor(sim_time_s))
+    nanoseconds = int(round((sim_time_s - seconds) * 1_000_000_000))
+    if nanoseconds >= 1_000_000_000:
+        seconds += 1
+        nanoseconds -= 1_000_000_000
+    stamp = Clock().clock
+    stamp.sec = seconds
+    stamp.nanosec = nanoseconds
+    return stamp
+
+
+def quaternion_conjugate(quaternion):
+    """Conjuga un cuaternión Isaac [w, x, y, z]."""
+    quaternion = numeric_array(quaternion)
+    return quaternion * np.array([1.0, -1.0, -1.0, -1.0])
+
+
+def quaternion_multiply(left, right):
+    """Compone dos rotaciones expresadas como [w, x, y, z]."""
+    lw, lx, ly, lz = numeric_array(left)
+    rw, rx, ry, rz = numeric_array(right)
+    return np.array(
+        [
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ],
+        dtype=np.float64,
+    )
+
+
+def quaternion_rotate(quaternion, vector):
+    """Rota un vector con un cuaternión Isaac [w, x, y, z]."""
+    vector_quaternion = np.concatenate(
+        ([0.0], numeric_array(vector))
+    )
+    return quaternion_multiply(
+        quaternion_multiply(quaternion, vector_quaternion),
+        quaternion_conjugate(quaternion),
+    )[1:]
+
+
+def relative_pose(parent_position, parent_quaternion, child_position, child_quaternion):
+    """Expresa la pose mundial de un hijo en las coordenadas del padre."""
+    inverse_parent = quaternion_conjugate(parent_quaternion)
+    position = quaternion_rotate(
+        inverse_parent,
+        numeric_array(child_position) - numeric_array(parent_position),
+    )
+    orientation = quaternion_multiply(inverse_parent, child_quaternion)
+    orientation /= np.linalg.norm(orientation)
+    return position, orientation
+
+
+def planar_quaternion(quaternion):
+    """Conserva sólo el giro horizontal de una orientación Isaac."""
+    w, x, y, z = numeric_array(quaternion)
+    yaw = math.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+    return np.array(
+        [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)],
+        dtype=np.float64,
+    )
+
+
+def numeric_array(value):
+    """Copia a CPU valores que Isaac puede mantener como tensores CUDA."""
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value, dtype=np.float64)
 
 
 class PayloadMassController:
@@ -624,6 +713,8 @@ class G1RobotNode(Node):
 
         self.pub_state = self.create_publisher(JointState, "/g1/joint_states", 10)
         self.pub_odom = self.create_publisher(Odometry, "/g1/odom", 10)
+        self.pub_clock = self.create_publisher(Clock, "/clock", CLOCK_QOS)
+        self.tf_broadcaster = TransformBroadcaster(self)
         self.pub_arm_status = self.create_publisher(
             RosString, "/g1/arm_status", 10
         )
@@ -701,8 +792,25 @@ class G1RobotNode(Node):
             return np.zeros(3, dtype=np.float32)
         return self.command
 
-    def publish(self, joint_pos, joint_vel, root_pos, root_quat, lin_vel, ang_vel):
-        stamp = self.get_clock().now().to_msg()
+    def publish(
+        self,
+        sim_time_s,
+        joint_pos,
+        joint_vel,
+        root_pos,
+        root_quat,
+        lin_vel,
+        ang_vel,
+        lidar_world_pose=None,
+    ):
+        stamp = simulation_stamp(sim_time_s)
+
+        # Toda la autonomía debe medir el tiempo de la física: en esta VM un
+        # segundo simulado tarda varios segundos reales y los timeouts de pared
+        # cortaban maniobras válidas antes de tiempo.
+        clock = Clock()
+        clock.clock = stamp
+        self.pub_clock.publish(clock)
 
         state = JointState()
         state.header.stamp = stamp
@@ -713,8 +821,11 @@ class G1RobotNode(Node):
 
         odom = Odometry()
         odom.header.stamp = stamp
-        odom.header.frame_id = "map"
-        odom.child_frame_id = "pelvis"
+        # Isaac entrega hoy esta pose sin ruido. Se conserva como adaptador de
+        # odometría para integrar Nav2, pero no se finge que sea localización
+        # global: SLAM será el único dueño de map -> odom.
+        odom.header.frame_id = "odom"
+        odom.child_frame_id = "base_link"
         odom.pose.pose.position.x = float(root_pos[0])
         odom.pose.pose.position.y = float(root_pos[1])
         odom.pose.pose.position.z = float(root_pos[2])
@@ -729,6 +840,61 @@ class G1RobotNode(Node):
         odom.twist.twist.angular.y = float(ang_vel[1])
         odom.twist.twist.angular.z = float(ang_vel[2])
         self.pub_odom.publish(odom)
+
+        footprint_orientation = planar_quaternion(root_quat)
+        body_orientation = quaternion_multiply(
+            quaternion_conjugate(footprint_orientation),
+            root_quat,
+        )
+
+        footprint_tf = TransformStamped()
+        footprint_tf.header.stamp = stamp
+        footprint_tf.header.frame_id = "odom"
+        footprint_tf.child_frame_id = "base_footprint"
+        footprint_tf.transform.translation.x = float(root_pos[0])
+        footprint_tf.transform.translation.y = float(root_pos[1])
+        footprint_tf.transform.translation.z = 0.0
+        footprint_tf.transform.rotation.w = float(footprint_orientation[0])
+        footprint_tf.transform.rotation.x = float(footprint_orientation[1])
+        footprint_tf.transform.rotation.y = float(footprint_orientation[2])
+        footprint_tf.transform.rotation.z = float(footprint_orientation[3])
+
+        body_tf = TransformStamped()
+        body_tf.header.stamp = stamp
+        body_tf.header.frame_id = "base_footprint"
+        body_tf.child_frame_id = "base_link"
+        body_tf.transform.translation.z = float(root_pos[2])
+        body_tf.transform.rotation.w = float(body_orientation[0])
+        body_tf.transform.rotation.x = float(body_orientation[1])
+        body_tf.transform.rotation.y = float(body_orientation[2])
+        body_tf.transform.rotation.z = float(body_orientation[3])
+        # Nav2 necesita una huella plana aunque la pelvis del bípedo suba y se
+        # incline. Separarlas evita que SLAM use el balanceo como pendiente del
+        # piso sin esconder el movimiento 3D que sí describe al cuerpo.
+        self.tf_broadcaster.sendTransform([footprint_tf, body_tf])
+
+        if lidar_world_pose is not None:
+            lidar_position, lidar_orientation = relative_pose(
+                root_pos,
+                root_quat,
+                lidar_world_pose[0],
+                lidar_world_pose[1],
+            )
+            lidar_tf = TransformStamped()
+            lidar_tf.header.stamp = stamp
+            lidar_tf.header.frame_id = "base_link"
+            lidar_tf.child_frame_id = "lidar_link"
+            lidar_tf.transform.translation.x = float(lidar_position[0])
+            lidar_tf.transform.translation.y = float(lidar_position[1])
+            lidar_tf.transform.translation.z = float(lidar_position[2])
+            lidar_tf.transform.rotation.w = float(lidar_orientation[0])
+            lidar_tf.transform.rotation.x = float(lidar_orientation[1])
+            lidar_tf.transform.rotation.y = float(lidar_orientation[2])
+            lidar_tf.transform.rotation.z = float(lidar_orientation[3])
+            # En el robot real robot_state_publisher reconstruirá esta unión
+            # desde el URDF y los encoders. Publicarla medida mantiene correcta
+            # la simulación aun si la cintura mueve el sensor respecto al torso.
+            self.tf_broadcaster.sendTransform(lidar_tf)
         # Una pose inmóvil no demuestra que el equilibrio esté funcionando:
         # el modo congelado reescribe el estado y puede producir un falso éxito.
         self.pub_robot_status.publish(RosString(data=json.dumps({
@@ -1228,12 +1394,15 @@ def main():
                 if cam_pub is not None:
                     cam_pub.publish()
                 node.publish(
+                    step * physics_dt,
                     robot.data.joint_pos[0].cpu().numpy(),
                     robot.data.joint_vel[0].cpu().numpy(),
                     robot.data.root_pos_w[0].cpu().numpy(),
                     robot.data.root_quat_w[0].cpu().numpy(),
                     robot.data.root_lin_vel_w[0].cpu().numpy(),
                     robot.data.root_ang_vel_w[0].cpu().numpy(),
+                    lidar_bridge.sensor.get_world_pose()
+                    if lidar_bridge is not None else None,
                 )
                 publish_current_arm_status()
                 rclpy.spin_once(node, timeout_sec=0.0)
@@ -1368,12 +1537,15 @@ def main():
 
         if step % steps_per_control == 0:
             node.publish(
+                step * physics_dt,
                 robot.data.joint_pos[0].cpu().numpy(),
                 robot.data.joint_vel[0].cpu().numpy(),
                 robot.data.root_pos_w[0].cpu().numpy(),
                 robot.data.root_quat_w[0].cpu().numpy(),
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
+                lidar_bridge.sensor.get_world_pose()
+                if lidar_bridge is not None else None,
             )
             publish_current_arm_status()
             if cam_pub is not None:

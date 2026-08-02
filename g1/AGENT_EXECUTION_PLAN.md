@@ -495,3 +495,27 @@ Adaptación propia de esta demo:
 - preaproximación inspirada en el flujo de Nav2 Docking, pero con nuestra
   distancia medida y sin afirmar que el servidor oficial ya está integrado;
 - AGILE conserva locomoción y balance; el modelo no controla el cuerpo.
+
+## Corte de navegación y mapa — 1 de agosto de 2026
+
+La base estándar ya existe y no debe volver a reemplazarse por coordenadas
+directas de Isaac:
+
+`map → odom → base_footprint → base_link → lidar_link`
+
+- el robot publica `/clock`, odometría local y la huella plana del bípedo;
+- Isaac publica nube 3D por sectores y una vuelta 2D cruda;
+- la Jetson normaliza el metadato angular medido y ejecuta SLAM Toolbox;
+- quieto, el mapa pasa contenido y coincide con la referencia exacta;
+- caminando, ida y regreso pasan físicamente, pero el mapa móvil falla la
+  puerta de 15 cm / 5° por la falta de Motion BVH en la T4;
+- el lanzamiento completo volvió a separar ambas métricas: la caminata de
+  2,14 m frenó en 4 cm, mientras el mapa acumuló 48,5 cm de desacuerdo;
+- el navegador actual sigue siendo la adaptación simple detrás de Actions de
+  Nav2. **Nav2 todavía no planifica ni evita obstáculos en esta demo.**
+
+El próximo bloque de navegación no es escribir otro planificador. Es repetir
+la misma prueba móvil en Ampere o con otro LiDAR simulado, aprobar la calidad
+del mapa y recién entonces conectar mapas de obstáculos, planificador y
+controlador de Nav2 a la autoridad única de movilidad. Resultados y comandos:
+[`LIDAR_STATUS.md`](LIDAR_STATUS.md).

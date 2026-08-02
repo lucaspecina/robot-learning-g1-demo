@@ -16,6 +16,14 @@ MIN_MESSAGES = 3
 MIN_POINTS = 100
 
 
+def azimuth_coverage_deg(xyz: np.ndarray) -> float:
+    """Mide el arco cubierto sin confundir un cruce de ±180° con 360°."""
+    azimuth = np.mod(np.arctan2(xyz[:, 1], xyz[:, 0]), 2.0 * np.pi)
+    azimuth.sort()
+    gaps = np.diff(np.concatenate((azimuth, azimuth[:1] + 2.0 * np.pi)))
+    return float(np.degrees(2.0 * np.pi - np.max(gaps)))
+
+
 class LidarChecker(Node):
     def __init__(self):
         super().__init__("check_lidar")
@@ -64,6 +72,7 @@ class LidarChecker(Node):
                 "max_range": float(np.max(ranges)),
                 "minimum": np.min(xyz, axis=0),
                 "maximum": np.max(xyz, axis=0),
+                "azimuth_coverage_deg": azimuth_coverage_deg(xyz),
                 "received_at": time.monotonic(),
             }
         )
@@ -93,6 +102,7 @@ def main() -> int:
         points = [sample["points"] for sample in node.samples]
         sizes = [sample["bytes"] for sample in node.samples]
         last = node.samples[-1]
+        coverages = [sample["azimuth_coverage_deg"] for sample in node.samples]
         print(
             f"{len(node.samples)} nubes en {elapsed:.2f} s "
             f"({rate:.2f} Hz de pared); "
@@ -112,7 +122,14 @@ def main() -> int:
             f"{np.round(last['minimum'], 2)} a "
             f"{np.round(last['maximum'], 2)} m"
         )
-        print("PASA: el LiDAR publica nubes 3D finitas y renovadas")
+        print(
+            f"cobertura horizontal: {min(coverages):.1f}–"
+            f"{max(coverages):.1f}°"
+        )
+        print(
+            "PASA: el LiDAR publica porciones 3D finitas y renovadas; "
+            "la vuelta 2D se verifica por separado en /scan"
+        )
         return 0
     except RuntimeError as error:
         print(f"FALLA LIDAR: {error}")

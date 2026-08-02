@@ -58,6 +58,24 @@ launch() {   # nombre archivo_log script
     echo "   $1"
 }
 
+stop_mapping() {
+    sudo docker exec jetson pkill -f \
+        "laser_scan_adapter.py|online_async_launch.py|async_slam_toolbox_node" \
+        2>/dev/null || true
+}
+
+start_mapping() {
+    stop_mapping
+    launch "adaptador LaserScan" laser_scan_adapter.log \
+        navigation/laser_scan_adapter.py
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        ros2 launch slam_toolbox online_async_launch.py \
+        slam_params_file:=$D/config/slam_toolbox.yaml use_sim_time:=true \
+        >> /tmp/slam_toolbox.log 2>&1; sleep 3; done"
+    echo "   mapa SLAM Toolbox"
+}
+
 stop_layers() {
     sudo docker exec jetson pkill -f \
         "mobility_authority.py|stand_hold.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
@@ -120,7 +138,7 @@ up)
     esac
     if ! ROBOT_LAUNCH_OUTPUT=$(
         bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 \
-            "--camera --scene --visible --arm-controller $ARM_CONTROLLER" 2>&1
+            "--camera --scene --lidar --visible --arm-controller $ARM_CONTROLLER" 2>&1
     ); then
         echo "$ROBOT_LAUNCH_OUTPUT" >&2
         echo "ERROR: Isaac no fue lanzado; no se acepta un log anterior" >&2
@@ -139,6 +157,8 @@ up)
     stop_layers
     sleep 2
     start_layers
+    echo ">> Mapa de la habitación en la Jetson:"
+    start_mapping
     sleep 6
 
     echo ""
@@ -170,6 +190,38 @@ layers)
     start_layers
     sleep 6
     echo "capas de la Jetson reiniciadas sin recargar Isaac"
+    ;;
+
+map)
+    case "${2:-status}" in
+    on)
+        pgrep -f "g1_robot.p[y]" >/dev/null \
+            || { echo "el robot no está corriendo"; exit 1; }
+        start_mapping
+        sleep 5
+        echo "mapeo prendido; verificar: bash run_demo.sh map check"
+        ;;
+    off)
+        stop_mapping
+        echo "mapeo apagado"
+        ;;
+    check)
+        sudo docker exec jetson bash -lc \
+            "$ROS && python3 $D/tools/check_time_and_tf.py \
+            && python3 $D/tools/check_laser_scan.py \
+            && python3 $D/tools/check_slam_map.py"
+        ;;
+    status)
+        for process in laser_scan_adapter async_slam_toolbox_node; do
+            if sudo docker exec jetson pgrep -f "$process" >/dev/null 2>&1; then
+                echo "$process: corriendo"
+            else
+                echo "$process: DETENIDO"
+            fi
+        done
+        ;;
+    *) echo "uso: bash run_demo.sh map {on|off|check|status}"; exit 1 ;;
+    esac
     ;;
 
 start)
@@ -331,6 +383,8 @@ reset)
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
+    # Un teletransporte invalida el mapa anterior y su historial de poses.
+    start_mapping
     echo "todo reiniciado. Darle la mision: bash run_demo.sh mission"
     ;;
 
@@ -357,6 +411,14 @@ status)
     for p in mobility_authority stand_hold go_to align_with_table object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
         if sudo docker exec jetson \
             pgrep -f "^python3 .*/$p.py$" >/dev/null 2>&1; then
+            echo "  $p: corriendo"
+        else
+            echo "  $p: DETENIDO"
+        fi
+    done
+    echo "== el mapa =="
+    for p in laser_scan_adapter async_slam_toolbox_node; do
+        if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
             echo "  $p: DETENIDO"
@@ -407,6 +469,7 @@ kill)
     # ver como el sistema vuelve a levantarse (se apaga con: tablero off).
     bash ~/go2-lab/g1/run_g1.sh stop
     stop_layers
+    stop_mapping
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
     echo "GPU:   $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
@@ -421,5 +484,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|map [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac
