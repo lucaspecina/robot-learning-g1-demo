@@ -26,6 +26,7 @@ SCENE_POSITIONS = {
     "clock": (0.0, 2.5),
     "red_table": (4.0, 2.6),
     "blue_table": (4.0, -2.6),
+    "navigation_crate": (1.5, 1.0),
 }
 
 # Una meta de navegación es el lugar seguro desde el cual usar un objeto, no
@@ -36,6 +37,24 @@ NAVIGATION_TARGETS = {
 }
 
 TABLE_SIZE = (0.8, 1.2)
+
+# Este cajón corta exactamente la recta entre el origen y la meta de prueba,
+# pero deja libres el corredor y las aproximaciones de la misión. Es geometría
+# física y visible al LiDAR; Nav2 no recibe su posición por este módulo.
+NAVIGATION_TEST_OBSTACLE = {
+    "id": "navigation_crate",
+    "label": "obstáculo de navegación",
+    "x": SCENE_POSITIONS["navigation_crate"][0],
+    "y": SCENE_POSITIONS["navigation_crate"][1],
+    "size_x": 0.6,
+    "size_y": 0.6,
+    # El LaserScan provisional es un plano a la altura de la cabeza y pierde
+    # geometría inferior a 1 m. Esta puerta 2D debe cruzar ese plano; los
+    # obstáculos bajos se validarán después con la nube 3D del mismo sensor.
+    "height": 1.8,
+    "rgb": (0.72, 0.46, 0.12),
+}
+NAVIGATION_TEST_GOAL = (3.0, 2.0, 0.0)
 
 COLORED_TABLES = (
     {
@@ -82,5 +101,15 @@ DASHBOARD_SCENE = {
             }
             for table in COLORED_TABLES
         ],
+        {
+            "id": NAVIGATION_TEST_OBSTACLE["id"],
+            "label": NAVIGATION_TEST_OBSTACLE["label"],
+            "shape": "rectangle",
+            "x": NAVIGATION_TEST_OBSTACLE["x"],
+            "y": NAVIGATION_TEST_OBSTACLE["y"],
+            "size_x": NAVIGATION_TEST_OBSTACLE["size_x"],
+            "size_y": NAVIGATION_TEST_OBSTACLE["size_y"],
+            "color": "#b8751f",
+        },
     ],
 }

@@ -4,6 +4,7 @@
 # Uso (en la VM):
 #   bash run_demo.sh up          arranca robot + skills + agente
 #   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | home
+#   bash run_demo.sh check obstacle exige un rodeo físico con Nav2
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
 #   bash run_demo.sh table red  mira una mesa desde una pose sólo de prueba
@@ -83,7 +84,9 @@ start_safety() {
 }
 
 stop_navigation_stack() {
-    sudo docker exec jetson pkill -INT -f \
+    # El bash desprendido ignora SIGINT. TERM detiene tanto al supervisor como
+    # al lanzador; dejarlo vivo hizo que Nav2 sobreviviera a un reloj nuevo.
+    sudo docker exec jetson pkill -TERM -f \
         "[n]avigation/nav2_stack.py" 2>/dev/null || true
     sleep 3
     # Launch puede morir antes que alguno de sus hijos. Limpiarlos evita dos
@@ -92,11 +95,22 @@ stop_navigation_stack() {
     sudo docker exec jetson pkill -TERM -f \
         "/nav2_controller/[c]ontroller_server|/nav2_planner/[p]lanner_server|/nav2_behaviors/[b]ehavior_server|/nav2_velocity_smoother/[v]elocity_smoother|/nav2_bt_navigator/[b]t_navigator|[l]ifecycle_manager_navigation" \
         2>/dev/null || true
+    sleep 1
+    if sudo docker exec jetson pgrep -f \
+        "[n]avigation/nav2_stack.py|/nav2_controller/[c]ontroller_server|/nav2_planner/[p]lanner_server|/nav2_behaviors/[b]ehavior_server|/nav2_velocity_smoother/[v]elocity_smoother|/nav2_bt_navigator/[b]t_navigator|[l]ifecycle_manager_navigation" \
+        >/dev/null 2>&1; then
+        sudo docker exec jetson pkill -KILL -f \
+            "[n]avigation/nav2_stack.py|/nav2_controller/[c]ontroller_server|/nav2_planner/[p]lanner_server|/nav2_behaviors/[b]ehavior_server|/nav2_velocity_smoother/[v]elocity_smoother|/nav2_bt_navigator/[b]t_navigator|[l]ifecycle_manager_navigation" \
+            2>/dev/null || true
+    fi
 }
 
 navigation_is_active() {
+    sudo docker exec jetson pgrep -f \
+        "/nav2_bt_navigator/[b]t_navigator" >/dev/null 2>&1 \
+        || return 1
     sudo docker exec jetson bash -lc \
-        "$ROS && ros2 lifecycle get /nav2/bt_navigator 2>/dev/null" \
+        "$ROS && timeout 5 ros2 lifecycle get /nav2/bt_navigator 2>/dev/null" \
         | grep -q "active"
 }
 
@@ -124,22 +138,85 @@ start_navigation_stack() {
     return 1
 }
 
+stop_laser_scan() {
+    sudo docker exec jetson pkill -f "laser_scan_adapter.py" \
+        2>/dev/null || true
+}
+
+start_laser_scan() {
+    if sudo docker exec jetson pgrep -f \
+        "^python3 .*/laser_scan_adapter.py$" >/dev/null 2>&1; then
+        return 0
+    fi
+    launch "adaptador LaserScan" laser_scan_adapter.log \
+        navigation/laser_scan_adapter.py
+}
+
 stop_mapping() {
     sudo docker exec jetson pkill -f \
-        "laser_scan_adapter.py|online_async_launch.py|async_slam_toolbox_node" \
+        "online_async_launch.py|async_slam_toolbox_node" \
         2>/dev/null || true
 }
 
 start_mapping() {
+    # Mapear y localizar publican la misma corrección map->odom. Son modos
+    # excluyentes: dos fuentes simultáneas harían incoherente la posición.
+    stop_navigation_stack
+    stop_localization_stack
     stop_mapping
-    launch "adaptador LaserScan" laser_scan_adapter.log \
-        navigation/laser_scan_adapter.py
+    start_laser_scan
     sudo docker exec -d jetson bash -c \
         "$ROS && while true; do \
         ros2 launch slam_toolbox online_async_launch.py \
         slam_params_file:=$D/config/slam_toolbox.yaml use_sim_time:=true \
         >> /tmp/slam_toolbox.log 2>&1; sleep 3; done"
     echo "   mapa SLAM Toolbox"
+}
+
+stop_localization_stack() {
+    sudo docker exec jetson pkill -TERM -f \
+        "[l]ocalization/localization_stack.py|[n]avigation/localization_stack.py" \
+        2>/dev/null || true
+    sleep 2
+    sudo docker exec jetson pkill -TERM -f \
+        "/nav2_map_server/[m]ap_server|/nav2_amcl/[a]mcl|[l]ifecycle_manager_localization" \
+        2>/dev/null || true
+}
+
+localization_is_active() {
+    sudo docker exec jetson pgrep -f \
+        "/nav2_amcl/[a]mcl" >/dev/null 2>&1 \
+        || return 1
+    sudo docker exec jetson bash -lc \
+        "$ROS && timeout 5 ros2 lifecycle get /nav2/amcl 2>/dev/null" \
+        | grep -q "active"
+}
+
+start_localization_stack() {
+    if localization_is_active; then
+        echo "   mapa fijo y localización ya estaban activos"
+        return 0
+    fi
+    stop_navigation_stack
+    stop_mapping
+    stop_localization_stack
+    start_laser_scan
+    sudo docker exec jetson bash -c ": > /tmp/localization_stack.log"
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        python3 $D/navigation/localization_stack.py \
+            --params-file $D/config/localization.yaml \
+            >> /tmp/localization_stack.log 2>&1; sleep 3; done"
+    for _ in $(seq 1 30); do
+        if localization_is_active; then
+            echo "   mapa fijo y localización AMCL"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "ERROR: la localización no llegó al estado activo" >&2
+    sudo docker exec jetson tail -30 /tmp/localization_stack.log >&2 || true
+    return 1
 }
 
 stop_layers() {
@@ -176,6 +253,9 @@ preflight() {
         }
     fi
     stop_navigation_stack
+    stop_localization_stack
+    stop_mapping
+    stop_laser_scan
     stop_layers
     stop_safety
     sleep 2
@@ -226,9 +306,9 @@ up)
     stop_layers
     sleep 2
     start_layers
-    echo ">> Mapa de la habitación en la Jetson:"
-    start_mapping
-    sleep 6
+    echo ">> Mapa fijo y localización en la Jetson:"
+    start_localization_stack
+    sleep 4
 
     echo ""
     echo "TODO CARGADO Y EL ROBOT CONGELADO, quieto en el punto de partida."
@@ -261,6 +341,7 @@ layers)
     sleep 6
     if sudo docker exec jetson bash -lc \
         "$ROS && timeout 5 ros2 topic echo --once /g1/odom >/dev/null"; then
+        start_localization_stack
         start_navigation_stack
     else
         echo "Nav2 espera a que el robot sea soltado con: bash run_demo.sh start"
@@ -280,7 +361,7 @@ map)
     off)
         stop_navigation_stack
         stop_mapping
-        echo "mapeo apagado"
+        echo "mapeo apagado; el LaserScan queda disponible para seguridad"
         ;;
     check)
         sudo docker exec jetson bash -lc \
@@ -305,10 +386,38 @@ map)
     esac
     ;;
 
+localize)
+    case "${2:-status}" in
+    on)
+        pgrep -f "g1_robot.p[y]" >/dev/null \
+            || { echo "el robot no está corriendo"; exit 1; }
+        start_localization_stack
+        ;;
+    off)
+        stop_navigation_stack
+        stop_localization_stack
+        echo "localización apagada"
+        ;;
+    check)
+        sudo docker exec jetson bash -lc \
+            "$ROS && python3 $D/tools/check_time_and_tf.py \
+            && python3 $D/tools/check_laser_scan.py \
+            && timeout 10 ros2 topic echo --once /amcl_pose >/dev/null"
+        ;;
+    status)
+        localization_is_active \
+            && echo "AMCL: activo sobre el mapa fijo" \
+            || echo "AMCL: DETENIDO"
+        ;;
+    *) echo "uso: bash run_demo.sh localize {on|off|check|status}"; exit 1 ;;
+    esac
+    ;;
+
 start)
     # Suelta el robot: la policy toma el control con la memoria limpia.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
     echo "robot SOLTADO; espero reloj y posición antes de entregar rutas..."
+    start_localization_stack
     if ! sudo docker exec jetson bash -lc \
         "$ROS && python3 $D/tools/check_time_and_tf.py"; then
         echo "ERROR: el robot no publicó una posición utilizable" >&2
@@ -417,6 +526,15 @@ check)
             "$ROS && python3 $D/tools/check_home_return.py"
         exit $?
     fi
+    if [ "${2:-}" = "obstacle" ]; then
+        navigation_is_active || {
+            echo "Nav2 no está activo; primero: bash run_demo.sh start" >&2
+            exit 1
+        }
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/check_obstacle_navigation.py"
+        exit $?
+    fi
     # Soltar antes evita que un robot clavado artificialmente apruebe quietud.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
     # La confirmación se publica desde el lazo de física; el proceso de prueba
@@ -480,6 +598,7 @@ reset)
     # para poder repetir la mision desde cero sin relanzar el simulador.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/reset std_msgs/msg/String \"{data: ya}\""         >/dev/null 2>&1
     stop_navigation_stack
+    stop_localization_stack
     sudo docker exec jetson pkill -f \
         "nav2_adapter.py|go_to.py|align_with_table.py|detector.py|object_detector.py|open_vocabulary_detector.py|table_localizer.py|detection_adapter.py|agent.py" \
         2>/dev/null
@@ -491,8 +610,9 @@ reset)
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
     launch "agente"               agent.log             agent/agent.py
-    # Un teletransporte invalida el mapa anterior y su historial de poses.
-    start_mapping
+    # Un teletransporte invalida la posición anterior, pero no el mapa fijo.
+    # Reiniciar AMCL fuerza una nueva localización desde el origen conocido.
+    start_localization_stack
     if sudo docker exec jetson bash -lc \
         "$ROS && python3 $D/tools/check_time_and_tf.py"; then
         start_navigation_stack
@@ -539,8 +659,8 @@ status)
             echo "  $p: DETENIDO"
         fi
     done
-    echo "== el mapa =="
-    for p in laser_scan_adapter async_slam_toolbox_node; do
+    echo "== mapa y posición =="
+    for p in laser_scan_adapter async_slam_toolbox_node amcl map_server; do
         if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
@@ -600,6 +720,8 @@ kill)
     stop_layers
     stop_safety
     stop_mapping
+    stop_localization_stack
+    stop_laser_scan
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
     echo "GPU:   $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
@@ -615,5 +737,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|map [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [safety|safety-wall|authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|map [on|off|check|status]|localize [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [safety|safety-wall|authority|stand|walk|turn|goto|clock|home|obstacle|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

@@ -33,10 +33,10 @@ La puerta de aceptación del lanzamiento normal pasó con estas mediciones:
 
 El mapa local ya alimenta al Nav2 completo. NavFn calcula la ruta global y DWB
 elige avance y giro mirando obstáculos actuales; Collision Monitor conserva la
-última palabra antes de `/cmd_vel`. Tres navegaciones libres llegaron a 50 cm
-en dos corridas, una tercera expuso un plazo interno demasiado corto y la
-repetición con 500 ms volvió a pasar. Falta la puerta física de rodeo: todavía
-no se afirma que esquive hasta verla y medirla alrededor de un obstáculo.
+última palabra antes de `/cmd_vel`. El rodeo físico dejó 58 cm alrededor de un
+cajón y el robot no cayó. La corrida completa sigue rechazada: AMCL informó
+5 cm restantes cuando la posición física estaba a 49 cm. El plan y el control
+local funcionan; el barrido móvil todavía corrompe la localización global.
 
 Se corrigió además una causa estructural: en Isaac 5.1,
 `LidarRtx.get_world_pose()` dejó de seguir al padre móvil y ubicaba falsamente
@@ -142,16 +142,19 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 - Quieto, SLAM Toolbox produjo un mapa de 138 × 148 celdas a 5 cm, con 7.958
   libres y 121 ocupadas. `map → odom` quedó en identidad, como debe ocurrir
   contra la odometría exacta actual de Isaac.
-- La ida y vuelta física pasó dos veces. En la final se alejó 1,91 m, llegó con
-  10 cm de error y volvió con 8,6 cm, de pie a 0,77 m.
+- La ida y vuelta física anterior pasó dos veces. En la final se alejó 1,91 m,
+  llegó con 10 cm de error y volvió con 8,6 cm, de pie a 0,77 m.
 - El mapa móvil **no pasa todavía la puerta de precisión**: después de esa ida
   y vuelta contradijo la referencia exacta de Isaac en 0,26 m y 8,4°. La T4 no
   soporta Motion BVH y el barrido móvil queda deformado. No se oculta ajustando
   tolerancias de SLAM.
-- La validación final del lanzamiento normal confirmó que las dos cosas están
-  separadas: el robot avanzó 2,14 m, se desvió 13 cm y frenó en 4 cm, pero el
-  mapa terminó contradiciendo a Isaac en 0,485 m / 1,4°. Por eso locomoción
-  pasa y localización móvil falla; no se habilita Nav2 como conductor.
+- El mapa fijo + AMCL evitó que el mapa se deforme, pero no corrigió el sensor:
+  el mejor rodeo útil terminó con 0,42 m / 8,0° de corrección falsa. Limitar la
+  navegación a 0,15 m/s dejó la corrección en 0,04 m / 0,7°, pero la policy no
+  produjo desplazamiento útil; el límite se revirtió.
+- La validación final del bloque confirmó que las piezas están separadas: el
+  robot quieto quedó dentro de 4 cm; caminó 2,11 m, se desvió 12 cm y frenó en
+  8 cm. Locomoción pasa, Nav2 rodea y localización móvil falla.
 - Se conserva `tools/check_lidar_standalone.py` como referencia positiva y
   `tools/check_lidar.py` como puerta obligatoria para la integración.
 - `tools/check_time_and_tf.py`, `tools/check_laser_scan.py` y
@@ -181,8 +184,8 @@ El siguiente bloque debe seguir el orden estándar:
 2. si no hay GPU compatible, evaluar el LiDAR PhysX oficial en una rama
    separada, manteniendo exactamente `/scan` y la misma prueba;
 3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
-4. medir un rodeo físico con el planificador y controlador Nav2 ya integrados,
-   pero no declarar despliegue transferible hasta aprobar la localización;
+4. repetir el rodeo físico ya medido y exigir llegada menor a 15 cm, pero no
+   declarar despliegue transferible hasta aprobar la localización;
 5. mantener Collision Monitor como único publicador final de `/cmd_vel`.
 
 Isaac Sim 5.1 ya figura como versión sin soporte. Una prueba posterior sobre

@@ -14,6 +14,7 @@ import isaaclab.sim as sim_utils
 from scene_layout import (
     COLORED_TABLES,
     NAVIGATION_TARGETS,
+    NAVIGATION_TEST_OBSTACLE,
     ROOM_WALL_THICKNESS,
     SCENE_POSITIONS,
     TABLE_SIZE,
@@ -237,6 +238,27 @@ def build_demo_scene():
 
     # --- el reloj: display digital visible desde el punto de observación ---
     _spawn_digital_clock()
+
+    obstacle = NAVIGATION_TEST_OBSTACLE
+    crate = sim_utils.CuboidCfg(
+        size=(
+            obstacle["size_x"],
+            obstacle["size_y"],
+            obstacle["height"],
+        ),
+        visual_material=_color(obstacle["rgb"]),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+    )
+    crate.func(
+        f"/World/{obstacle['id']}",
+        crate,
+        translation=(
+            obstacle["x"],
+            obstacle["y"],
+            obstacle["height"] / 2.0,
+        ),
+    )
 
     # Cada mesa tiene un objeto dinámico independiente. No alcanza con dibujar
     # una botella: debe poder caerse y, más adelante, responder al agarre.

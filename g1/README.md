@@ -3,10 +3,14 @@
 El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 
 ```bash
-# robot, capas de la Jetson, LiDAR y mapa
+# robot, capas de la Jetson, LiDAR, mapa fijo y localización
 bash run_demo.sh up
 
-# puertas separadas del bloque de mapa
+# el modo normal localiza sobre un mapa guardado
+bash run_demo.sh localize status
+bash run_demo.sh localize check
+
+# SLAM queda separado para construir o renovar ese mapa
 bash run_demo.sh map status
 bash run_demo.sh map check
 
@@ -31,7 +35,7 @@ hasta volver a pasar las pruebas físicas.
 | LiDAR simulado | integrado: nube 3D y vuelta 2D completas; posición del sensor corregida contra el torso físico |
 | Mapa local de obstáculos | Nav2: 3 × 3 m a 5 cm, paredes y margen de seguridad medidos |
 | Parada ante obstáculos | Collision Monitor de Nav2: 3/3, detención a 0,50–0,51 m |
-| Esquivar obstáculos | Nav2 completo integrado; ruta libre aprobada, rodeo físico pendiente de la próxima puerta |
+| Esquivar obstáculos | rodeo físico medido: dejó 58 cm y siguió de pie; falla la llegada por error del LiDAR móvil en la T4 |
 | Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
@@ -121,11 +125,11 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/head_cam/camera_info` | CameraInfo | el robot |
 | `/tf`: `map` → `head_cam_optical` | TransformStamped | el robot simulado |
 | `/clock` | Clock | tiempo de física; no depende de la lentitud de Azure |
-| `/tf`: `odom` → `base_footprint` → `base_link` → `lidar_link` | TransformStamped | robot simulado; SLAM agrega `map` → `odom` |
+| `/tf`: `odom` → `base_footprint` → `base_link` → `lidar_link` | TransformStamped | robot simulado; AMCL agrega `map` → `odom` en operación |
 | `/g1/lidar/points` | PointCloud2 | vueltas 3D completas del LiDAR provisional |
 | `/scan_raw` | LaserScan | vuelta 2D de Isaac 5.1 con metadatos sin normalizar |
-| `/scan` | LaserScan | vuelta validada que consume SLAM Toolbox |
-| `/map` | OccupancyGrid | mapa 2D construido en la Jetson |
+| `/scan` | LaserScan | vuelta validada que consumen SLAM Toolbox y AMCL |
+| `/map` | OccupancyGrid | mapa 2D guardado; SLAM lo construye y Map Server lo carga |
 | `/nav2/local_costmap/costmap` | OccupancyGrid | obstáculos actuales y margen alrededor del robot |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
@@ -158,11 +162,13 @@ llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
 | `lidar.py` | nube RTX 3D y perfil 2D para navegación |
 | `navigation/laser_scan_adapter.py` | normaliza el único metadato angular inconsistente de Isaac 5.1 |
 | `config/slam_toolbox.yaml` | configuración online asíncrona basada en la oficial |
+| `config/localization.yaml` | mapa fijo y AMCL omnidireccional basados en Nav2 |
 | `config/nav2.yaml` | planificador, controlador, mapas y recuperaciones de Nav2 |
 | `config/collision_monitor.yaml` | barrera final Nav2 y sus zonas medidas |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
 | `navigation/nav2_stack.py` | inicia el subconjunto oficial de Nav2 usado por la demo |
+| `navigation/localization_stack.py` | inicia Map Server y AMCL sin mezclarlo con SLAM |
 | `execution_core.py` | vigilancia común de plazo y pérdida de respuesta |
 | `skills/nav2_adapter.py` | conserva el contrato `/g1` y delega ruta y control a Nav2 |
 | `skills/align_with_table.py` | corrección visual fina con contrato `DockRobot` |
@@ -301,22 +307,22 @@ una posición vieja; ahora se reconstruye desde el torso físico y su montaje
 fijo, igual que hará el árbol de coordenadas del robot real. Quieto, SLAM
 Toolbox produce el mapa correcto. Después de caminar, la precisión global
 sigue rechazada en esta T4 hasta reproducirla con el LiDAR físico/Point-LIO o
-una GPU compatible con la compensación de movimiento. El mapa local y la
-parada de emergencia sí usan cada barrido actual: representan paredes y
-detienen el robot, pero todavía no calculan un camino que las rodee. El detalle
-está en [`LIDAR_STATUS.md`](LIDAR_STATUS.md).
+una GPU compatible con la compensación de movimiento. Nav2 ya calcula y
+ejecuta el rodeo: dejó 58 cm alrededor del cajón y el robot siguió de pie. La
+corrida se rechaza porque AMCL creyó estar a 5 cm cuando físicamente faltaban
+49 cm. El detalle está en [`LIDAR_STATUS.md`](LIDAR_STATUS.md) y
+[`NAV2_STATUS.md`](NAV2_STATUS.md).
 
 ## Lo siguiente
 
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Reemplazar el movimiento directo por Nav2**: integrar primero su
-   planificador y controlador contra el mapa local ya medido, sin quitar la
-   autoridad exclusiva ni Collision Monitor.
-2. **Resolver la localización realizable**: reproducir el driver L2 y
+1. **Resolver la localización realizable**: reproducir el driver L2 y
    Point-LIO de Unitree para el G1 real; en simulación, repetir la puerta de
-   15 cm / 5° sin usar la pose perfecta de Isaac.
+   15 cm / 5° con GPU Ampere o LiDAR PhysX, sin usar la pose perfecta de Isaac.
+2. **Agregar obstáculos bajos con la nube 3D**: usar la `VoxelLayer` oficial
+   de Nav2 y repetir la puerta física con un cajón que quede bajo el plano 2D.
 3. **Validar la nueva pose congelada con Lucas**: mostrar `transporte` con
    `0,5 kg` sin lanzar una misión. La candidata quedó a `26,9 cm` delante de la
    pelvis, pero todavía no tiene aprobación visual.
