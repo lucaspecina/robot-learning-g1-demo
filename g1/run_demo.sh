@@ -152,6 +152,29 @@ start_laser_scan() {
         navigation/laser_scan_adapter.py
 }
 
+stop_depth_pointcloud() {
+    sudo docker exec jetson pkill -f "[p]oint_cloud_xyz_node" \
+        2>/dev/null || true
+}
+
+start_depth_pointcloud() {
+    if sudo docker exec jetson pgrep -f \
+        "[p]oint_cloud_xyz_node" >/dev/null 2>&1; then
+        return 0
+    fi
+    # ROS mantiene esta conversión estándar también para cámaras físicas: el
+    # simulador sólo reemplaza al driver que publica profundidad y calibración.
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        ros2 run depth_image_proc point_cloud_xyz_node --ros-args \
+        -r image_rect:=/g1/head_cam/depth \
+        -r camera_info:=/g1/head_cam/camera_info \
+        -r points:=/g1/head_cam/points \
+        -p use_sim_time:=true \
+        >> /tmp/depth_pointcloud.log 2>&1; sleep 3; done"
+    echo "   nube 3D de la cámara"
+}
+
 stop_mapping() {
     sudo docker exec jetson pkill -f \
         "online_async_launch.py|async_slam_toolbox_node" \
@@ -229,6 +252,7 @@ start_layers() {
     # La barrera final nace antes que la autoridad. Si cualquier capa tarda o
     # se cae, el watchdog del robot recibe cero en vez del último comando.
     start_safety
+    start_depth_pointcloud
     launch "autoridad"            mobility.log          mobility_authority.py
     launch "quieto"               stand.log             stand_hold.py
     launch "adaptador Nav2"       nav2_adapter.log      skills/nav2_adapter.py
@@ -256,6 +280,7 @@ preflight() {
     stop_localization_stack
     stop_mapping
     stop_laser_scan
+    stop_depth_pointcloud
     stop_layers
     stop_safety
     sleep 2
@@ -290,6 +315,13 @@ up)
     # incluye para demostrar que el LiDAR los descubre después de mapear.
     if [ "${G1_NAVIGATION_OBSTACLE:-1}" = "1" ]; then
         SCENE_OPTIONS="$SCENE_OPTIONS --navigation-obstacle"
+        if [ -n "${G1_NAVIGATION_OBSTACLE_HEIGHT:-}" ]; then
+            if ! [[ "$G1_NAVIGATION_OBSTACLE_HEIGHT" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+                echo "ERROR: G1_NAVIGATION_OBSTACLE_HEIGHT debe ser un número positivo" >&2
+                exit 2
+            fi
+            SCENE_OPTIONS="$SCENE_OPTIONS --navigation-obstacle-height ${G1_NAVIGATION_OBSTACLE_HEIGHT}"
+        fi
     fi
     if ! ROBOT_LAUNCH_OUTPUT=$(
         bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 \
@@ -670,7 +702,7 @@ status)
         fi
     done
     echo "== mapa y posición =="
-    for p in laser_scan_adapter async_slam_toolbox_node amcl map_server; do
+    for p in laser_scan_adapter point_cloud_xyz_node async_slam_toolbox_node amcl map_server; do
         if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
@@ -732,6 +764,7 @@ kill)
     stop_mapping
     stop_localization_stack
     stop_laser_scan
+    stop_depth_pointcloud
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
     echo "GPU:   $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"

@@ -19,10 +19,13 @@ sensores y física, no regalarle respuestas al agente.
 | Mapa local Nav2 | pasa: 60 × 60 celdas, obstáculos y margen de seguridad | la T4 deforma el barrido durante movimiento |
 | Collision Monitor de Nav2 | pasa: tres paradas a 0,50–0,51 m | huella fija; debe cambiar al mover brazos o transportar una carga |
 | Planificador y controlador Nav2 | integrado: NavFn + DWB llega a 50 cm y vuelve a `STAND` | falta medir y mirar un rodeo físico repetido |
+| Obstáculos bajos por RGB-D | pasa: 13 mil puntos del cajón de 45 cm y costo vivo `100` | campo frontal; no reemplaza la cobertura 360° del LiDAR |
+| Barrera final ante obstáculos bajos | bloqueada honestamente | la nube cruda ve 20.054 puntos del torso; falta filtro corporal por URDF |
 
-Nada de esta tabla afirma navegación autónoma completa. El robot ya calcula y
-ejecuta rutas libres con Nav2, pero todavía no aprobó una prueba física en la
-que el camino directo esté bloqueado y deba rodearlo.
+Nada de esta tabla afirma navegación autónoma completa. El robot ya rodeó un
+cajón alto y uno bajo sin caer. La ejecución con el cajón bajo terminó
+físicamente a 2,8 cm, pero Nav2 no la cerró: AMCL acumuló 41 cm de error y la
+acción agotó el plazo. La localización móvil sigue siendo el bloqueo.
 
 ## Qué significa "fake"
 
@@ -48,7 +51,7 @@ Cada mecanismo quedará clasificado con una de estas cuatro etiquetas:
 | Plan local de respaldo para la misión conocida | ayuda indebida si se activa en silencio | si Azure o el planificador fallan, detener la misión, conservar `STAND` y mostrar el fallo; nunca ejecutar un libreto oculto |
 | Coordenada conocida del reloj | escalón temporal | obtenerla de una anotación hecha al preparar el mapa o encontrar el reloj con sensores; el agente no puede leer la escena de Isaac |
 | `/g1/odom` y transformaciones calculadas desde la pose perfecta de Isaac | adaptador hoy, bloqueante para despliegue | producir `odom -> base_link` con estimación local y `map -> odom` con localización basada en sensores |
-| Profundidad de Isaac | adaptador válido sólo si imita la cámara real | misma imagen de profundidad, calibración, marco y sincronización que el driver físico; prohibido consultar distancia interna de la escena |
+| Profundidad de Isaac | adaptador validado para navegación y aproximación | publica imagen, calibración y tiempo estándar; `depth_image_proc` produce la misma nube que consumirá Nav2 con una cámara física |
 | `attach_payload` | instrumento de prueba explícito | mantenerlo únicamente para ensayos de carga; el perfil de despliegue debe detenerse en “agarre no disponible” hasta tener contacto y retención reales |
 | Publicación manual de `/g1/mission` | escalón temporal | reemplazarla por voz sin cambiar el contrato de texto que recibe el agente |
 | Navegador propio `go_to.py` | retirado del lanzamiento normal | `nav2_adapter.py` conserva la Action y Nav2 ejecuta ruta y movimiento |

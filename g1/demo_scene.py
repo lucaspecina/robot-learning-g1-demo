@@ -231,7 +231,10 @@ def _spawn_room_walls():
     )
 
 
-def build_demo_scene(include_navigation_obstacle=True):
+def build_demo_scene(
+    include_navigation_obstacle=True,
+    navigation_obstacle_height=None,
+):
     """Crea la habitacion. Llamar despues del piso y antes de sim.reset()."""
 
     _spawn_room_walls()
@@ -241,11 +244,18 @@ def build_demo_scene(include_navigation_obstacle=True):
 
     if include_navigation_obstacle:
         obstacle = NAVIGATION_TEST_OBSTACLE
+        obstacle_height = (
+            obstacle["height"]
+            if navigation_obstacle_height is None
+            else float(navigation_obstacle_height)
+        )
+        if obstacle_height <= 0.0:
+            raise ValueError("la altura del obstáculo debe ser positiva")
         crate = sim_utils.CuboidCfg(
             size=(
                 obstacle["size_x"],
                 obstacle["size_y"],
-                obstacle["height"],
+                obstacle_height,
             ),
             visual_material=_color(obstacle["rgb"]),
             collision_props=sim_utils.CollisionPropertiesCfg(),
@@ -257,7 +267,7 @@ def build_demo_scene(include_navigation_obstacle=True):
             translation=(
                 obstacle["x"],
                 obstacle["y"],
-                obstacle["height"] / 2.0,
+                obstacle_height / 2.0,
             ),
         )
 

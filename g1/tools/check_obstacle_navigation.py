@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exige que Nav2 rodee el cajón que corta el camino directo."""
 
+import argparse
 import json
 import math
 import sys
@@ -158,6 +159,18 @@ def grid_value(message, x: float, y: float):
     return int(message.data[row * message.info.width + column])
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Comprueba detección viva y, opcionalmente, el rodeo",
+    )
+    parser.add_argument(
+        "--sensing-only",
+        action="store_true",
+        help="verificar los mapas sin entregar una orden de movimiento",
+    )
+    return parser.parse_args()
+
+
 def report_measurements(node, start, goal):
     """Imprime también la evidencia de una corrida incompleta."""
     goal_x, goal_y = goal
@@ -239,6 +252,7 @@ def report_measurements(node, start, goal):
 
 
 def main() -> int:
+    args = parse_args()
     rclpy.init()
     node = ObstacleNavigationCheck()
     executor = MultiThreadedExecutor(num_threads=2)
@@ -248,7 +262,7 @@ def main() -> int:
     try:
         if not wait_until(lambda: node.pose is not None, 10.0):
             raise RuntimeError("no llegó la posición inicial")
-        if not node.client.wait_for_server(timeout_sec=10.0):
+        if not args.sensing_only and not node.client.wait_for_server(timeout_sec=10.0):
             raise RuntimeError("no apareció la Action de navegación")
 
         if not wait_until(
@@ -281,7 +295,7 @@ def main() -> int:
         ):
             value = grid_value(node.global_costmap, obstacle_x, obstacle_y)
             raise RuntimeError(
-                "el LiDAR no agregó el cajón al mapa vivo de Nav2 "
+                "los sensores no agregaron el cajón al mapa vivo de Nav2 "
                 f"(ocupación {value})"
             )
         live_value = grid_value(node.global_costmap, obstacle_x, obstacle_y)
@@ -289,6 +303,9 @@ def main() -> int:
             "detección viva: mapa fijo libre "
             f"({static_value}), mapa de Nav2 ocupado ({live_value})"
         )
+        if args.sensing_only:
+            print("PASA: detección comprobada sin ordenar movimiento")
+            return 0
         # La prueba sólo discrimina esquive si la caja corta la recta ideal.
         if distance_to_obstacle(
             NAVIGATION_TEST_OBSTACLE["x"],

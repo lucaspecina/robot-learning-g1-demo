@@ -83,6 +83,13 @@ def main() -> int:
                 "base_link", "lidar_link", rclpy.time.Time(), Duration(seconds=0.1)
             ):
                 continue
+            if not node.tf_buffer.can_transform(
+                "base_link",
+                "head_cam_optical",
+                rclpy.time.Time(),
+                Duration(seconds=0.1),
+            ):
+                continue
             break
 
         if len(node.clock_samples) < MIN_CLOCK_SAMPLES:
@@ -107,6 +114,9 @@ def main() -> int:
             node.tf_buffer.lookup_transform(
                 "base_link", "lidar_link", rclpy.time.Time()
             ),
+            node.tf_buffer.lookup_transform(
+                "base_link", "head_cam_optical", rclpy.time.Time()
+            ),
         ]
         if not all(finite_transform(transform) for transform in transforms):
             raise RuntimeError("la cadena de coordenadas contiene valores inválidos")
@@ -122,7 +132,7 @@ def main() -> int:
         )
         print(
             "coordenadas: odom -> base_footprint -> "
-            "base_link -> lidar_link"
+            "base_link -> lidar_link / head_cam_optical"
         )
         print("PASA: tiempo y coordenadas cumplen la base requerida por Nav2")
         return 0

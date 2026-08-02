@@ -48,9 +48,9 @@ NAVIGATION_TEST_OBSTACLE = {
     "y": SCENE_POSITIONS["navigation_crate"][1],
     "size_x": 0.6,
     "size_y": 0.6,
-    # El LaserScan provisional es un plano a la altura de la cabeza y pierde
-    # geometría inferior a 1 m. Esta puerta 2D debe cruzar ese plano; los
-    # obstáculos bajos se validarán después con la nube 3D del mismo sensor.
+    # La altura normal conserva la referencia del ensayo 2D. Las pruebas pueden
+    # bajarla a 45 cm para exigir que la cámara de profundidad cubra el hueco
+    # que el plano horizontal no ve.
     "height": 1.8,
     "rgb": (0.72, 0.46, 0.12),
 }

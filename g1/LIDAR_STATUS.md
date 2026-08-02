@@ -30,6 +30,8 @@ La puerta de aceptación del lanzamiento normal pasó con estas mediciones:
 | Quietud después de integrar seguridad | 60 s, error final y máximo 4 cm |
 | Caminata y frenado | 2,14 m, 17 cm lateral, freno en 4 cm, de pie |
 | Aproximación a una pared | 0,50 / 0,51 / 0,51 m; avance extra 2–3 cm |
+| Cajón bajo de 45 cm, LiDAR 3D provisional | **0 puntos** dentro del cajón |
+| Mismo cajón, cámara de profundidad | **13.114–13.440 puntos** dentro del cajón |
 
 El mapa local ya alimenta al Nav2 completo. NavFn calcula la ruta global y DWB
 elige avance y giro mirando obstáculos actuales; Collision Monitor conserva la
@@ -41,6 +43,21 @@ El cuerpo dejó 56–60 cm alrededor del cajón y nunca cayó. Dos acciones
 terminaron a 17,0 y 19,1 cm físicos; una tercera agotó el plazo lejos del
 objetivo. Esquive y seguridad funcionan, pero la navegación completa y la
 localización móvil todavía no son repetibles.
+
+El perfil 3D provisional de NVIDIA no resuelve obstáculos bajos: sus 128
+emisores cubren sólo de -15° a +10°. Desde la cabeza, el rayo inferior pasa
+cerca de un metro por encima de un cajón de 45 cm ubicado a 1,8 m. La nube
+confirmó la geometría con cero puntos sobre su planta. Agregar esa nube a Nav2
+no mejoró la métrica y se revirtió.
+
+La cámara RGB-D sí resolvió el caso por el flujo estándar. El componente
+oficial `depth_image_proc` de ROS convierte `/g1/head_cam/depth` más su
+calibración en `/g1/head_cam/points`; Nav2 recibe ese `PointCloud2` además del
+LaserScan. Detectó entre 13.114 y 13.440 puntos del cajón y el mapa vivo pasó
+de libre `0` a ocupado `100`, mientras el mapa fijo siguió libre. La
+transformación de la cámara ya no es `map -> cámara` calculada con la posición
+perfecta de Isaac: ahora nace en `base_link` y sólo describe el montaje físico,
+como hará el URDF con los encoders del G1 real.
 
 Se corrigió además una causa estructural: en Isaac 5.1,
 `LidarRtx.get_world_pose()` dejó de seguir al padre móvil y ubicaba falsamente
@@ -189,23 +206,41 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 - La distancia a las mesas continúa usando RGB-D: imagen de color más
   profundidad sincronizada. Eso existe en el robot real si la cámara elegida
   entrega profundidad, pero debe confirmarse el modelo exacto antes de comprar.
+- La misma profundidad alimenta obstáculos bajos mediante el paquete oficial
+  `depth_image_proc`. Se conserva ObstacleLayer, recomendado por Nav2 cuando el
+  presupuesto es limitado; VoxelLayer queda como mejora medible, no como
+  requisito inventado.
+- Collision Monitor conserva sólo `/scan`. La cámara ve 20.054 puntos del
+  propio torso entre 17 y 23 cm delante del marco del cuerpo y produjo una
+  falsa parada inmediata. El paquete comunitario `robot_body_filter` implementa
+  el filtrado correcto contra URDF, pero no está publicado para Jazzy y este
+  banco aún no publica todos los eslabones del G1. No se reemplazó por un radio
+  ciego que también ocultaría obstáculos reales cercanos.
+- La nube se transforma exactamente a `odom`. Hacia `map`, AMCL puede quedar
+  varios segundos simulados atrás cuando el robot está quieto; el mapa local
+  sigue recibiendo todos los cuadros y el global los recibe cuando la
+  localización está fresca.
 - La pose perfecta que Isaac conoce no se presentará como localización real.
 
 ## Próximo bloque útil
 
-La integración, el mapa quieto, el mapa local, la barrera final y una llegada
-libre con Nav2 están cerrados; la localización continua en movimiento y el
-rodeo físico de obstáculos, no.
+La integración, el mapa quieto, el mapa local, la barrera final y la detección
+de obstáculos bajos están cerrados. La localización continua en movimiento y
+el cierre repetible de las acciones Nav2, no.
 El siguiente bloque debe seguir el orden estándar:
 
 1. repetir la misma ida y vuelta en una VM Ampere o posterior y exigir menos
    de 15 cm / 5° de corrección;
 2. no integrar el LiDAR PhysX 2D al G1: ya aisló el error RTX, pero falló la
    prueba de cuerpo propio y fue retirado del camino normal;
-3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
-4. repetir el rodeo físico ya medido y exigir llegada menor a 15 cm, pero no
+3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje; la
+   cámara de profundidad ya cubre el hueco bajo sin fingir otro LiDAR;
+4. corregir la localización móvil: con el cajón bajo el cuerpo dejó 42,5 cm,
+   no cayó y terminó físicamente a 2,8 cm, pero Nav2 agotó el plazo porque AMCL
+   acumuló 41 cm de corrección;
+5. repetir el rodeo físico ya medido y exigir llegada menor a 15 cm, pero no
    declarar despliegue transferible hasta aprobar la localización;
-5. mantener Collision Monitor como único publicador final de `/cmd_vel`.
+6. mantener Collision Monitor como único publicador final de `/cmd_vel`.
 
 Isaac Sim 5.1 ya figura como versión sin soporte. Una prueba posterior sobre
 una versión nueva queda justificada si la integración continúa fallando, pero
@@ -239,4 +274,7 @@ Antes de permitir que Nav2 mueva el robot:
 - [Unitree Point-LIO: referencia con LiDAR L2 e IMU](https://github.com/unitreerobotics/point_lio_unilidar)
 - [Nav2: mapa local, capa de obstáculos e inflación](https://docs.nav2.org/setup_guides/sensors/mapping_localization.html)
 - [Nav2: configuración de Collision Monitor](https://docs.nav2.org/configuration/packages/collision_monitor/configuring-collision-monitor-node.html)
+- [ROS 2 Jazzy: conversión oficial de profundidad a nube](https://docs.ros.org/en/jazzy/p/depth_image_proc/doc/index.html)
+- [Nav2: LaserScan y PointCloud2 combinados](https://docs.nav2.org/setup_guides/sensors/mapping_localization.html)
+- [ROS Index: robot_body_filter](https://index.ros.org/p/robot_body_filter/)
 - [IsaacLab: caso comunitario de LiDAR vacío y Fabric](https://github.com/isaac-sim/IsaacLab/discussions/2082)

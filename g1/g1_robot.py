@@ -77,6 +77,12 @@ parser.add_argument(
     action="store_true",
     help="agregar el cajón móvil de la prueba; se omite al construir el mapa base",
 )
+parser.add_argument(
+    "--navigation-obstacle-height",
+    type=float,
+    default=None,
+    help="altura experimental del cajón; la escena normal conserva 1,8 m",
+)
 parser.add_argument("--camera", action="store_true",
                     help="montar la camara de la cabeza y publicarla por ROS 2")
 parser.add_argument("--camera_hz", type=float, default=3.0,
@@ -807,6 +813,7 @@ class G1RobotNode(Node):
         lin_vel,
         ang_vel,
         lidar_world_pose=None,
+        camera_world_pose=None,
     ):
         stamp = simulation_stamp(sim_time_s)
 
@@ -900,6 +907,28 @@ class G1RobotNode(Node):
             # desde el URDF y los encoders. Publicarla medida mantiene correcta
             # la simulación aun si la cintura mueve el sensor respecto al torso.
             self.tf_broadcaster.sendTransform(lidar_tf)
+        if camera_world_pose is not None:
+            camera_position, camera_orientation = relative_pose(
+                root_pos,
+                root_quat,
+                camera_world_pose[0],
+                camera_world_pose[1],
+            )
+            camera_tf = TransformStamped()
+            camera_tf.header.stamp = stamp
+            camera_tf.header.frame_id = "base_link"
+            camera_tf.child_frame_id = "head_cam_optical"
+            camera_tf.transform.translation.x = float(camera_position[0])
+            camera_tf.transform.translation.y = float(camera_position[1])
+            camera_tf.transform.translation.z = float(camera_position[2])
+            camera_tf.transform.rotation.w = float(camera_orientation[0])
+            camera_tf.transform.rotation.x = float(camera_orientation[1])
+            camera_tf.transform.rotation.y = float(camera_orientation[2])
+            camera_tf.transform.rotation.z = float(camera_orientation[3])
+            # El simulador sólo reemplaza al URDF y a los encoders: expresar
+            # el montaje desde el cuerpo evita entregar la posición global
+            # perfecta de Isaac a percepción o navegación.
+            self.tf_broadcaster.sendTransform(camera_tf)
         # Una pose inmóvil no demuestra que el equilibrio esté funcionando:
         # el modo congelado reescribe el estado y puede producir un falso éxito.
         self.pub_robot_status.publish(RosString(data=json.dumps({
@@ -1032,7 +1061,8 @@ def main():
 
     if args_cli.scene:
         build_demo_scene(
-            include_navigation_obstacle=args_cli.navigation_obstacle
+            include_navigation_obstacle=args_cli.navigation_obstacle,
+            navigation_obstacle_height=args_cli.navigation_obstacle_height,
         )
 
     robot = Articulation(robot_cfg)
@@ -1305,6 +1335,11 @@ def main():
         sensor_orientation /= np.linalg.norm(sensor_orientation)
         return sensor_position, sensor_orientation
 
+    def current_camera_world_pose():
+        if cam_pub is None:
+            return None
+        return cam_pub.world_pose()
+
     def consume_arm_pose_request():
         """Aplica una orden pendiente y deja una confirmación inequívoca en el log."""
         if arms is None or node.arm_pose_request is None:
@@ -1447,7 +1482,7 @@ def main():
                 camera.update(physics_dt)
             if step % steps_per_control == 0:
                 if cam_pub is not None:
-                    cam_pub.publish()
+                    cam_pub.publish(simulation_stamp(step * physics_dt))
                 node.publish(
                     step * physics_dt,
                     robot.data.joint_pos[0].cpu().numpy(),
@@ -1457,6 +1492,7 @@ def main():
                     robot.data.root_lin_vel_w[0].cpu().numpy(),
                     robot.data.root_ang_vel_w[0].cpu().numpy(),
                     current_lidar_world_pose(),
+                    current_camera_world_pose(),
                 )
                 publish_current_arm_status()
                 rclpy.spin_once(node, timeout_sec=0.0)
@@ -1599,10 +1635,11 @@ def main():
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
                 current_lidar_world_pose(),
+                current_camera_world_pose(),
             )
             publish_current_arm_status()
             if cam_pub is not None:
-                cam_pub.publish()
+                cam_pub.publish(simulation_stamp(step * physics_dt))
             rclpy.spin_once(node, timeout_sec=0.0)
 
         # El seguimiento es opcional porque imponer esta vista varias veces por

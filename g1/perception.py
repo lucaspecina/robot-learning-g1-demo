@@ -16,9 +16,7 @@ import numpy as np
 import isaaclab.sim as sim_utils
 from isaaclab.sensors import Camera, CameraCfg
 
-from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import CameraInfo, Image as ImageMsg
-from tf2_ros import TransformBroadcaster
 
 from camera_geometry import camera_rotation
 
@@ -92,12 +90,11 @@ class CameraPublisher:
             "/g1/head_cam/camera_info",
             1,
         )
-        self.tf_broadcaster = TransformBroadcaster(node)
         self.node = node
         self.frames = 0
         self.last_camera_frame = -1
 
-    def publish(self):
+    def publish(self, stamp):
         """Publica el ultimo cuadro disponible. Silencioso si todavia no hay."""
         rgb_data = self.camera.data.output.get("rgb")
         depth_data = self.camera.data.output.get(
@@ -121,7 +118,6 @@ class CameraPublisher:
         if img.ndim == 3 and img.shape[2] == 4:
             img = img[:, :, :3]               # descartar el canal alfa
 
-        stamp = self.node.get_clock().now().to_msg()
         msg = ImageMsg()
         msg.header.stamp = stamp
         msg.header.frame_id = CAMERA_FRAME
@@ -171,6 +167,12 @@ class CameraPublisher:
         ]
         self.info_pub.publish(camera_info)
 
+        self.frames += 1
+        self.last_camera_frame = camera_frame
+        return True
+
+    def world_pose(self):
+        """Entrega la pose física para incorporarla al árbol del robot."""
         position = self.camera.data.pos_w[0]
         orientation = self.camera.data.quat_w_ros[0]
         if hasattr(position, "cpu"):
@@ -179,22 +181,8 @@ class CameraPublisher:
             orientation = orientation.cpu().numpy()
         position = np.asarray(position, dtype=np.float64)
         orientation = np.asarray(orientation, dtype=np.float64)
-        camera_transform = TransformStamped()
-        camera_transform.header.stamp = stamp
-        camera_transform.header.frame_id = "map"
-        camera_transform.child_frame_id = CAMERA_FRAME
-        camera_transform.transform.translation.x = float(position[0])
-        camera_transform.transform.translation.y = float(position[1])
-        camera_transform.transform.translation.z = float(position[2])
         # Isaac Lab entrega este cuaternión como (w, x, y, z). Es la pose del
-        # marco óptico exacto usado para proyectar la profundidad; publicar
-        # otra convención produciría puntos espejados aunque la imagen se vea.
-        camera_transform.transform.rotation.w = float(orientation[0])
-        camera_transform.transform.rotation.x = float(orientation[1])
-        camera_transform.transform.rotation.y = float(orientation[2])
-        camera_transform.transform.rotation.z = float(orientation[3])
-        self.tf_broadcaster.sendTransform(camera_transform)
-
-        self.frames += 1
-        self.last_camera_frame = camera_frame
-        return True
+        # marco óptico exacto usado para proyectar la profundidad. El robot
+        # calcula luego base_link -> cámara: publicar map -> cámara desde esta
+        # pose global regalaría a la navegación una respuesta de Isaac.
+        return position, orientation

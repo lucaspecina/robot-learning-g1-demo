@@ -17,6 +17,11 @@ Nav2 usa:
 - BT Navigator para coordinar ruta, seguimiento y recuperaciones;
 - dos costmaps de 5 cm y Collision Monitor como barrera final.
 
+Los dos costmaps combinan ahora el corte horizontal `/scan` con
+`/g1/head_cam/points`, una nube construida por `depth_image_proc`, el paquete
+oficial de ROS para cámaras de profundidad. El primero cubre paredes alrededor;
+la segunda cubre objetos bajos dentro del campo visual frontal.
+
 La operación normal ya no modifica el mapa mientras camina. Sigue el flujo
 recomendado por Nav2 para una habitación conocida: `map_server` carga el mapa
 guardado y AMCL compara cada barrido con él para publicar `map -> odom`.
@@ -68,6 +73,9 @@ No se aprueba todavía la navegación completa ni su repetibilidad.
 | AMCL omnidireccional, mapa que todavía contenía el cajón | mejoró a 0,42 m / 8,0°; esa corrida no prueba detección viva |
 | mismo caso limitado a 0,15 m/s | localización 0,04 m / 0,7°, pero la policy casi no avanzó |
 | mapa limpio + cajón sólo en el sensor, tres repeticiones | detección 3/3; dos llegadas a 17,0/19,1 cm y un bloqueo |
+| cajón de 45 cm + LiDAR provisional | 0 puntos; mapa vivo quedó libre `0` |
+| mismo cajón + profundidad estándar | 13.114–13.440 puntos; mapa vivo ocupado `100` |
+| rodeo del cajón bajo | margen real 42,5 cm, altura mínima 0,730 m, error físico 2,8 cm; acción agotó plazo por 41 cm de error de localización |
 
 La velocidad lenta no sirve como arreglo: cayó en la zona de órdenes que
 mueven las piernas sin desplazar útilmente el cuerpo y fue revertida. El
@@ -80,8 +88,6 @@ movimiento lateral y la deriva lateral está medida.
 - repetición e inspección visual del rodeo completo;
 - localización móvil transferible: Isaac todavía entrega odometría perfecta y
   la T4 no compensa bien el movimiento del barrido RTX;
-- obstáculos bajos: la puerta actual cruza el plano 2D a la altura del LiDAR;
-  falta alimentar la capa 3D oficial de Nav2 con `PointCloud2`;
 - huella dinámica cuando brazos y carga sobresalen del torso.
 
 No se seguirá afinando tolerancias de Nav2 para ocultar ese error. El próximo
@@ -96,6 +102,11 @@ referencia es LiDAR + IMU con Point-LIO de Unitree y filtrado del propio cuerpo.
 cajón ya figura en el mapa fijo o si el mapa vivo no lo agregó. Luego mide
 ruta, trayectoria física, distancia al obstáculo, altura, llegada, corrección
 de localización y devolución de autoridad incluso cuando hay cancelación.
+Con `--sensing-only` comprueba sólo la percepción sin autorizar movimiento.
+`tools/check_depth_safety_zone.py` conserva la prueba negativa de la barrera:
+midió 20.054 retornos del propio torso dentro de la zona de emergencia. Por
+eso Collision Monitor sigue usando el LaserScan hasta disponer de filtrado
+corporal basado en el URDF completo.
 
 ## Referencias oficiales
 
@@ -108,3 +119,5 @@ de localización y devolución de autoridad incluso cuando hay cancelación.
 - [Nav2: AMCL](https://docs.nav2.org/configuration/packages/configuring-amcl.html)
 - [NVIDIA: LiDAR PhysX en Isaac Sim 5.1](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_physx_lidar.html)
 - [Unitree: Point-LIO para sus LiDAR](https://github.com/unitreerobotics/point_lio_unilidar)
+- [ROS 2 Jazzy: depth_image_proc](https://docs.ros.org/en/jazzy/p/depth_image_proc/doc/index.html)
+- [Nav2: selección de ObstacleLayer y VoxelLayer](https://docs.nav2.org/tuning/index.html#costmap2d-plugins)
