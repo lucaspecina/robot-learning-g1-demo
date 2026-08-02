@@ -33,10 +33,14 @@ La puerta de aceptación del lanzamiento normal pasó con estas mediciones:
 
 El mapa local ya alimenta al Nav2 completo. NavFn calcula la ruta global y DWB
 elige avance y giro mirando obstáculos actuales; Collision Monitor conserva la
-última palabra antes de `/cmd_vel`. El rodeo físico dejó 58 cm alrededor de un
-cajón y el robot no cayó. La corrida completa sigue rechazada: AMCL informó
-5 cm restantes cuando la posición física estaba a 49 cm. El plan y el control
-local funcionan; el barrido móvil todavía corrompe la localización global.
+última palabra antes de `/cmd_vel`. El mapa fijo no contiene el cajón: su celda
+vale `0`, mientras el mapa vivo de Nav2 midió `99` en 3/3 repeticiones. El
+LiDAR sí detecta el obstáculo que apareció después de mapear.
+
+El cuerpo dejó 56–60 cm alrededor del cajón y nunca cayó. Dos acciones
+terminaron a 17,0 y 19,1 cm físicos; una tercera agotó el plazo lejos del
+objetivo. Esquive y seguridad funcionan, pero la navegación completa y la
+localización móvil todavía no son repetibles.
 
 Se corrigió además una causa estructural: en Isaac 5.1,
 `LidarRtx.get_world_pose()` dejó de seguir al padre móvil y ubicaba falsamente
@@ -148,10 +152,11 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
   y vuelta contradijo la referencia exacta de Isaac en 0,26 m y 8,4°. La T4 no
   soporta Motion BVH y el barrido móvil queda deformado. No se oculta ajustando
   tolerancias de SLAM.
-- El mapa fijo + AMCL evitó que el mapa se deforme, pero no corrigió el sensor:
-  el mejor rodeo útil terminó con 0,42 m / 8,0° de corrección falsa. Limitar la
-  navegación a 0,15 m/s dejó la corrección en 0,04 m / 0,7°, pero la policy no
-  produjo desplazamiento útil; el límite se revirtió.
+- El mapa fijo + AMCL evitó que el mapa se deforme, pero no corrigió el sensor.
+  Con el mapa limpio, dos corridas útiles terminaron con 0,27–0,28 m de
+  corrección y 1,3–3,2°; la tercera se bloqueó aun con sólo 0,04 m / 3,3°.
+  Limitar la navegación a 0,15 m/s dejó la corrección en 0,04 m / 0,7°, pero la
+  policy no produjo desplazamiento útil; el límite se revirtió.
 - La validación final del bloque confirmó que las piezas están separadas: el
   robot quieto quedó dentro de 4 cm; caminó 2,11 m, se desvió 12 cm y frenó en
   8 cm. Locomoción pasa, Nav2 rodea y localización móvil falla.

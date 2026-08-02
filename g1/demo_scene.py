@@ -231,7 +231,7 @@ def _spawn_room_walls():
     )
 
 
-def build_demo_scene():
+def build_demo_scene(include_navigation_obstacle=True):
     """Crea la habitacion. Llamar despues del piso y antes de sim.reset()."""
 
     _spawn_room_walls()
@@ -239,26 +239,27 @@ def build_demo_scene():
     # --- el reloj: display digital visible desde el punto de observación ---
     _spawn_digital_clock()
 
-    obstacle = NAVIGATION_TEST_OBSTACLE
-    crate = sim_utils.CuboidCfg(
-        size=(
-            obstacle["size_x"],
-            obstacle["size_y"],
-            obstacle["height"],
-        ),
-        visual_material=_color(obstacle["rgb"]),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-    )
-    crate.func(
-        f"/World/{obstacle['id']}",
-        crate,
-        translation=(
-            obstacle["x"],
-            obstacle["y"],
-            obstacle["height"] / 2.0,
-        ),
-    )
+    if include_navigation_obstacle:
+        obstacle = NAVIGATION_TEST_OBSTACLE
+        crate = sim_utils.CuboidCfg(
+            size=(
+                obstacle["size_x"],
+                obstacle["size_y"],
+                obstacle["height"],
+            ),
+            visual_material=_color(obstacle["rgb"]),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+        )
+        crate.func(
+            f"/World/{obstacle['id']}",
+            crate,
+            translation=(
+                obstacle["x"],
+                obstacle["y"],
+                obstacle["height"] / 2.0,
+            ),
+        )
 
     # Cada mesa tiene un objeto dinámico independiente. No alcanza con dibujar
     # una botella: debe poder caerse y, más adelante, responder al agarre.

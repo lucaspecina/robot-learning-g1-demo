@@ -11,11 +11,12 @@ from pathlib import Path
 import rclpy
 from action_msgs.msg import GoalStatus
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import Odometry, Path as NavigationPath
+from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavigationPath
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
@@ -33,6 +34,11 @@ MIN_HEIGHT_M = 0.60
 MAX_GOAL_ERROR_M = 0.15
 MIN_CENTER_CLEARANCE_M = 0.45
 MIN_DETOUR_M = 0.25
+MAP_QOS = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 def distance_to_obstacle(x: float, y: float) -> float:
@@ -67,11 +73,25 @@ class ObstacleNavigationCheck(Node):
         self.plan = []
         self.plan_history = []
         self.owner = None
+        self.static_map = None
+        self.global_costmap = None
         self.feedback_count = 0
         self.last_remaining = math.inf
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_subscription(Odometry, "/g1/odom", self.on_odom, 10)
+        self.create_subscription(
+            OccupancyGrid,
+            "/map",
+            lambda message: setattr(self, "static_map", message),
+            MAP_QOS,
+        )
+        self.create_subscription(
+            OccupancyGrid,
+            "/nav2/global_costmap/costmap",
+            lambda message: setattr(self, "global_costmap", message),
+            MAP_QOS,
+        )
         self.create_subscription(
             NavigationPath,
             "/nav2/plan",
@@ -126,6 +146,16 @@ def cancel_safely(handle, result_future) -> None:
     cancel = handle.cancel_goal_async()
     wait_until(cancel.done, 3.0)
     wait_until(result_future.done, 5.0)
+
+
+def grid_value(message, x: float, y: float):
+    """Devuelve la ocupación de una coordenada mundial o None si queda fuera."""
+    resolution = float(message.info.resolution)
+    column = math.floor((x - message.info.origin.position.x) / resolution)
+    row = math.floor((y - message.info.origin.position.y) / resolution)
+    if not (0 <= column < message.info.width and 0 <= row < message.info.height):
+        return None
+    return int(message.data[row * message.info.width + column])
 
 
 def report_measurements(node, start, goal):
@@ -184,14 +214,14 @@ def report_measurements(node, start, goal):
         )
     print(
         f"ruta: {len(node.plan_history)} versiones; margen planeado "
-        f"{plan_clearance:.2f} m"
+        f"{plan_clearance:.3f} m"
     )
     print(
-        f"movimiento: desvío de la recta {detour:.2f} m; "
-        f"margen real {actual_clearance:.2f} m"
+        f"movimiento: desvío de la recta {detour:.3f} m; "
+        f"margen real {actual_clearance:.3f} m"
     )
     print(
-        f"llegada física: error {final_error:.2f} m; altura mínima "
+        f"llegada física: error {final_error:.3f} m; altura mínima "
         f"{minimum_height:.3f} m; restante informado "
         f"{node.last_remaining:.2f} m"
     )
@@ -221,8 +251,44 @@ def main() -> int:
         if not node.client.wait_for_server(timeout_sec=10.0):
             raise RuntimeError("no apareció la Action de navegación")
 
+        if not wait_until(
+            lambda: node.static_map is not None
+            and node.global_costmap is not None,
+            15.0,
+        ):
+            raise RuntimeError("no llegaron el mapa fijo y el mapa de Nav2")
+
         start = node.pose[:2]
         goal_x, goal_y, goal_yaw = NAVIGATION_TEST_GOAL
+        obstacle_x = NAVIGATION_TEST_OBSTACLE["x"]
+        obstacle_y = NAVIGATION_TEST_OBSTACLE["y"]
+        static_value = grid_value(node.static_map, obstacle_x, obstacle_y)
+        if static_value is None or static_value >= 50:
+            raise RuntimeError(
+                "el cajón ya está grabado en el mapa fijo; la prueba no "
+                "demostraría detección en vivo"
+            )
+        if not wait_until(
+            lambda: (
+                node.global_costmap is not None
+                and (grid_value(
+                    node.global_costmap,
+                    obstacle_x,
+                    obstacle_y,
+                ) or -1) >= 50
+            ),
+            15.0,
+        ):
+            value = grid_value(node.global_costmap, obstacle_x, obstacle_y)
+            raise RuntimeError(
+                "el LiDAR no agregó el cajón al mapa vivo de Nav2 "
+                f"(ocupación {value})"
+            )
+        live_value = grid_value(node.global_costmap, obstacle_x, obstacle_y)
+        print(
+            "detección viva: mapa fijo libre "
+            f"({static_value}), mapa de Nav2 ocupado ({live_value})"
+        )
         # La prueba sólo discrimina esquive si la caja corta la recta ideal.
         if distance_to_obstacle(
             NAVIGATION_TEST_OBSTACLE["x"],
@@ -270,16 +336,19 @@ def main() -> int:
         minimum_height = metrics["minimum_height"]
         final_error = metrics["final_error"]
 
+        failures = []
         if plan_clearance < MIN_CENTER_CLEARANCE_M:
-            raise RuntimeError("la ruta planeada pasa demasiado cerca del cajón")
+            failures.append("la ruta planeada pasa demasiado cerca del cajón")
         if actual_clearance < MIN_CENTER_CLEARANCE_M:
-            raise RuntimeError("el cuerpo pasó demasiado cerca del cajón")
+            failures.append("el cuerpo pasó demasiado cerca del cajón")
         if detour < MIN_DETOUR_M:
-            raise RuntimeError("la trayectoria no demuestra un rodeo")
+            failures.append("la trayectoria no demuestra un rodeo")
         if final_error > MAX_GOAL_ERROR_M:
-            raise RuntimeError("terminó fuera de la tolerancia de llegada")
+            failures.append("terminó fuera de la tolerancia de llegada")
         if minimum_height < MIN_HEIGHT_M:
-            raise RuntimeError("el robot perdió la postura durante el rodeo")
+            failures.append("el robot perdió la postura durante el rodeo")
+        if failures:
+            raise RuntimeError("; ".join(failures))
         print("PASA: Nav2 rodeó el obstáculo, llegó y devolvió el mando a STAND")
         return 0
     except RuntimeError as error:

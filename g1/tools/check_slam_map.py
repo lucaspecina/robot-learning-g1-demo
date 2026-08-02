@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comprueba que SLAM produzca un mapa real y cierre el árbol global."""
+"""Comprueba que el mapa global sea real y cierre el árbol de coordenadas."""
 import math
 import time
 
@@ -50,7 +50,7 @@ def main() -> int:
             ):
                 break
         if not node.maps:
-            raise RuntimeError("SLAM Toolbox no publicó /map")
+            raise RuntimeError("ninguna fuente publicó /map")
         message = node.maps[-1]
         if message.header.frame_id != "map":
             raise RuntimeError(f"el mapa usa el marco {message.header.frame_id!r}")
@@ -132,10 +132,10 @@ def main() -> int:
             "coordenadas: map -> odom -> base_footprint -> "
             "base_link -> lidar_link"
         )
-        print("PASA: SLAM Toolbox construyó el primer mapa utilizable")
+        print("PASA: el mapa global y la posición son utilizables")
         return 0
     except RuntimeError as error:
-        print(f"FALLA MAPA: {error}")
+        print(f"FALLA MAPA GLOBAL: {error}")
         return 1
     finally:
         node.destroy_node()

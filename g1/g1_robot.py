@@ -72,6 +72,11 @@ parser.add_argument("--payload_kg", type=float, default=0.0,
                          "Unitree fue entrenada con el robot vacio)")
 parser.add_argument("--scene", action="store_true",
                     help="construir la habitación de la demo (reloj, mesas y objetos)")
+parser.add_argument(
+    "--navigation-obstacle",
+    action="store_true",
+    help="agregar el cajón móvil de la prueba; se omite al construir el mapa base",
+)
 parser.add_argument("--camera", action="store_true",
                     help="montar la camara de la cabeza y publicarla por ROS 2")
 parser.add_argument("--camera_hz", type=float, default=3.0,
@@ -1026,7 +1031,9 @@ def main():
     light.func("/World/light", light)
 
     if args_cli.scene:
-        build_demo_scene()
+        build_demo_scene(
+            include_navigation_obstacle=args_cli.navigation_obstacle
+        )
 
     robot = Articulation(robot_cfg)
     payload_visual = PayloadVisual.spawn()

@@ -35,7 +35,7 @@ hasta volver a pasar las pruebas físicas.
 | LiDAR simulado | integrado: nube 3D y vuelta 2D completas; posición del sensor corregida contra el torso físico |
 | Mapa local de obstáculos | Nav2: 3 × 3 m a 5 cm, paredes y margen de seguridad medidos |
 | Parada ante obstáculos | Collision Monitor de Nav2: 3/3, detención a 0,50–0,51 m |
-| Esquivar obstáculos | rodeo físico medido: dejó 58 cm y siguió de pie; falla la llegada por error del LiDAR móvil en la T4 |
+| Esquivar obstáculos | detección viva 3/3 y margen real 56–60 cm; dos llegadas a 17–19 cm y un bloqueo, todavía no aprobado |
 | Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
@@ -307,10 +307,11 @@ una posición vieja; ahora se reconstruye desde el torso físico y su montaje
 fijo, igual que hará el árbol de coordenadas del robot real. Quieto, SLAM
 Toolbox produce el mapa correcto. Después de caminar, la precisión global
 sigue rechazada en esta T4 hasta reproducirla con el LiDAR físico/Point-LIO o
-una GPU compatible con la compensación de movimiento. Nav2 ya calcula y
-ejecuta el rodeo: dejó 58 cm alrededor del cajón y el robot siguió de pie. La
-corrida se rechaza porque AMCL creyó estar a 5 cm cuando físicamente faltaban
-49 cm. El detalle está en [`LIDAR_STATUS.md`](LIDAR_STATUS.md) y
+una GPU compatible con la compensación de movimiento. Nav2 ya detecta en vivo
+y ejecuta el rodeo: dejó 56–60 cm alrededor del cajón y el robot siguió de pie
+en 3/3. Dos corridas terminaron a 17–19 cm y otra quedó bloqueada, por lo que
+la conducta integral todavía se rechaza. El detalle está en
+[`LIDAR_STATUS.md`](LIDAR_STATUS.md) y
 [`NAV2_STATUS.md`](NAV2_STATUS.md).
 
 ## Lo siguiente

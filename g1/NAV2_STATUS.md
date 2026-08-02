@@ -49,11 +49,15 @@ Después de integrarlo al lanzador normal pasaron:
 - sensor y mapas: vuelta de 359,4°, mapa global utilizable y obstáculo más
   cercano a 1,08 m con 35 cm libres alrededor del cuerpo.
 
-El primer rodeo físico también aisló las responsabilidades correctamente:
-Nav2 planeó alrededor de un cajón de 60 cm, el cuerpo dejó 58 cm de espacio,
-la altura no bajó de 0,735 m y la cancelación devolvió el mando a `STAND`.
-No se aprueba la navegación completa porque la localización informó que
-faltaban 5 cm cuando el error físico todavía era 49 cm.
+La puerta de rodeo ya separa mapa permanente de obstáculo actual. El mapa fijo
+tiene valor libre `0` en el centro del cajón; el mapa vivo de Nav2 midió `99`
+en las tres repeticiones. Por lo tanto, el rodeo demuestra detección por LiDAR
+y no conocimiento grabado de la escena.
+
+En tres corridas el cuerpo dejó 0,56–0,60 m y la altura nunca bajó de 0,735 m.
+Dos acciones terminaron, pero con 0,170 m y 0,191 m de error físico; la tercera
+agotó 240 s a 2,836 m del objetivo. Las tres devolvieron el mando a `STAND`.
+No se aprueba todavía la navegación completa ni su repetibilidad.
 
 ## Experimentos de localización móvil
 
@@ -61,8 +65,9 @@ faltaban 5 cm cuando el error físico todavía era 49 cm.
 |---|---|
 | SLAM online durante el rodeo | esquivó; corrección falsa de 0,93 m / 9,0° |
 | mapa fijo + AMCL diferencial | corrección de 0,68 m / 11,8°; no llegó físicamente |
-| AMCL omnidireccional, contrato correcto del G1 | mejoró a 0,42 m / 8,0°; error físico 0,49 m |
+| AMCL omnidireccional, mapa que todavía contenía el cajón | mejoró a 0,42 m / 8,0°; esa corrida no prueba detección viva |
 | mismo caso limitado a 0,15 m/s | localización 0,04 m / 0,7°, pero la policy casi no avanzó |
+| mapa limpio + cajón sólo en el sensor, tres repeticiones | detección 3/3; dos llegadas a 17,0/19,1 cm y un bloqueo |
 
 La velocidad lenta no sirve como arreglo: cayó en la zona de órdenes que
 mueven las piernas sin desplazar útilmente el cuerpo y fue revertida. El
@@ -71,7 +76,7 @@ movimiento lateral y la deriva lateral está medida.
 
 ## Lo que todavía no está aprobado
 
-- terminar físicamente a 15 cm después de rodear el obstáculo;
+- terminar físicamente a 15 cm en tres repeticiones después de rodear;
 - repetición e inspección visual del rodeo completo;
 - localización móvil transferible: Isaac todavía entrega odometría perfecta y
   la T4 no compensa bien el movimiento del barrido RTX;
@@ -83,6 +88,11 @@ No se seguirá afinando tolerancias de Nav2 para ocultar ese error. El próximo
 experimento útil es repetir sin deformación móvil: GPU Ampere o posterior, o
 el LiDAR PhysX oficial de Isaac 5.1 manteniendo el mismo contrato ROS. Para el
 robot real, el camino de referencia es LiDAR + IMU con Point-LIO de Unitree.
+
+`tools/check_obstacle_navigation.py` rechaza la prueba antes de arrancar si el
+cajón ya figura en el mapa fijo o si el mapa vivo no lo agregó. Luego mide
+ruta, trayectoria física, distancia al obstáculo, altura, llegada, corrección
+de localización y devolución de autoridad incluso cuando hay cancelación.
 
 ## Referencias oficiales
 

@@ -285,9 +285,15 @@ up)
         pose|pink) ;;
         *) echo "ERROR: G1_ARM_CONTROLLER debe ser pose o pink" >&2; exit 2 ;;
     esac
+    SCENE_OPTIONS="--camera --scene --lidar --visible --arm-controller $ARM_CONTROLLER"
+    # El mapa base se construye sin objetos temporales. La escena normal los
+    # incluye para demostrar que el LiDAR los descubre después de mapear.
+    if [ "${G1_NAVIGATION_OBSTACLE:-1}" = "1" ]; then
+        SCENE_OPTIONS="$SCENE_OPTIONS --navigation-obstacle"
+    fi
     if ! ROBOT_LAUNCH_OUTPUT=$(
         bash ~/go2-lab/g1/run_g1.sh wbc 29dof 0 \
-            "--camera --scene --lidar --visible --arm-controller $ARM_CONTROLLER" 2>&1
+            "$SCENE_OPTIONS" 2>&1
     ); then
         echo "$ROBOT_LAUNCH_OUTPUT" >&2
         echo "ERROR: Isaac no fue lanzado; no se acepta un log anterior" >&2
@@ -367,8 +373,7 @@ map)
         sudo docker exec jetson bash -lc \
             "$ROS && python3 $D/tools/check_time_and_tf.py \
             && python3 $D/tools/check_laser_scan.py \
-            && python3 $D/tools/check_slam_map.py \
-            && python3 $D/tools/check_local_costmap.py"
+            && python3 $D/tools/check_slam_map.py"
         ;;
     status)
         for process in laser_scan_adapter async_slam_toolbox_node; do
@@ -402,7 +407,12 @@ localize)
         sudo docker exec jetson bash -lc \
             "$ROS && python3 $D/tools/check_time_and_tf.py \
             && python3 $D/tools/check_laser_scan.py \
+            && python3 $D/tools/check_slam_map.py \
             && timeout 10 ros2 topic echo --once /amcl_pose >/dev/null"
+        if navigation_is_active; then
+            sudo docker exec jetson bash -lc \
+                "$ROS && python3 $D/tools/check_local_costmap.py"
+        fi
         ;;
     status)
         localization_is_active \
