@@ -19,7 +19,7 @@ from sensor_msgs_py import point_cloud2
 G1_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, G1_DIR)
 
-from scene_layout import WORLD_BOUNDS  # noqa: E402
+from scene_layout import ROOM_INTERIOR_BOUNDS  # noqa: E402
 
 
 def yaw_from_odometry(message: Odometry) -> float:
@@ -85,10 +85,10 @@ class WallErrorMeter(Node):
         world_y = robot_y + sine * xyz[:, 0] + cosine * xyz[:, 1]
         residuals = np.minimum.reduce(
             (
-                np.abs(world_x - WORLD_BOUNDS["xmin"]),
-                np.abs(world_x - WORLD_BOUNDS["xmax"]),
-                np.abs(world_y - WORLD_BOUNDS["ymin"]),
-                np.abs(world_y - WORLD_BOUNDS["ymax"]),
+                np.abs(world_x - ROOM_INTERIOR_BOUNDS["xmin"]),
+                np.abs(world_x - ROOM_INTERIOR_BOUNDS["xmax"]),
+                np.abs(world_y - ROOM_INTERIOR_BOUNDS["ymin"]),
+                np.abs(world_y - ROOM_INTERIOR_BOUNDS["ymax"]),
             )
         )
         # Mesas y robot son retornos válidos pero no sirven para medir la

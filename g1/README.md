@@ -28,7 +28,10 @@ hasta volver a pasar las pruebas físicas.
 | Carga en las muñecas | 0,5 kg estables en tres caminatas y tres navegaciones; la pose y el bulto fueron rechazados visualmente |
 | Habitación física | funciona — cuatro paredes con colisión, alineadas con el tablero |
 | Cámara de cabeza | funciona — color, profundidad y calibración sincronizados |
-| LiDAR simulado | integrado: nube 3D y vuelta 2D completas; mapa quieto pasa, precisión móvil bloqueada por T4 |
+| LiDAR simulado | integrado: nube 3D y vuelta 2D completas; posición del sensor corregida contra el torso físico |
+| Mapa local de obstáculos | Nav2: 3 × 3 m a 5 cm, paredes y margen de seguridad medidos |
+| Parada ante obstáculos | Collision Monitor de Nav2: 3/3, detención a 0,50–0,51 m |
+| Esquivar obstáculos | pendiente: `go_to.py` todavía no consume el mapa local |
 | Detector local RT-DETR | integrado; umbral medido en la escena: mesa 6/6, pared 0/5 |
 | Búsqueda visual abierta | integrada por pedido; roja y azul 3/3, red mala y corte probados |
 | Mesa visual a punto del mapa | funciona — roja y azul caen sobre su superficie real |
@@ -65,6 +68,10 @@ versión anterior quedaron fuera del alcance actual.
                          |                 /g1/cmd_vel/alignment
                   [ align_with_table ]             |
                             [ stand_hold.py ] -> [ mobility_authority.py ]
+                                                          |
+                                               /g1/cmd_vel/authorized
+                                                          |
+                                                [ collision_monitor ]
                                                           |
                                                       /cmd_vel
                                                           |
@@ -105,7 +112,8 @@ versión anterior quedaron fuera del alcance actual.
 | `/g1/cmd_vel/{stand,navigation,alignment,manual,test}` | Twist | cada fuente identificada |
 | `/g1/mobility/request` | String (JSON transitorio) | quien solicita o libera movilidad |
 | `/g1/mobility/status` | String (JSON) | el árbitro de movilidad |
-| `/cmd_vel` | Twist | sólo `mobility_authority.py` |
+| `/g1/cmd_vel/authorized` | Twist | sólo `mobility_authority.py` |
+| `/cmd_vel` | Twist | sólo Collision Monitor de Nav2, última barrera antes del robot |
 | `/g1/odom`, `/g1/joint_states` | Odometry, JointState | el robot |
 | `/g1/head_cam/image` | Image | el robot |
 | `/g1/head_cam/depth` | Image 32FC1 | el robot |
@@ -113,10 +121,11 @@ versión anterior quedaron fuera del alcance actual.
 | `/tf`: `map` → `head_cam_optical` | TransformStamped | el robot simulado |
 | `/clock` | Clock | tiempo de física; no depende de la lentitud de Azure |
 | `/tf`: `odom` → `base_footprint` → `base_link` → `lidar_link` | TransformStamped | robot simulado; SLAM agrega `map` → `odom` |
-| `/g1/lidar/points` | PointCloud2 | porciones 3D del LiDAR provisional |
+| `/g1/lidar/points` | PointCloud2 | vueltas 3D completas del LiDAR provisional |
 | `/scan_raw` | LaserScan | vuelta 2D de Isaac 5.1 con metadatos sin normalizar |
 | `/scan` | LaserScan | vuelta validada que consume SLAM Toolbox |
 | `/map` | OccupancyGrid | mapa 2D construido en la Jetson |
+| `/local_costmap/costmap` | OccupancyGrid | obstáculos actuales y margen alrededor del robot |
 
 Cada pieza se puede reemplazar sin tocar las demás mientras respete su contrato:
 la navegación por Nav2, RT-DETR por otro detector que publique las mismas
@@ -148,6 +157,8 @@ llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
 | `lidar.py` | nube RTX 3D y perfil 2D para navegación |
 | `navigation/laser_scan_adapter.py` | normaliza el único metadato angular inconsistente de Isaac 5.1 |
 | `config/slam_toolbox.yaml` | configuración online asíncrona basada en la oficial |
+| `config/local_costmap.yaml` | ventana local Nav2 basada en su configuración oficial |
+| `config/collision_monitor.yaml` | barrera final Nav2 y sus zonas medidas |
 | `g1_asset.py` | los cuerpos disponibles (12 y 29 articulaciones) y sus actuadores |
 | `demo_scene.py` | la habitación, los objetos y el reloj digital |
 | `navigation_core.py` | cálculo puro de movimiento y verificación de progreso |
@@ -281,37 +292,45 @@ abierto aunque el tablero mostrara un rectángulo. Ahora los mismos límites
 crean cuatro paredes con colisión. Quietud (error p95 de 1 cm), caminata
 (2,46 m) y frenado (2 cm) siguieron pasando con RTF 0,23.
 
-**El LiDAR integrado ya ve, pero la T4 no corrige un barrido móvil.** La nube
-vacía era el sensor de 360° encerrado dentro de la cabeza; a 0,35 m recuperó
-10.008–23.040 puntos. La vuelta 2D alimenta SLAM Toolbox mediante la cadena
-`map → odom → base_footprint → base_link → lidar_link`. Quieto produjo el mapa
-de la habitación sin corrección global. Después de caminar 1,91 m y volver,
-SLAM contradijo la pose exacta de Isaac en 0,26 m / 8,4°: la precisión móvil
-queda rechazada hasta repetir en Ampere o evaluar otro sensor. El detalle y
-todas las negativas están en [`LIDAR_STATUS.md`](LIDAR_STATUS.md).
+**El LiDAR integrado ya ve, pero la T4 no corrige un barrido móvil.** La salida
+3D actual acumula una vuelta completa: 285.234–285.353 puntos y 359,9°. La
+vista plana entregó tres vueltas de 1.066 rayos y 359,4°. Se corrigió además
+un defecto de Isaac 5.1: consultar la pose mundial del sensor montado devolvía
+una posición vieja; ahora se reconstruye desde el torso físico y su montaje
+fijo, igual que hará el árbol de coordenadas del robot real. Quieto, SLAM
+Toolbox produce el mapa correcto. Después de caminar, la precisión global
+sigue rechazada en esta T4 hasta reproducirla con el LiDAR físico/Point-LIO o
+una GPU compatible con la compensación de movimiento. El mapa local y la
+parada de emergencia sí usan cada barrido actual: representan paredes y
+detienen el robot, pero todavía no calculan un camino que las rodee. El detalle
+está en [`LIDAR_STATUS.md`](LIDAR_STATUS.md).
 
 ## Lo siguiente
 
 La cámara, sus memorias acotadas y lo que muestra el tablero están explicados
 en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
-1. **Validar la nueva pose congelada con Lucas**: mostrar `transporte` con
+1. **Reemplazar el movimiento directo por Nav2**: integrar primero su
+   planificador y controlador contra el mapa local ya medido, sin quitar la
+   autoridad exclusiva ni Collision Monitor.
+2. **Resolver la localización realizable**: reproducir el driver L2 y
+   Point-LIO de Unitree para el G1 real; en simulación, repetir la puerta de
+   15 cm / 5° sin usar la pose perfecta de Isaac.
+3. **Validar la nueva pose congelada con Lucas**: mostrar `transporte` con
    `0,5 kg` sin lanzar una misión. La candidata quedó a `26,9 cm` delante de la
    pelvis, pero todavía no tiene aprobación visual.
-2. **Repetir quietud, caminata y frenado** con la pose nueva. Un objetivo
+4. **Repetir quietud, caminata y frenado** con la pose nueva. Un objetivo
    articular alcanzado no demuestra equilibrio ni que la postura tenga sentido.
-3. **Ejecutar la misión integral** sólo si los dos pasos anteriores pasan;
+5. **Ejecutar la misión integral** sólo si los dos pasos anteriores pasan;
    observar alineación, bulto, postura y regreso en una misma corrida.
-4. **Medir la confiabilidad de la alineación**: una de tres aproximaciones
+6. **Medir la confiabilidad de la alineación**: una de tres aproximaciones
    largas se estancó y pasó en el primer reintento idéntico.
-5. **Migrar el barrido completo a una Action cancelable**, conservando el
+7. **Migrar el barrido completo a una Action cancelable**, conservando el
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
-6. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
+8. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
    caminata y frenado; probar una postura más cercana a neutral si falla.
-7. **Localización móvil**: repetir la puerta de 15 cm / 5° en GPU Ampere o con
-   el LiDAR PhysX, sin ajustar SLAM para esconder la deformación de la T4.
-8. **Migrar la cámara al mismo árbol de coordenadas**; hoy su vínculo directo
+9. **Migrar la cámara al mismo árbol de coordenadas**; hoy su vínculo directo
    con `map` sigue siendo un adaptador de pose perfecta de Isaac.
-9. **El agarre** con un VLA entrenado por nosotros.
-10. **Voz** para reemplazar la publicación manual de texto; el planificador
+10. **El agarre** con un VLA entrenado por nosotros.
+11. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

@@ -1,6 +1,6 @@
 # Estado del LiDAR simulado
 
-Fecha de corte: 2026-08-01.
+Fecha de corte: 2026-08-02.
 
 ## Para qué lo queremos
 
@@ -17,7 +17,36 @@ representa el sensor físico del G1: la página pública de Unitree informa
 “3D LiDAR”, pero no identifica el modelo ni su montaje para todas las
 configuraciones EDU.
 
-## Resultado medido
+## Resultado vigente
+
+La puerta de aceptación del lanzamiento normal pasó con estas mediciones:
+
+| Salida o conducta | Tres muestras / repeticiones |
+|---|---:|
+| Nube 3D acumulada | 285.234–285.353 puntos, 359,9°, 3,34 MiB por vuelta |
+| Barrido plano `/scan` | 1.066 rayos, 762 válidos, 359,4°, 0,67 Hz de pared |
+| Mapa quieto de SLAM Toolbox | 138 × 148 celdas de 5 cm; 117 ocupadas |
+| Mapa local Nav2 | 60 × 60 celdas; 242 letales y 258 de margen |
+| Quietud después de integrar seguridad | 60 s, error final y máximo 4 cm |
+| Caminata y frenado | 2,14 m, 17 cm lateral, freno en 4 cm, de pie |
+| Aproximación a una pared | 0,50 / 0,51 / 0,51 m; avance extra 2–3 cm |
+
+El mapa local representa obstáculos, pero todavía no decide el movimiento.
+`go_to.py` sigue apuntando directamente al objetivo: Collision Monitor lo
+detiene antes de una pared, pero sólo el futuro planificador/controlador de
+Nav2 podrá elegir un rodeo.
+
+Se corrigió además una causa estructural: en Isaac 5.1,
+`LidarRtx.get_world_pose()` dejó de seguir al padre móvil y ubicaba falsamente
+el sensor 56 cm por delante. Ahora se mide una vez el montaje fijo respecto de
+`torso_link` y se reconstruye su pose desde el cuerpo físico en cada estado.
+Es el equivalente simulado del árbol de coordenadas que publicará el URDF del
+G1 real; no consulta la posición de una pared ni de un objetivo.
+
+## Historial de diagnóstico
+
+Las cifras siguientes explican cómo se aisló la falla inicial. Las mediciones
+vigentes de aceptación son las de la sección anterior.
 
 | Prueba, cambiando una variable | Resultado |
 |---|---:|
@@ -97,13 +126,17 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 - `/clock` publica el tiempo de física. Con los dos perfiles LiDAR activos, la
   medición fue RTF 0,32–0,33; los plazos de navegación ya no deben depender de
   cuánto tarda Azure en simular un segundo.
-- La nube 3D se conserva por sectores en `/g1/lidar/points`. Para SLAM, Isaac
+- La nube 3D se acumula hasta completar 359,9° en `/g1/lidar/points`. No se usa
+  como barrera inmediata porque, con RTF 0,23 en esta T4, cada vuelta pesa
+  3,34 MiB y tarda demasiado en tiempo de pared. Para SLAM y seguridad, Isaac
   5.1 necesita un perfil 2D separado y publica la vuelta en `/scan_raw`.
   `navigation/laser_scan_adapter.py` corrige sólo una inconsistencia medida del
   ejemplo NVIDIA: declara 1.067 rayos y entrega 1.066. No altera distancias.
-- `/scan` pasó tres vueltas de 1.066 rayos, 359,4°, 758–766 retornos válidos y
-  1,03 Hz de pared. Un perfil NVIDIA/SLAMTEC de 10 Hz entregó sólo 0,34 Hz de
-  pared; falló la métrica de frescura y se revirtió.
+- `/scan` pasó tres vueltas de 1.066 rayos, 359,4°, 762 retornos válidos y
+  0,67 Hz de pared. Su alcance cercano se ajustó a 5 cm, valor publicado para
+  el Unitree L2: el perfil de ejemplo de Isaac ocultaba la pared por debajo de
+  1 m y volvía inútil la zona de parada. Un perfil NVIDIA/SLAMTEC alternativo
+  produjo datos más viejos, falló la distancia de frenado y se revirtió.
 - Quieto, SLAM Toolbox produjo un mapa de 138 × 148 celdas a 5 cm, con 7.958
   libres y 121 ocupadas. `map → odom` quedó en identidad, como debe ocurrir
   contra la odometría exacta actual de Isaac.
@@ -125,6 +158,10 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
   usemos la referencia perfecta de Isaac.
 - `tools/measure_lidar_wall_error.py` compara cada nube con las cuatro paredes
   físicas y deja una métrica repetible para detectar regresiones en movimiento.
+- `tools/check_local_costmap.py` exige resolución, tamaño, datos frescos,
+  obstáculos, margen inflado, centro libre y coincidencia con la pose actual.
+- `tools/check_collision_safety.py` prueba la propiedad exclusiva de los
+  topics y tres detenciones físicas, no sólo que existan procesos.
 - La distancia a las mesas continúa usando RGB-D: imagen de color más
   profundidad sincronizada. Eso existe en el robot real si la cámara elegida
   entrega profundidad, pero debe confirmarse el modelo exacto antes de comprar.
@@ -132,16 +169,18 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 
 ## Próximo bloque útil
 
-La integración y el mapa quieto están cerrados; la localización continua en
-movimiento, no. El siguiente experimento útil debe atacar esa única métrica:
+La integración, el mapa quieto, el mapa local y la barrera final están
+cerrados; la localización continua en movimiento y el rodeo de obstáculos, no.
+El siguiente bloque debe seguir el orden estándar:
 
 1. repetir la misma ida y vuelta en una VM Ampere o posterior y exigir menos
    de 15 cm / 5° de corrección;
 2. si no hay GPU compatible, evaluar el LiDAR PhysX oficial en una rama
    separada, manteniendo exactamente `/scan` y la misma prueba;
 3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
-4. recién con localización móvil aprobada integrar los mapas de obstáculos y
-   el controlador de Nav2.
+4. integrar el planificador y controlador de Nav2 con el mapa local ya medido,
+   pero no declarar despliegue transferible hasta aprobar la localización;
+5. mantener Collision Monitor como único publicador final de `/cmd_vel`.
 
 Isaac Sim 5.1 ya figura como versión sin soporte. Una prueba posterior sobre
 una versión nueva queda justificada si la integración continúa fallando, pero
@@ -171,4 +210,7 @@ Antes de permitir que Nav2 mueva el robot:
 - [NVIDIA Isaac Sim 5.1: notas de versión](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/release_notes.html)
 - [Unitree G1: página oficial del producto](https://www.unitree.com/g1)
 - [Unitree LiDAR SDK: salida PointCloud2 oficial](https://github.com/unitreerobotics/unilidar_sdk2)
+- [Unitree Point-LIO: referencia con LiDAR L2 e IMU](https://github.com/unitreerobotics/point_lio_unilidar)
+- [Nav2: mapa local, capa de obstáculos e inflación](https://docs.nav2.org/setup_guides/sensors/mapping_localization.html)
+- [Nav2: configuración de Collision Monitor](https://docs.nav2.org/configuration/packages/collision_monitor/configuring-collision-monitor-node.html)
 - [IsaacLab: caso comunitario de LiDAR vacío y Fabric](https://github.com/isaac-sim/IsaacLab/discussions/2082)

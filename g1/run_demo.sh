@@ -58,7 +58,72 @@ launch() {   # nombre archivo_log script
     echo "   $1"
 }
 
+stop_safety() {
+    sudo docker exec jetson pkill -f \
+        "[n]av2_collision_monitor|[l]ifecycle_manager_safety" \
+        2>/dev/null || true
+}
+
+start_safety() {
+    stop_safety
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        ros2 run nav2_collision_monitor collision_monitor \
+        --ros-args --params-file $D/config/collision_monitor.yaml \
+        >> /tmp/collision_monitor.log 2>&1; sleep 3; done"
+    sleep 2
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        ros2 run nav2_lifecycle_manager lifecycle_manager \
+        --ros-args -r __node:=lifecycle_manager_safety \
+        -p autostart:=true -p 'node_names:=[collision_monitor]' \
+        -p use_sim_time:=true \
+        >> /tmp/lifecycle_manager_safety.log 2>&1; sleep 3; done"
+    echo "   seguridad de colisiones Nav2"
+}
+
+stop_local_costmap() {
+    sudo docker exec jetson pkill -f \
+        "[n]av2_costmap_2d|[l]ifecycle_manager_local_costmap" \
+        2>/dev/null || true
+}
+
+start_local_costmap() {
+    stop_local_costmap
+    # El ejecutable independiente de costmap es un nodo de ciclo de vida,
+    # pero deliberadamente no participa del enlace de supervisión general de
+    # Nav2. Lo configuramos y activamos con sus transiciones ROS oficiales;
+    # al integrar planner/controller, ambos serán dueños de sus costmaps.
+    sudo docker exec jetson bash -c ": > /tmp/local_costmap.log"
+    sudo docker exec -d jetson bash -lc \
+        "$ROS && while true; do \
+        ros2 run nav2_costmap_2d nav2_costmap_2d \
+        --ros-args -r __ns:=/local_costmap -r __node:=local_costmap \
+        --params-file $D/config/local_costmap.yaml \
+        >> /tmp/local_costmap.log 2>&1 & \
+        costmap_pid=\$!; \
+        for _ in \$(seq 1 30); do \
+            ros2 lifecycle get /local_costmap/local_costmap \
+                >/dev/null 2>&1 && break; \
+            sleep 1; \
+        done; \
+        if ! ros2 lifecycle set /local_costmap/local_costmap configure \
+            >> /tmp/local_costmap.log 2>&1; then \
+            kill \$costmap_pid 2>/dev/null || true; \
+            wait \$costmap_pid 2>/dev/null || true; sleep 3; continue; \
+        fi; \
+        if ! ros2 lifecycle set /local_costmap/local_costmap activate \
+            >> /tmp/local_costmap.log 2>&1; then \
+            kill \$costmap_pid 2>/dev/null || true; \
+            wait \$costmap_pid 2>/dev/null || true; sleep 3; continue; \
+        fi; \
+        wait \$costmap_pid; sleep 3; \
+        done"
+    echo "   mapa local de obstáculos Nav2"
+}
+
 stop_mapping() {
+    stop_local_costmap
     sudo docker exec jetson pkill -f \
         "laser_scan_adapter.py|online_async_launch.py|async_slam_toolbox_node" \
         2>/dev/null || true
@@ -74,6 +139,7 @@ start_mapping() {
         slam_params_file:=$D/config/slam_toolbox.yaml use_sim_time:=true \
         >> /tmp/slam_toolbox.log 2>&1; sleep 3; done"
     echo "   mapa SLAM Toolbox"
+    start_local_costmap
 }
 
 stop_layers() {
@@ -83,8 +149,9 @@ stop_layers() {
 }
 
 start_layers() {
-    # El árbitro nace antes que cualquier fuente. Así nunca existe una ventana
-    # donde navegación o pruebas puedan hablar directo con el robot.
+    # La barrera final nace antes que la autoridad. Si cualquier capa tarda o
+    # se cae, el watchdog del robot recibe cero en vez del último comando.
+    start_safety
     launch "autoridad"            mobility.log          mobility_authority.py
     launch "quieto"               stand.log             stand_hold.py
     launch "navegacion"           goto.log              skills/go_to.py
@@ -109,6 +176,7 @@ preflight() {
         }
     fi
     stop_layers
+    stop_safety
     sleep 2
 
     local gpu
@@ -209,7 +277,8 @@ map)
         sudo docker exec jetson bash -lc \
             "$ROS && python3 $D/tools/check_time_and_tf.py \
             && python3 $D/tools/check_laser_scan.py \
-            && python3 $D/tools/check_slam_map.py"
+            && python3 $D/tools/check_slam_map.py \
+            && python3 $D/tools/check_local_costmap.py"
         ;;
     status)
         for process in laser_scan_adapter async_slam_toolbox_node; do
@@ -219,6 +288,13 @@ map)
                 echo "$process: DETENIDO"
             fi
         done
+        if sudo docker exec jetson pgrep -f \
+            "^/opt/ros/jazzy/lib/nav2_costmap_2d/nav2_costmap_2d " \
+            >/dev/null 2>&1; then
+            echo "nav2_costmap_2d: corriendo"
+        else
+            echo "nav2_costmap_2d: DETENIDO"
+        fi
         ;;
     *) echo "uso: bash run_demo.sh map {on|off|check|status}"; exit 1 ;;
     esac
@@ -300,6 +376,20 @@ tablero)
 
 check)
     # La escalera de pruebas, de lo mas simple a lo mas complejo.
+    if [ "${2:-}" = "safety" ]; then
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/check_collision_safety.py wiring"
+        exit $?
+    fi
+    if [ "${2:-}" = "safety-wall" ]; then
+        sudo docker exec jetson bash -c \
+            "$ROS && timeout 8 ros2 topic pub --once /g1/control \
+            std_msgs/msg/String \"{data: start}\"" >/dev/null 2>&1
+        sleep 2
+        sudo docker exec jetson bash -c \
+            "$ROS && python3 $D/tools/check_collision_safety.py wall"
+        exit $?
+    fi
     if [ "${2:-}" = "clock" ]; then
         sudo docker exec jetson bash -c \
             "$ROS && python3 $D/tools/check_clock.py"
@@ -416,6 +506,14 @@ status)
             echo "  $p: DETENIDO"
         fi
     done
+    echo "== la seguridad =="
+    for p in nav2_collision_monitor lifecycle_manager_safety; do
+        if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
+            echo "  $p: corriendo"
+        else
+            echo "  $p: DETENIDO"
+        fi
+    done
     echo "== el mapa =="
     for p in laser_scan_adapter async_slam_toolbox_node; do
         if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
@@ -424,6 +522,13 @@ status)
             echo "  $p: DETENIDO"
         fi
     done
+    if sudo docker exec jetson pgrep -f \
+        "^/opt/ros/jazzy/lib/nav2_costmap_2d/nav2_costmap_2d " \
+        >/dev/null 2>&1; then
+        echo "  nav2_costmap_2d: corriendo"
+    else
+        echo "  nav2_costmap_2d: DETENIDO"
+    fi
     perception_status=$(
         sudo docker exec jetson bash -lc \
             "$ROS && timeout 5 ros2 topic echo --once --field data /g1/perception/status" \
@@ -469,6 +574,7 @@ kill)
     # ver como el sistema vuelve a levantarse (se apaga con: tablero off).
     bash ~/go2-lab/g1/run_g1.sh stop
     stop_layers
+    stop_safety
     stop_mapping
     sleep 2
     echo "robot: $(pgrep -f 'g1_robot.p[y]' | wc -l) instancias vivas"
@@ -484,5 +590,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|map [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|map [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [safety|safety-wall|authority|stand|walk|turn|goto|clock|home|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
 esac

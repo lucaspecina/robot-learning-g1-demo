@@ -52,6 +52,9 @@ RTDetrForObjectDetection.from_pretrained(m, revision=r)"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-slam-toolbox \
     ros-jazzy-nav2-map-server \
+    ros-jazzy-nav2-collision-monitor \
+    ros-jazzy-nav2-costmap-2d \
+    ros-jazzy-nav2-lifecycle-manager \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp

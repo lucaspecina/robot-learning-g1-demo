@@ -84,7 +84,7 @@ La misión puede usar movilidad y brazos al mismo tiempo; por eso
 /g1/cmd_vel/manual        -> mobility_authority
 /g1/cmd_vel/test         /          |
                                    v
-                           velocity_smoother
+                    /g1/cmd_vel/authorized
                                    |
                                    v
                            collision_monitor
@@ -96,8 +96,12 @@ La misión puede usar movilidad y brazos al mismo tiempo; por eso
                          robot / Unitree API
 ```
 
-Sólo el último filtro publica en `/cmd_vel`. Mientras todavía no exista el
-filtro de colisiones, `mobility_authority` ocupa temporalmente ese último lugar.
+Sólo el monitor de colisiones publica en `/cmd_vel`. El árbitro publica la
+orden elegida en `/g1/cmd_vel/authorized`; así, perder al árbitro, el LiDAR o
+el propio monitor termina en velocidad cero y no en conservar una orden vieja.
+El suavizador de velocidad recomendado por Nav2 se incorporará junto con su
+controlador, porque todavía no hay una métrica que justifique insertarlo entre
+el árbitro y la barrera ya validada.
 
 El árbitro aplica una concesión con vencimiento:
 
@@ -181,6 +185,12 @@ Para considerar estable una espera:
    comando seleccionado y comando descartado.
 8. Las pruebas usan la misma interfaz de autoridad que la misión; no publican
    directamente al robot.
+
+La integración del 2-ago-2026 comprobó además que existe un solo publicador de
+la intención autorizada y uno solo de la salida final. Frente a la pared, tres
+corridas se detuvieron a 0,50–0,51 m y avanzaron sólo 0,02–0,03 m después de
+la primera orden de detención. Esta barrera reduce el daño de un plan malo;
+no reemplaza un camino que rodee obstáculos.
 
 ## Orden de integración
 

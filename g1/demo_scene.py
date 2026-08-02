@@ -14,6 +14,7 @@ import isaaclab.sim as sim_utils
 from scene_layout import (
     COLORED_TABLES,
     NAVIGATION_TARGETS,
+    ROOM_WALL_THICKNESS,
     SCENE_POSITIONS,
     TABLE_SIZE,
     WORLD_BOUNDS,
@@ -22,7 +23,7 @@ from scene_layout import (
 TABLE_HEIGHT = 0.75
 CLOCK_HEIGHT = 1.55
 ROOM_HEIGHT = 2.7
-WALL_THICKNESS = 0.12
+WALL_THICKNESS = ROOM_WALL_THICKNESS
 CLOCK_APPROACH = NAVIGATION_TARGETS["reloj"][:2]
 CLOCK_FACE_YAW = math.atan2(
     CLOCK_APPROACH[1] - SCENE_POSITIONS["clock"][1],

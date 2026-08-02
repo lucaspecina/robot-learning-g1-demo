@@ -1061,6 +1061,27 @@ def main():
     sim.reset()
     if lidar_bridge is not None:
         lidar_bridge.initialize()
+        torso_body_indices, _ = robot.find_bodies("torso_link")
+        if len(torso_body_indices) != 1:
+            raise RuntimeError(
+                "el LiDAR necesita exactamente un cuerpo torso_link; "
+                f"se encontraron {len(torso_body_indices)}"
+            )
+        lidar_torso_body_index = torso_body_indices[0]
+        lidar_mount_position, lidar_mount_orientation = relative_pose(
+            robot.data.body_pos_w[0, lidar_torso_body_index].cpu().numpy(),
+            robot.data.body_quat_w[0, lidar_torso_body_index].cpu().numpy(),
+            *lidar_bridge.sensor.get_world_pose(),
+        )
+        print(
+            "[robot] montaje LiDAR respecto del torso: "
+            f"posición {np.round(lidar_mount_position, 4).tolist()}",
+            flush=True,
+        )
+    else:
+        lidar_torso_body_index = None
+        lidar_mount_position = None
+        lidar_mount_orientation = None
     print(f"[robot] articulaciones del modelo: {robot.num_joints} "
           f"({', '.join(robot.joint_names[:3])}...)", flush=True)
 
@@ -1250,6 +1271,33 @@ def main():
             diagnostic_damping,
         )
 
+    def current_lidar_world_pose():
+        """Reconstruye el montaje desde el torso físico del articulado."""
+        if lidar_torso_body_index is None:
+            return None
+        torso_position = robot.data.body_pos_w[
+            0,
+            lidar_torso_body_index,
+        ].cpu().numpy()
+        torso_orientation = robot.data.body_quat_w[
+            0,
+            lidar_torso_body_index,
+        ].cpu().numpy()
+        # LidarRtx.get_world_pose() dejó de seguir al padre móvil en Isaac 5.1:
+        # al caminar, TF fingía que el sensor se alejaba del cuerpo. El montaje
+        # se mide una vez y luego sigue al torso, igual que robot_state_publisher
+        # lo reconstruirá desde URDF y encoders en el G1 real.
+        sensor_position = torso_position + quaternion_rotate(
+            torso_orientation,
+            lidar_mount_position,
+        )
+        sensor_orientation = quaternion_multiply(
+            torso_orientation,
+            lidar_mount_orientation,
+        )
+        sensor_orientation /= np.linalg.norm(sensor_orientation)
+        return sensor_position, sensor_orientation
+
     def consume_arm_pose_request():
         """Aplica una orden pendiente y deja una confirmación inequívoca en el log."""
         if arms is None or node.arm_pose_request is None:
@@ -1401,8 +1449,7 @@ def main():
                     robot.data.root_quat_w[0].cpu().numpy(),
                     robot.data.root_lin_vel_w[0].cpu().numpy(),
                     robot.data.root_ang_vel_w[0].cpu().numpy(),
-                    lidar_bridge.sensor.get_world_pose()
-                    if lidar_bridge is not None else None,
+                    current_lidar_world_pose(),
                 )
                 publish_current_arm_status()
                 rclpy.spin_once(node, timeout_sec=0.0)
@@ -1544,8 +1591,7 @@ def main():
                 robot.data.root_quat_w[0].cpu().numpy(),
                 robot.data.root_lin_vel_b[0].cpu().numpy(),
                 robot.data.root_ang_vel_b[0].cpu().numpy(),
-                lidar_bridge.sensor.get_world_pose()
-                if lidar_bridge is not None else None,
+                current_lidar_world_pose(),
             )
             publish_current_arm_status()
             if cam_pub is not None:

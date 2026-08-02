@@ -16,14 +16,14 @@ Control:
     {"operation":"release","source":"navigation","requester":"go_to",
      "reason":"objetivo terminado"}
 
-Salida:
+Salida autorizada:
 
-  /cmd_vel
+  /g1/cmd_vel/authorized
   /g1/mobility/status
 
-Mientras no exista un filtro de colisiones, este nodo es deliberadamente el
-único publicador del topic final. Cuando se agregue ese filtro, la salida del
-árbitro se remapeará a un topic intermedio.
+El filtro oficial de colisiones de Nav2 es el único publicador de `/cmd_vel`.
+Esta separación conserva una sola autoridad sobre la intención y coloca la
+seguridad como última barrera independiente antes del robot.
 """
 
 import json
@@ -45,6 +45,7 @@ OUTPUT_RATE_HZ = 20.0
 STATUS_RATE_HZ = 10.0
 LEASE_TIMEOUT_S = 0.75
 COMMAND_TIMEOUT_S = 0.35
+AUTHORIZED_COMMAND_TOPIC = "/g1/cmd_vel/authorized"
 
 
 def velocity_from_twist(msg: Twist):
@@ -67,7 +68,11 @@ class MobilityAuthorityNode(Node):
         self.last_status_publish = 0.0
         self.last_transition_count = -1
 
-        self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 1)
+        self.pub_cmd = self.create_publisher(
+            Twist,
+            AUTHORIZED_COMMAND_TOPIC,
+            1,
+        )
         self.pub_status = self.create_publisher(String, "/g1/mobility/status", 10)
 
         for source in MobilitySource:

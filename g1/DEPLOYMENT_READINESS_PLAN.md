@@ -1,12 +1,28 @@
 # Plan para quitar ayudas y preparar navegación real
 
-Estado: **siguiente etapa, después de aprobar visualmente la misión integral**.
-Fecha: 31-jul-2026.
+Estado: **en ejecución; sensores y barrera local validados, conductor Nav2 pendiente**.
+Fecha: 2-ago-2026.
 
 Este documento separa dos trabajos que no deben mezclarse: primero auditar los
 atajos de la demo y después incorporar percepción del espacio, mapa,
 localización y Nav2. La referencia es siempre el G1 físico; Isaac debe reemplazar
 sensores y física, no regalarle respuestas al agente.
+
+## Estado medido de esta migración
+
+| Parte estándar | Estado actual | Límite honesto |
+|---|---|---|
+| LiDAR 3D en ROS 2 | pasa: tres nubes de 285 mil puntos y 359,9° | el perfil y montaje de Isaac son adaptadores, no réplica del sensor comprado |
+| Vista plana `/scan` | pasa: 1.066 rayos, 359,4°, tres vueltas completas | Isaac 5.1 exige un segundo perfil simulado; en el G1 real se proyectará la nube física |
+| Coordenadas del sensor | pasa quieto y caminando | Isaac entrega todavía la pose perfecta del torso; el hardware usará URDF y estimación local |
+| SLAM Toolbox quieto | pasa: 138 × 148 celdas a 5 cm | la localización móvil sobre la T4 no alcanza todavía la precisión exigida |
+| Mapa local Nav2 | pasa: 60 × 60 celdas, obstáculos y margen de seguridad | representa obstáculos, pero el navegador propio todavía no lo consulta |
+| Collision Monitor de Nav2 | pasa: tres paradas a 0,50–0,51 m | huella fija; debe cambiar al mover brazos o transportar una carga |
+| Planificador y controlador Nav2 | pendiente | `go_to.py` sigue yendo directo al objetivo; aún no rodea obstáculos |
+
+Nada de esta tabla afirma navegación autónoma completa. Hoy el robot puede ver
+una pared y detenerse antes de golpearla. Todavía no calcula un desvío para
+rodearla.
 
 ## Qué significa "fake"
 
@@ -75,14 +91,17 @@ El orden será:
    tiempo y marcos equivalentes. Para navegación plana se evaluará una vista
    2D `sensor_msgs/LaserScan`; la nube 3D se conserva para obstáculos con
    altura.
-4. **Estimar movimiento local**: combinar la estimación de las piernas, IMU y,
-   si aporta precisión medida, visión. El resultado continuo publica
+4. **Estimar movimiento local**: en el G1 real, comenzar con el driver oficial
+   del LiDAR L2 y su IMU, y reproducir primero Point-LIO, la referencia abierta
+   de Unitree para odometría y mapa 3D. Fusionar piernas o visión sólo si una
+   medición demuestra que mejoran el resultado. La salida continua publica
    `odom -> base_link`; puede derivar lentamente, pero no debe saltar.
-5. **Construir y guardar el mapa**: recorrer el lugar una vez con SLAM Toolbox,
-   revisar el mapa y guardarlo.
-6. **Ubicarse al encender**: cargar el mapa y usar AMCL —el localizador 2D de
-   Nav2— u otro método medido para producir `map -> odom` sin conocer la pose
-   perfecta de Isaac.
+5. **Construir y guardar el mapa**: para el banco 2D actual, recorrer el lugar
+   con SLAM Toolbox, revisar el mapa y guardarlo. Para el L2 físico, proyectar
+   a navegación el mapa obtenido de la cadena 3D medida.
+6. **Ubicarse al encender**: cargar el mapa y comparar el localizador 2D AMCL
+   de Nav2 contra la localización 3D elegida; adoptar el que cumpla las métricas
+   sin conocer la pose perfecta del simulador.
 7. **Navegar con Nav2**: el mapa global decide por dónde ir; el mapa local se
    actualiza con obstáculos actuales; el controlador produce velocidades para
    la policy de locomoción.
@@ -127,3 +146,6 @@ orden semántica -> pose objetivo -> Nav2 -> autoridad -> monitor de colisión
 - [Nav2: monitor de colisiones como último filtro](https://docs.nav2.org/tutorials/docs/using_collision_monitor.html)
 - [NVIDIA Isaac Sim: LiDAR RTX y publicación ROS 2](https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_rtx_lidar.html)
 - [Unitree: SDK ROS 2 del LiDAR](https://github.com/unitreerobotics/unilidar_sdk2)
+- [Unitree: Point-LIO con LiDAR L2 e IMU](https://github.com/unitreerobotics/point_lio_unilidar)
+- [Nav2: mapa local de obstáculos e inflación](https://docs.nav2.org/setup_guides/sensors/mapping_localization.html)
+- [Nav2: configuración de Collision Monitor](https://docs.nav2.org/configuration/packages/collision_monitor/configuring-collision-monitor-node.html)

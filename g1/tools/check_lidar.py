@@ -11,9 +11,13 @@ from sensor_msgs_py import point_cloud2
 
 TOPIC = "/g1/lidar/points"
 EXPECTED_FRAME = "lidar_link"
-TIMEOUT_S = 25.0
+# La nube completa pesa ~3,3 MiB y el T4 comparte render con cámara y LiDAR
+# 2D. La ventana sólo evita cortar antes de la tercera vuelta; no baja la
+# cantidad de muestras ni el requisito geométrico.
+TIMEOUT_S = 45.0
 MIN_MESSAGES = 3
 MIN_POINTS = 100
+MIN_AZIMUTH_COVERAGE_DEG = 330.0
 
 
 def azimuth_coverage_deg(xyz: np.ndarray) -> float:
@@ -103,6 +107,12 @@ def main() -> int:
         sizes = [sample["bytes"] for sample in node.samples]
         last = node.samples[-1]
         coverages = [sample["azimuth_coverage_deg"] for sample in node.samples]
+        if min(coverages) < MIN_AZIMUTH_COVERAGE_DEG:
+            raise RuntimeError(
+                "la nube todavía es un sector parcial: cobertura mínima "
+                f"{min(coverages):.1f}°; se requieren "
+                f"{MIN_AZIMUTH_COVERAGE_DEG:.1f}°"
+            )
         print(
             f"{len(node.samples)} nubes en {elapsed:.2f} s "
             f"({rate:.2f} Hz de pared); "
@@ -127,8 +137,8 @@ def main() -> int:
             f"{max(coverages):.1f}°"
         )
         print(
-            "PASA: el LiDAR publica porciones 3D finitas y renovadas; "
-            "la vuelta 2D se verifica por separado en /scan"
+            "PASA: cada nube 3D es finita, renovada y cubre una vuelta "
+            "completa alrededor del robot"
         )
         return 0
     except RuntimeError as error:
