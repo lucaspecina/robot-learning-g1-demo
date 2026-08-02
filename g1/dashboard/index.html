@@ -44,7 +44,7 @@
     main{max-width:1600px;margin:0 auto;padding:16px}
     .mission-banner{
       display:grid;
-      grid-template-columns:minmax(0,1fr) auto auto;
+      grid-template-columns:minmax(0,1fr) auto auto auto;
       gap:20px;
       align-items:center;
       margin-bottom:16px;
@@ -376,7 +376,6 @@
     .author-skill{background:#183c2a;color:var(--green)}
     .author-validator{background:#472f25;color:#f5c17b}
     .author-llm{background:#322653;color:#cbb8ff}
-    .author-local_rules{background:#2f3440;color:#c3cad6}
     .human-summary{min-height:72px;margin-top:7px;color:#dce5f3}
     .raw-trace{margin-top:12px}
     .raw-trace summary{
@@ -454,6 +453,10 @@
       <div>
         <div class="summary-label">Progreso</div>
         <div class="summary-value" id="mission-progress">0 / 0</div>
+      </div>
+      <div>
+        <div class="summary-label">Perfil</div>
+        <div class="summary-value" id="operation-profile">—</div>
       </div>
     </section>
 
@@ -837,7 +840,17 @@
 
     function renderMission(mission){
       const steps = mission.steps || [];
+      const profileNames = {
+        simulation_demo:'Demo simulada',
+        deployment_rehearsal:'Ensayo sin ayudas'
+      };
       setText('task-text',mission.command || 'Esperando una misión');
+      setText(
+        'operation-profile',
+        profileNames[mission.operation_profile] ||
+          mission.operation_profile ||
+          '—'
+      );
       const statusName = missionStateNames[mission.state] || mission.state || '—';
       const status = document.getElementById('mission-status');
       status.textContent = statusName;
@@ -878,7 +891,6 @@
             }
             const detail = details.join(' · ');
             const source = step.source === 'azure_llm' ? 'plan: LLM' :
-              step.source === 'rules_fallback' ? 'plan: respaldo local' :
               step.source === 'llm_revision' ? 'agregado por revisión LLM' : '';
             return `<div class="step step-${escapeHtml(step.state)}">
               <span>${stepIcons[step.state] || '?'}</span>
@@ -919,11 +931,7 @@
     function humanModelEffect(event,mission){
       const validated=event.validated_output || {};
       if(event.state === 'running') return 'Todavía no se aplicó ningún cambio.';
-      if(event.state === 'failed'){
-        return mission.planner === 'rules_fallback'
-          ? 'La Jetson no aplicó esa respuesta y activó el plan local de respaldo.'
-          : 'La Jetson no aplicó esa respuesta; el plan anterior quedó intacto.';
-      }
+      if(event.state === 'failed') return 'La Jetson rechazó la respuesta y detuvo la misión de forma visible.';
       if(event.task === 'plan_mission'){
         const count=validated.steps?.length || 0;
         return `La Jetson comprobó el contrato y aceptó ${count} subtareas como plan inicial.`;
@@ -960,9 +968,7 @@
         : planEvent?.validated_output?.steps || [];
       setText(
         'model-plan-title',
-        mission.planner === 'rules_fallback'
-          ? 'Plan local de respaldo — el LLM inicial falló'
-          : mission.planner === 'azure_llm'
+        mission.planner === 'azure_llm'
           ? 'Plan vigente propuesto por el LLM y validado por la Jetson'
           : 'Plan vigente'
       );
@@ -1285,7 +1291,6 @@
         skill:'Skill + sensores',
         llm:'LLM',
         validator:'Validador Jetson',
-        local_rules:'Respaldo local',
         legacy:'Evento anterior'
       };
       document.getElementById('mission-timeline').innerHTML = events.length

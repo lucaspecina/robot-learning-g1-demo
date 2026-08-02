@@ -21,6 +21,7 @@ sensores y física, no regalarle respuestas al agente.
 | Planificador y controlador Nav2 | integrado: NavFn + DWB llega a 50 cm y vuelve a `STAND` | falta medir y mirar un rodeo físico repetido |
 | Obstáculos bajos por RGB-D | pasa: 13 mil puntos del cajón de 45 cm y costo vivo `100` | campo frontal; no reemplaza la cobertura 360° del LiDAR |
 | Barrera final ante obstáculos bajos | bloqueada honestamente | la nube cruda ve 20.054 puntos del torso; falta filtro corporal por URDF |
+| Tiempo por retorno para localización 3D | bloqueado en el puente Isaac 5.1 | el dato existe internamente, pero `/g1/lidar/points` sólo publica `x/y/z`; no se inventan tiempos |
 
 Nada de esta tabla afirma navegación autónoma completa. El robot ya rodeó un
 cajón alto y uno bajo sin caer. La ejecución con el cajón bajo terminó
@@ -44,15 +45,15 @@ Cada mecanismo quedará clasificado con una de estas cuatro etiquetas:
   perfil de ensayo de despliegue;
 - **ayuda indebida**: se elimina o se cambia por un fallo explícito.
 
-## Auditoría que haremos
+## Auditoría en curso
 
 | Mecanismo actual | Lectura preliminar | Resultado exigido |
 |---|---|---|
-| Plan local de respaldo para la misión conocida | ayuda indebida si se activa en silencio | si Azure o el planificador fallan, detener la misión, conservar `STAND` y mostrar el fallo; nunca ejecutar un libreto oculto |
+| Plan local de respaldo para la misión conocida | **eliminado del ejecutor** | si Azure o el planificador fallan, la misión queda bloqueada y visible; `build_demo_plan` sólo permanece como referencia de pruebas |
 | Coordenada conocida del reloj | escalón temporal | obtenerla de una anotación hecha al preparar el mapa o encontrar el reloj con sensores; el agente no puede leer la escena de Isaac |
 | `/g1/odom` y transformaciones calculadas desde la pose perfecta de Isaac | adaptador hoy, bloqueante para despliegue | producir `odom -> base_link` con estimación local y `map -> odom` con localización basada en sensores |
 | Profundidad de Isaac | adaptador validado para navegación y aproximación | publica imagen, calibración y tiempo estándar; `depth_image_proc` produce la misma nube que consumirá Nav2 con una cámara física |
-| `attach_payload` | instrumento de prueba explícito | mantenerlo únicamente para ensayos de carga; el perfil de despliegue debe detenerse en “agarre no disponible” hasta tener contacto y retención reales |
+| `attach_payload` | instrumento de prueba explícito | `simulation_demo` lo ofrece; `deployment_rehearsal` lo elimina del catálogo y se detiene en “agarre no disponible” |
 | Publicación manual de `/g1/mission` | escalón temporal | reemplazarla por voz sin cambiar el contrato de texto que recibe el agente |
 | Navegador propio `go_to.py` | retirado del lanzamiento normal | `nav2_adapter.py` conserva la Action y Nav2 ejecuta ruta y movimiento |
 | Posiciones, nombres o colores de la escena usados por el tablero | instrumentación permitida | demostrar con pruebas que no entran al agente, detectores, mapa ni navegador |
@@ -64,7 +65,7 @@ probaremos qué ocurre al quitarlo.
 
 ## Perfil de ensayo de despliegue
 
-Crearemos un modo explícito `deployment_rehearsal`. En ese modo:
+Existe un modo explícito `deployment_rehearsal`. En ese modo:
 
 1. no hay plan fijo de respaldo;
 2. no se leen coordenadas internas de Isaac;
@@ -72,6 +73,12 @@ Crearemos un modo explícito `deployment_rehearsal`. En ese modo:
 4. cada sensor entra por el mismo contrato ROS 2 previsto para el hardware;
 5. una capacidad ausente bloquea honestamente la misión;
 6. un corte del servidor termina en espera segura, no en éxito aparente.
+
+El modo se inicia con
+`G1_OPERATION_PROFILE=deployment_rehearsal bash run_demo.sh up`; el lanzador lo
+conserva para reinicios de capas y el tablero lo muestra como “Ensayo sin
+ayudas”. `simulation_demo` sigue siendo el modo predeterminado para medir el
+recorrido completo con carga anexada, pero queda rotulado como simulación.
 
 La misión completa con carga anexada seguirá existiendo como **ensayo de
 locomoción con peso**, pero no contará como ensayo de despliegue ni como agarre.
@@ -96,8 +103,10 @@ El orden será:
    altura.
 4. **Estimar movimiento local**: en el G1 real, comenzar con el driver oficial
    del LiDAR L2 y su IMU, y reproducir primero Point-LIO, la referencia abierta
-   de Unitree para odometría y mapa 3D. Fusionar piernas o visión sólo si una
-   medición demuestra que mejoran el resultado. La salida continua publica
+   de Unitree para odometría y mapa 3D. Antes se debe resolver que esa referencia
+   oficial es ROS 1 Noetic mientras el proyecto usa ROS 2 Jazzy; no se aceptará
+   un puerto sólo porque compila. Fusionar piernas o visión sólo si una medición
+   demuestra que mejoran el resultado. La salida continua publica
    `odom -> base_link`; puede derivar lentamente, pero no debe saltar.
 5. **Construir y guardar el mapa**: para el banco 2D actual, recorrer el lugar
    con SLAM Toolbox, revisar el mapa y guardarlo. Para el L2 físico, proyectar

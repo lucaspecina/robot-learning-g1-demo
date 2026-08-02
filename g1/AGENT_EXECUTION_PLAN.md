@@ -142,7 +142,8 @@ Ya funciona:
 - plan inicial generado por `gpt-4.1-mini`;
 - formato JSON estricto;
 - validación independiente en el servidor y en la Jetson;
-- plan local de respaldo para la misión conocida;
+- fallo visible y seguro si el planificador remoto no responde o su salida es
+  inválida; el libreto local fue retirado del ejecutor;
 - trazabilidad de entrada exacta, salida literal y plan aceptado;
 - ejecución secuencial del plan;
 - revisión remota después de cada paso y después de cada falla;
@@ -161,7 +162,7 @@ prueba adaptable mínima guardó `home`, recibió `continue` del modelo en
 1,1–1,3 segundos y regresó a la misma pose. En una falla inducida, el modelo
 pidió `retry`, el agente lo permitió una sola vez y detuvo la misión cuando
 volvió a fallar. El robot permaneció en `STAND` en ambos casos.
-Las 94 pruebas locales de `g1` y las 19 del servicio externo pasan juntas.
+Las pruebas locales de `g1` y las del servicio externo pasan juntas.
 El tablero tampoco solicita imágenes inexistentes: espera la confirmación del
 servidor y mantiene un estado vacío estable.
 

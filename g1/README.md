@@ -6,6 +6,9 @@ El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 # robot, capas de la Jetson, LiDAR, mapa fijo y localización
 bash run_demo.sh up
 
+# ensayo estricto: no conoce el reloj ni permite la carga mágica
+G1_OPERATION_PROFILE=deployment_rehearsal bash run_demo.sh up
+
 # el modo normal localiza sobre un mapa guardado
 bash run_demo.sh localize status
 bash run_demo.sh localize check
@@ -92,7 +95,7 @@ versión anterior quedaron fuera del alcance actual.
 |---|---|---|
 | `/g1/mission` | String | vos (o el reconocimiento de voz, más adelante) |
 | `/g1/mission_state` | String (JSON transitorio) | estado, pasos y decisiones verificables de la misión |
-| `/g1/mission_status` | String (JSON) | historia legible con autor: agente, skill/sensores, LLM, validador o respaldo local |
+| `/g1/mission_status` | String (JSON) | historia legible con autor: agente, skill/sensores, LLM o validador |
 | `/g1/model_events` | String (JSON transitorio) | entrada, texto literal y salida validada de cada modelo remoto |
 | `/g1/navigate_to_pose` | Action NavigateToPose | objetivo, progreso, resultado y cancelación de navegación |
 | `/g1/spin` | Action Spin | giro relativo, progreso angular, resultado y cancelación |
@@ -142,14 +145,16 @@ capacidad del catálogo explica en castellano qué hace, qué argumento acepta,
 qué condiciones necesita y qué resultado deja. El modelo devuelve solamente
 un plan JSON; no puede publicar movimiento. El servidor lo valida y la Jetson
 lo vuelve a validar contra su propia copia antes de ejecutarlo. Si el servicio
-remoto falla, la misión conocida usa el plan local de respaldo. Las
-capacidades todavía pendientes aparecen como `placeholder` y bloquean la
-ejecución honestamente al llegar a ellas.
+remoto falla o devuelve algo inválido, la misión se bloquea antes de continuar;
+no existe un plan local de respaldo en el ejecutor. Las capacidades todavía
+pendientes aparecen como `placeholder` y bloquean la ejecución honestamente al
+llegar a ellas.
 
-La misión visual completa pide explícitamente la adaptación simulada de
-`attach_payload` con 0,5 kg. Su argumento numérico forma parte del esquema que
-recibe el LLM. Una orden real de “agarrar” sin esa aclaración debe seguir
-llegando al `placeholder`: no se hace pasar una carga anexada por un agarre.
+La misión visual completa usa el perfil `simulation_demo` y pide explícitamente
+la adaptación simulada `attach_payload` con 0,5 kg. El perfil
+`deployment_rehearsal` elimina esa skill y tampoco entrega la coordenada interna
+del reloj. Una orden real de “agarrar” llega al `placeholder`: no se hace pasar
+una carga anexada por un agarre.
 
 ## Los archivos
 
@@ -321,9 +326,12 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
 
 1. **Resolver la localización realizable**: reproducir el driver L2 y
    Point-LIO de Unitree para el G1 real; en simulación, repetir la puerta de
-   15 cm / 5° con GPU Ampere o LiDAR PhysX, sin usar la pose perfecta de Isaac.
-2. **Agregar obstáculos bajos con la nube 3D**: usar la `VoxelLayer` oficial
-   de Nav2 y repetir la puerta física con un cajón que quede bajo el plano 2D.
+   15 cm / 5° con una salida que conserve tiempo por retorno y una GPU
+   compatible, sin usar la pose perfecta de Isaac. Isaac 5.1 calcula esos
+   tiempos, pero su nube ROS actual publica sólo `x/y/z`.
+2. **Cerrar la barrera para obstáculos bajos**: la cámara de profundidad ya
+   los agrega a ambos mapas de Nav2; falta filtrar el propio cuerpo mediante
+   el URDF antes de autorizar esa nube en Collision Monitor.
 3. **Validar la nueva pose congelada con Lucas**: mostrar `transporte` con
    `0,5 kg` sin lanzar una misión. La candidata quedó a `26,9 cm` delante de la
    pelvis, pero todavía no tiene aprobación visual.
@@ -337,8 +345,8 @@ en [`PERCEPTION_ARCHITECTURE.md`](PERCEPTION_ARCHITECTURE.md).
    giro `Spin` actual y evitando que una cancelación llegue sólo entre vistas.
 8. **Continuar la escalera de cargas** solamente si cada nivel pasa quietud,
    caminata y frenado; probar una postura más cercana a neutral si falla.
-9. **Migrar la cámara al mismo árbol de coordenadas**; hoy su vínculo directo
-   con `map` sigue siendo un adaptador de pose perfecta de Isaac.
+9. **Conservar la cámara en el árbol físico de coordenadas**; ya publica su
+   montaje desde `base_link` y no una posición perfecta desde `map`.
 10. **El agarre** con un VLA entrenado por nosotros.
 11. **Voz** para reemplazar la publicación manual de texto; el planificador
    semántico ya está conectado y acotado por el catálogo.

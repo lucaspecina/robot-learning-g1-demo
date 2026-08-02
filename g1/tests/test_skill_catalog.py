@@ -5,6 +5,8 @@ from mission_contract import build_demo_plan, validate_plan
 from skill_catalog import (
     INITIAL_WORLD_FACTS,
     SKILL_CATALOG,
+    initial_world_facts_for_profile,
+    skill_catalog_for_profile,
     skill_catalog_for_model,
 )
 
@@ -98,6 +100,35 @@ class SkillCatalogTest(unittest.TestCase):
         copy[0]["description"] = "mutado"
 
         self.assertNotEqual(copy[0]["description"], SKILL_CATALOG[0]["description"])
+
+    def test_deployment_rehearsal_removes_simulation_only_skill(self):
+        catalog = skill_catalog_for_profile("deployment_rehearsal")
+
+        self.assertNotIn(
+            "attach_payload",
+            {skill["name"] for skill in catalog},
+        )
+        self.assertIn(
+            "grasp_object",
+            {skill["name"] for skill in catalog},
+        )
+
+    def test_deployment_rehearsal_does_not_know_clock_position(self):
+        facts = initial_world_facts_for_profile("deployment_rehearsal")
+
+        self.assertEqual(facts, ["robot_pose_known"])
+        with self.assertRaisesRegex(ValueError, "clock_location_known"):
+            validate_plan(
+                build_demo_plan(),
+                skill_catalog=skill_catalog_for_profile(
+                    "deployment_rehearsal"
+                ),
+                initial_facts=facts,
+            )
+
+    def test_unknown_profile_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "perfil de operación inválido"):
+            skill_catalog_for_profile("deploymet_typo")
 
 
 if __name__ == "__main__":

@@ -222,6 +222,34 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
   localización está fresca.
 - La pose perfecta que Isaac conoce no se presentará como localización real.
 
+## Contrato medido para localización LiDAR + IMU
+
+El driver ROS 2 oficial del Unitree L2 conserva seis datos por retorno:
+`x`, `y`, `z`, intensidad, fila emisora y tiempo relativo. La adaptación
+oficial de Point-LIO de Unitree consume de forma explícita ese tiempo para
+corregir cuánto se movió el sensor durante una vuelta. Su implementación de
+referencia está probada en ROS 1 Noetic, no en ROS 2 Jazzy.
+
+Nuestro `/g1/lidar/points` de Isaac 5.1 contiene sólo `x`, `y` y `z`. La prueba
+aislada `tools/check_lidar_metadata.py` confirmó que el simulador calcula
+internamente intensidad, emisor y tiempos crecientes, pero el perfil de dos
+ecos devolvió 365.227 puntos y sólo 182.613 tiempos. La salida de Python no
+incluyó los índices ni la cantidad de ecos necesarios para asociarlos sin
+ambigüedad. Por eso no se fabrican tiempos ni se presenta la nube actual como
+entrada compatible con Point-LIO.
+
+La documentación de NVIDIA 5.1 permite pedir esos metadatos al anotador
+interno, pero su puente ROS de esa versión no ofrece la configuración que sí
+aparece en versiones posteriores. La decisión es mantener la navegación y el
+esquive ya medidos, y dejar la localización móvil transferible detrás de una
+frontera explícita:
+
+- en el G1 real: driver oficial del LiDAR e IMU, seguido por Point-LIO o una
+  implementación ROS 2 validada con el mismo contrato;
+- en simulación: probar una actualización aislada de Isaac que publique el
+  tiempo por retorno, o repetir en hardware/GPU compatible;
+- mientras tanto: no afinar AMCL ni tolerancias para ocultar el error móvil.
+
 ## Próximo bloque útil
 
 La integración, el mapa quieto, el mapa local, la barrera final y la detección
@@ -272,6 +300,7 @@ Antes de permitir que Nav2 mueva el robot:
 - [Unitree G1: página oficial del producto](https://www.unitree.com/g1)
 - [Unitree LiDAR SDK: salida PointCloud2 oficial](https://github.com/unitreerobotics/unilidar_sdk2)
 - [Unitree Point-LIO: referencia con LiDAR L2 e IMU](https://github.com/unitreerobotics/point_lio_unilidar)
+- [NVIDIA 5.1: tiempo, intensidad y emisor del anotador RTX](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_rtx_annotators.html)
 - [Nav2: mapa local, capa de obstáculos e inflación](https://docs.nav2.org/setup_guides/sensors/mapping_localization.html)
 - [Nav2: configuración de Collision Monitor](https://docs.nav2.org/configuration/packages/collision_monitor/configuring-collision-monitor-node.html)
 - [ROS 2 Jazzy: conversión oficial de profundidad a nube](https://docs.ros.org/en/jazzy/p/depth_image_proc/doc/index.html)

@@ -8,6 +8,9 @@ INITIAL_WORLD_FACTS = [
     "clock_location_known",
 ]
 
+OPERATION_PROFILES = {"simulation_demo", "deployment_rehearsal"}
+SIMULATION_ONLY_SKILLS = {"attach_payload"}
+
 
 SKILL_CATALOG = [
     {
@@ -278,6 +281,37 @@ SKILL_CATALOG = [
 ]
 
 
-def skill_catalog_for_model() -> list[dict]:
+def validate_operation_profile(profile: str) -> str:
+    """Rechaza modos desconocidos para no habilitar ayudas por un typo."""
+    if profile not in OPERATION_PROFILES:
+        raise ValueError(
+            f"perfil de operación inválido: {profile}; "
+            f"permitidos: {', '.join(sorted(OPERATION_PROFILES))}"
+        )
+    return profile
+
+
+def skill_catalog_for_profile(profile: str) -> list[dict]:
+    """Separa capacidades físicas de instrumentos exclusivos del simulador."""
+    validate_operation_profile(profile)
+    catalog = deepcopy(SKILL_CATALOG)
+    if profile == "deployment_rehearsal":
+        catalog = [
+            skill
+            for skill in catalog
+            if skill["name"] not in SIMULATION_ONLY_SKILLS
+        ]
+    return catalog
+
+
+def initial_world_facts_for_profile(profile: str) -> list[str]:
+    """No regala ubicaciones internas en el ensayo de despliegue."""
+    validate_operation_profile(profile)
+    if profile == "deployment_rehearsal":
+        return ["robot_pose_known"]
+    return list(INITIAL_WORLD_FACTS)
+
+
+def skill_catalog_for_model(skill_catalog: list[dict] = None) -> list[dict]:
     """Entrega una copia porque la respuesta remota nunca debe mutar el catálogo."""
-    return deepcopy(SKILL_CATALOG)
+    return deepcopy(SKILL_CATALOG if skill_catalog is None else skill_catalog)

@@ -330,7 +330,7 @@ class MissionTracker:
         return self._update(mutate)
 
     def set_planner(self, planner: str) -> dict:
-        """Registra si el plan vino del modelo o del respaldo local."""
+        """Registra el planificador que produjo la propuesta aceptada."""
         if not isinstance(planner, str) or not planner.strip():
             raise ValueError("falta el nombre del planificador")
 

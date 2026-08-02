@@ -32,8 +32,8 @@ robot y conserva, por separado, tres tipos de evidencia:
            /g1/model_events               salida literal de LLM/VLM y validación
 
 Las decisiones lentas se piden al servidor externo. Si falla el planificador,
-la misión conocida conserva un respaldo local; cualquier ejecución sigue
-validada y el control local mantiene el equilibrio.
+la misión se detiene de forma visible antes de ejecutar capacidades físicas;
+el control local mantiene el equilibrio.
 """
 import json
 import math
@@ -77,16 +77,17 @@ from active_search import (
 )
 from camera_geometry import horizontal_field_of_view_deg
 from execution_core import FeedbackWatchdog
-from mission_contract import MissionTracker, build_demo_plan, validate_plan
+from mission_contract import MissionTracker, validate_plan
 from model_trace import build_model_event
 from navigation_core import normalize_angle
 from object_localization import select_object_near_table
 from open_vocabulary_core import make_search_request
 from scene_layout import NAVIGATION_TARGETS, WORLD_BOUNDS
 from skill_catalog import (
-    INITIAL_WORLD_FACTS,
-    SKILL_CATALOG,
+    initial_world_facts_for_profile,
+    skill_catalog_for_profile,
     skill_catalog_for_model,
+    validate_operation_profile,
 )
 from table_approach import (
     compute_table_staging_pose,
@@ -209,6 +210,15 @@ class Agent(Node):
         self.visual_evidence_lock = threading.Lock()
         self.current_review_evidence = None
         self.mission_context = {}
+        self.operation_profile = validate_operation_profile(
+            os.getenv("G1_OPERATION_PROFILE", "simulation_demo")
+        )
+        self.skill_catalog = skill_catalog_for_profile(
+            self.operation_profile
+        )
+        self.initial_world_facts = initial_world_facts_for_profile(
+            self.operation_profile
+        )
         self.intelligence = IntelligenceClient()
 
         self.navigation_client = ActionClient(
@@ -332,7 +342,8 @@ class Agent(Node):
 
         self.publish_mission_state(self.mission_tracker.snapshot())
         self.get_logger().info(
-            "agente listo. Esperando misiones en /g1/mission"
+            "agente listo en perfil "
+            f"{self.operation_profile}. Esperando misiones en /g1/mission"
         )
 
     # ---------- entradas ----------
@@ -500,6 +511,8 @@ class Agent(Node):
     # ---------- publicación observable ----------
 
     def publish_mission_state(self, state: dict):
+        state = deepcopy(state)
+        state["operation_profile"] = self.operation_profile
         self.mission_state_pub.publish(
             String(data=json.dumps(state, ensure_ascii=False))
         )
@@ -540,33 +553,22 @@ class Agent(Node):
             plan = self.plan_with_model(command)
             self.mission_tracker.set_planner("azure_llm")
         except (RemoteIntelligenceError, ValueError) as model_error:
-            self.report(
+            error = (
                 "el planificador remoto no produjo un plan utilizable; "
-                f"uso el respaldo local: {model_error}",
+                f"la misión se detuvo sin usar un libreto local: {model_error}"
+            )
+            self.mission_tracker.stop(error, blocked=True)
+            self.report(
+                f"BLOQUEADO: {error}",
                 author="validator",
                 category="safety",
             )
-            try:
-                plan = self.plan_with_rules(command)
-                validate_plan(
-                    plan,
-                    skill_catalog=SKILL_CATALOG,
-                    initial_facts=INITIAL_WORLD_FACTS,
-                )
-                self.mission_tracker.set_planner("rules_fallback")
-            except ValueError as fallback_error:
-                self.mission_tracker.stop(str(fallback_error))
-                self.report(
-                    f"FALLO al planificar: {fallback_error}",
-                    author="validator",
-                    category="safety",
-                )
-                return
+            return
         try:
             self.mission_tracker.set_plan(
                 plan,
-                skill_catalog=SKILL_CATALOG,
-                initial_facts=INITIAL_WORLD_FACTS,
+                skill_catalog=self.skill_catalog,
+                initial_facts=self.initial_world_facts,
             )
         except ValueError as error:
             self.mission_tracker.stop(str(error))
@@ -578,11 +580,7 @@ class Agent(Node):
             return
         self.report(
             "plan: " + " → ".join(step["label"] for step in plan),
-            author=(
-                "llm"
-                if self.mission_tracker.snapshot()["planner"] == "azure_llm"
-                else "local_rules"
-            ),
+            author="llm",
             category="plan",
         )
         self.execute_plan(command, plan)
@@ -592,11 +590,11 @@ class Agent(Node):
         event_id = str(uuid.uuid4())
         started_wall = time.time()
         started_monotonic = time.monotonic()
-        catalog = skill_catalog_for_model()
+        catalog = skill_catalog_for_model(self.skill_catalog)
         local_input = {
             "command": command,
             "skill_catalog": catalog,
-            "initial_facts": list(INITIAL_WORLD_FACTS),
+            "initial_facts": list(self.initial_world_facts),
         }
         self.publish_model_event(
             build_model_event(
@@ -615,7 +613,7 @@ class Agent(Node):
             proposal = self.intelligence.plan_mission(
                 command,
                 catalog,
-                list(INITIAL_WORLD_FACTS),
+                list(self.initial_world_facts),
             )
         except RemoteIntelligenceError as error:
             self.publish_model_event(
@@ -643,8 +641,8 @@ class Agent(Node):
         try:
             validated = validate_plan(
                 proposal["steps"],
-                skill_catalog=SKILL_CATALOG,
-                initial_facts=INITIAL_WORLD_FACTS,
+                skill_catalog=self.skill_catalog,
+                initial_facts=self.initial_world_facts,
             )
         except ValueError as error:
             self.publish_model_event(
@@ -692,20 +690,9 @@ class Agent(Node):
         )
         return proposal["steps"]
 
-    @staticmethod
-    def plan_with_rules(command: str) -> list[dict]:
-        """Respaldo local para la misión de referencia si falla el servidor."""
-        normalized = command.lower()
-        if not any(
-            word in normalized
-            for word in ("reloj", "hora", "mesa", "objeto")
-        ):
-            raise ValueError("no entendí la misión")
-        return build_demo_plan()
-
     def execute_plan(self, command: str, plan: list[dict]):
         pending = deepcopy(plan)
-        world_facts = set(INITIAL_WORLD_FACTS)
+        world_facts = set(self.initial_world_facts)
         required_facts = {
             fact
             for planned_step in plan
@@ -773,26 +760,19 @@ class Agent(Node):
                     review_count=review_count,
                 )
             except (RemoteIntelligenceError, ValueError) as error:
-                if outcome["state"] == "succeeded":
-                    # El plan pendiente ya fue validado dos veces antes de
-                    # arrancar. Una revisión remota rota no debe reemplazarlo
-                    # ni detener una misión que localmente sigue siendo válida.
-                    self.report(
-                        "revisión remota no utilizable; conservo el plan "
-                        f"validado: {error}",
-                        author="validator",
-                        category="safety",
-                    )
-                    continue
                 message = (
-                    f"{outcome['message']}; no hubo una revisión válida: "
-                    f"{error}"
+                    f"{outcome['message']}; la misión se detuvo porque no "
+                    f"hubo una revisión remota válida: {error}"
                 )
                 self.mission_tracker.stop(
                     message,
-                    blocked=outcome["state"] == "blocked",
+                    blocked=True,
                 )
-                self.report(f"FALLO: {message}")
+                self.report(
+                    f"BLOQUEADO: {message}",
+                    author="validator",
+                    category="safety",
+                )
                 return
 
             decision = review["decision"]
@@ -841,13 +821,13 @@ class Agent(Node):
                 try:
                     revised = validate_plan(
                         review["revised_steps"],
-                        skill_catalog=SKILL_CATALOG,
+                        skill_catalog=self.skill_catalog,
                         initial_facts=sorted(world_facts),
                         required_facts=sorted(required_facts),
                     )
                     self.mission_tracker.replace_pending_steps(
                         review["revised_steps"],
-                        skill_catalog=SKILL_CATALOG,
+                        skill_catalog=self.skill_catalog,
                         current_facts=sorted(world_facts),
                     )
                 except ValueError as error:
@@ -910,9 +890,8 @@ class Agent(Node):
         )
         self.report("misión completada")
 
-    @staticmethod
-    def effects_of(step: dict) -> list[str]:
-        for skill in SKILL_CATALOG:
+    def effects_of(self, step: dict) -> list[str]:
+        for skill in self.skill_catalog:
             if skill["name"] != step["skill"]:
                 continue
             for variant in skill["variants"]:
@@ -955,7 +934,7 @@ class Agent(Node):
             for item in snapshot["steps"]
             if item["state"] != "pending"
         ]
-        catalog = skill_catalog_for_model()
+        catalog = skill_catalog_for_model(self.skill_catalog)
         local_input = {
             "command": command,
             "skill_catalog": catalog,
@@ -1026,7 +1005,7 @@ class Agent(Node):
             if review["decision"] == "revise":
                 validate_plan(
                     review["revised_steps"],
-                    skill_catalog=SKILL_CATALOG,
+                    skill_catalog=self.skill_catalog,
                     initial_facts=world_facts,
                     required_facts=required_facts,
                 )

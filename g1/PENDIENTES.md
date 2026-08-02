@@ -209,13 +209,12 @@ ocho esferas de los pies contra MuJoCo.
 
 ## Otros pendientes conocidos
 
-- **Auditoría para quitar las “rueditas de ayuda”**: se hará inmediatamente
-  después de la próxima corrida integral aprobada visualmente. No será una
-  eliminación a ciegas. Primero se registrará, para cada dato y decisión, de
-  dónde sale y qué equivalente tendrá en el G1 físico. La primera lista que hay
-  que confirmar en el código incluye:
+- **Auditoría para quitar las “rueditas de ayuda”**: ya comenzó y separó los
+  perfiles `simulation_demo` y `deployment_rehearsal`. El libreto local ante
+  falla de Azure fue retirado; el agente se bloquea de forma visible. La lista
+  que todavía se sigue dato por dato incluye:
 
-  1. plan local de respaldo ante falla del modelo;
+  1. ~~plan local de respaldo ante falla del modelo~~ — retirado;
   2. coordenadas conocidas del reloj y cualquier posición interna leída de
      Isaac;
   3. detectores por color o forma ajustados sólo a esta habitación;
@@ -227,10 +226,10 @@ ocho esferas de los pies contra MuJoCo.
      `mobility_authority`;
   8. éxito declarado a partir de un valor pedido y no de una medición.
 
-  El perfil normal deberá **fallar de forma visible y segura**: ante falta de
-  modelo, sensor o dato válido, pasar a `STAND` y pedir ayuda o detenerse. Las
-  inyecciones útiles se conservarán sólo bajo un perfil `test` explícito, con
-  su origen mostrado en el tablero. El cierre será una misión bajo perfil de
+  El perfil `deployment_rehearsal` **falla de forma visible y segura**: ante
+  falta de modelo, sensor o dato válido, conserva `STAND` y se detiene. Las
+  inyecciones útiles quedan sólo en `simulation_demo`, con el perfil mostrado
+  en el tablero. El cierre será una misión bajo perfil de
   despliegue, seguida por fallas inducidas de red, visión y localización; ninguna
   deberá activar un reemplazo silencioso. La clasificación, el perfil sin
   ayudas y sus criterios están fijados en

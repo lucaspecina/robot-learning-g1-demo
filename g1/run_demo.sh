@@ -3,6 +3,8 @@
 #
 # Uso (en la VM):
 #   bash run_demo.sh up          arranca robot + skills + agente
+#   G1_OPERATION_PROFILE=deployment_rehearsal bash run_demo.sh up
+#                               arranca sin coordenadas ni carga mágicas
 #   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | home
 #   bash run_demo.sh check obstacle exige un rodeo físico con Nav2
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
@@ -36,6 +38,25 @@ set -uo pipefail
 HOST_DEMO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 D=/workspace/g1          # ruta dentro del contenedor jetson
 ROS="source /opt/ros/jazzy/setup.bash"
+OPERATION_PROFILE_FILE=/tmp/g1_operation_profile
+
+resolve_operation_profile() {
+    local profile="${G1_OPERATION_PROFILE:-}"
+    if [ -z "$profile" ] && [ -r "$OPERATION_PROFILE_FILE" ]; then
+        profile=$(tr -d '\r\n' < "$OPERATION_PROFILE_FILE")
+    fi
+    profile="${profile:-simulation_demo}"
+    case "$profile" in
+        simulation_demo|deployment_rehearsal) printf '%s' "$profile" ;;
+        *)
+            echo "ERROR: perfil inválido: $profile" >&2
+            echo "usar simulation_demo o deployment_rehearsal" >&2
+            return 2
+            ;;
+    esac
+}
+
+OPERATION_PROFILE=$(resolve_operation_profile) || exit $?
 
 # Dos operaciones de banco simultáneas invalidan cualquier medición y pueden
 # duplicar todos los nodos. `status` queda libre para poder observar mientras
@@ -57,6 +78,17 @@ launch() {   # nombre archivo_log script
     # una pagina muerta creyendo que ves al robot.
     sudo docker exec -d jetson bash -c         "$ROS && while true; do python3 $D/$3 >> /tmp/$2 2>&1; sleep 3; done"
     echo "   $1"
+}
+
+launch_agent() {
+    # El perfil llega como dato explícito al proceso supervisado. Así un
+    # reinicio del agente no puede volver a habilitar ayudas por accidente.
+    sudo docker exec -d \
+        -e G1_OPERATION_PROFILE="$OPERATION_PROFILE" \
+        jetson bash -c \
+        "$ROS && while true; do python3 $D/agent/agent.py \
+        >> /tmp/agent.log 2>&1; sleep 3; done"
+    echo "   agente ($OPERATION_PROFILE)"
 }
 
 stop_safety() {
@@ -261,7 +293,7 @@ start_layers() {
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
-    launch "agente"               agent.log             agent/agent.py
+    launch_agent
 }
 
 preflight() {
@@ -303,6 +335,7 @@ preflight() {
 
 case "${1:-up}" in
 up)
+    printf '%s\n' "$OPERATION_PROFILE" > "$OPERATION_PROFILE_FILE"
     preflight
     echo ">> El robot (Isaac, ~1 min de arranque)..."
     ARM_CONTROLLER="${G1_ARM_CONTROLLER:-pose}"
@@ -651,7 +684,7 @@ reset)
     launch "búsqueda visual"      open_vocabulary.log   skills/open_vocabulary_detector.py
     launch "posición 3D"          table_localizer.log   skills/table_localizer.py
     launch "adaptador percepción" detection_adapter.log skills/detection_adapter.py
-    launch "agente"               agent.log             agent/agent.py
+    launch_agent
     # Un teletransporte invalida la posición anterior, pero no el mapa fijo.
     # Reiniciar AMCL fuerza una nueva localización desde el origen conocido.
     start_localization_stack
@@ -682,6 +715,7 @@ status)
         echo "  SIN GIT: no se puede identificar el código ejecutado"
     fi
     echo "== el robot =="
+    echo "  perfil: $OPERATION_PROFILE"
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
     tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
     echo "== las capas de arriba =="
