@@ -31,10 +31,18 @@ class LaserScanChecker(Node):
 
     def on_scan(self, message: LaserScan):
         ranges = np.asarray(message.ranges, dtype=np.float32)
-        finite = ranges[
+        valid_mask = (
             np.isfinite(ranges)
             & (ranges >= message.range_min)
             & (ranges <= message.range_max)
+        )
+        finite = ranges[valid_mask]
+        near_indices = np.flatnonzero(valid_mask & (ranges < 0.60))
+        near_angles = [
+            math.degrees(
+                message.angle_min + int(index) * message.angle_increment
+            )
+            for index in near_indices
         ]
         self.samples.append(
             {
@@ -47,6 +55,24 @@ class LaserScanChecker(Node):
                 "finite_rays": int(finite.size),
                 "minimum": float(np.min(finite)) if finite.size else math.inf,
                 "maximum": float(np.max(finite)) if finite.size else math.inf,
+                "near_count": int(near_indices.size),
+                "near_angles": near_angles,
+                "at_minimum_count": int(
+                    np.count_nonzero(
+                        valid_mask
+                        & np.isclose(
+                            ranges,
+                            message.range_min,
+                            rtol=0.0,
+                            atol=1e-4,
+                        )
+                    )
+                ),
+                "near_maximum": (
+                    float(np.max(ranges[near_indices]))
+                    if near_indices.size
+                    else math.inf
+                ),
                 "span_deg": math.degrees(
                     float(message.angle_max - message.angle_min)
                 ),
@@ -99,6 +125,22 @@ def main() -> int:
             f"{max(sample['maximum'] for sample in node.samples):.2f} m; "
             f"ángulo {min(sample['span_deg'] for sample in node.samples):.1f}°"
         )
+        nearest = max(node.samples, key=lambda sample: sample["near_count"])
+        if nearest["near_count"]:
+            angles = ", ".join(
+                f"{angle:.1f}°" for angle in nearest["near_angles"][:12]
+            )
+            suffix = "..." if nearest["near_count"] > 12 else ""
+            print(
+                f"rayos a menos de 0,60 m: {nearest['near_count']}; "
+                f"{nearest['at_minimum_count']} exactamente en el mínimo y "
+                f"máximo cercano {nearest['near_maximum']:.3f} m; "
+                f"rango angular {min(nearest['near_angles']):.1f}° a "
+                f"{max(nearest['near_angles']):.1f}°; "
+                f"primeros {angles}{suffix}"
+            )
+        else:
+            print("rayos a menos de 0,60 m: 0")
         print("PASA: /scan contiene vueltas completas para SLAM Toolbox")
         return 0
     except RuntimeError as error:

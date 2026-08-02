@@ -29,6 +29,7 @@ SCAN_TOPIC = "/scan"
 WALL_SPEED_MPS = -0.25
 MIN_SAFE_CENTER_CLEARANCE_M = 0.40
 MIN_USEFUL_TRAVEL_M = 0.30
+WIRING_SPEED_MPS = 0.30
 
 
 class SafetyChecker(Checker):
@@ -155,15 +156,28 @@ def check_wiring(node: SafetyChecker) -> bool:
         print("FALLA: /cmd_vel no pertenece únicamente a Collision Monitor")
         return False
 
+    node.reset_robot()
+    node.spin_for(1.0)
     if not node.acquire_test_mobility():
         print(f"FALLA: TEST no obtuvo autoridad; dueño {node.mobility_owner}")
         return False
     try:
-        outputs = hold_test_command(node, vx=0.05, duration_s=2.0)
+        outputs = hold_test_command(
+            node,
+            vx=WIRING_SPEED_MPS,
+            duration_s=2.0,
+        )
     finally:
         node.release_test_mobility("cableado de seguridad verificado")
-    if not outputs or max(outputs) < 0.04:
-        print("FALLA: el filtro bloqueó movimiento en el espacio libre inicial")
+    median_output = statistics.median(outputs) if outputs else 0.0
+    print(
+        f"orden {WIRING_SPEED_MPS:.2f} m/s; salida mediana "
+        f"{median_output:.2f} m/s; estado {node.collision_state}"
+    )
+    if median_output < WIRING_SPEED_MPS - 0.05:
+        print(
+            "FALLA: el filtro limitó movimiento en el espacio libre inicial"
+        )
         return False
     print(
         f"PASA: LiDAR vivo ({node.scan_messages} barridos), orden autorizada "

@@ -160,6 +160,20 @@ posterior, o se evalúa el LiDAR PhysX oficial como experimento separado.
 - La validación final del bloque confirmó que las piezas están separadas: el
   robot quieto quedó dentro de 4 cm; caminó 2,11 m, se desvió 12 cm y frenó en
   8 cm. Locomoción pasa, Nav2 rodea y localización móvil falla.
+- El LiDAR PhysX oficial se probó como diagnóstico, no como reemplazo del
+  sensor real. En una pared conocida, quieto dio error 0 y sobre un soporte a
+  0,30 m/s dio mediana, p95 y máximo de 5 mm; conserva
+  `tools/check_physx_lidar_standalone.py` para repetirlo. Integrado al G1, en
+  cambio, el plano de 360° interceptó el propio cuerpo: 343 rayos quedaron
+  clavados en el mínimo de 5 cm y Collision Monitor anuló la caminata. Un
+  filtro de 10 cm y elevar el montaje 10 cm no resolvieron la falsa emergencia
+  durante el balanceo. Se revirtieron ambos: no se deja un sensor que sólo
+  funciona ocultando una parte creciente del espacio cercano.
+- La versión Jazzy instalada expone para la fuente `scan` sólo `topic`,
+  `source_timeout`, `type` y `enabled`; no tiene todavía las zonas geométricas
+  de exclusión que Nav2 actual recomienda para quitar retornos del propio
+  robot. El sensor físico deberá entregar una nube filtrable por cuerpo y
+  altura, no un plano simulado flotante.
 - Se conserva `tools/check_lidar_standalone.py` como referencia positiva y
   `tools/check_lidar.py` como puerta obligatoria para la integración.
 - `tools/check_time_and_tf.py`, `tools/check_laser_scan.py` y
@@ -186,8 +200,8 @@ El siguiente bloque debe seguir el orden estándar:
 
 1. repetir la misma ida y vuelta en una VM Ampere o posterior y exigir menos
    de 15 cm / 5° de corrección;
-2. si no hay GPU compatible, evaluar el LiDAR PhysX oficial en una rama
-   separada, manteniendo exactamente `/scan` y la misma prueba;
+2. no integrar el LiDAR PhysX 2D al G1: ya aisló el error RTX, pero falló la
+   prueba de cuerpo propio y fue retirado del camino normal;
 3. confirmar el sensor real antes de fijar perfil, frecuencia y montaje;
 4. repetir el rodeo físico ya medido y exigir llegada menor a 15 cm, pero no
    declarar despliegue transferible hasta aprobar la localización;
@@ -216,6 +230,7 @@ Antes de permitir que Nav2 mueva el robot:
 - [SLAM Toolbox: configuración online asíncrona](https://github.com/SteveMacenski/slam_toolbox/blob/ros2/config/mapper_params_online_async.yaml)
 - [NVIDIA: fallas de LaserScan que rompen SLAM Toolbox](https://forums.developer.nvidia.com/t/ros2-laserscan-faulty-data/231738)
 - [NVIDIA: extensión RTX y Motion BVH](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_rtx.html)
+- [NVIDIA: LiDAR PhysX y disparo simultáneo a 0 Hz](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_physx_lidar.html)
 - [NVIDIA: requisito Ampere o posterior informado por su equipo](https://forums.developer.nvidia.com/t/motionbvh-for-lidar-model-not-enabled/297482)
 - [NVIDIA: la Tesla T4 pertenece a la arquitectura Turing](https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/technologies/turing-architecture/NVIDIA-Turing-Architecture-Whitepaper.pdf)
 - [NVIDIA Isaac Sim 5.1: notas de versión](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/release_notes.html)

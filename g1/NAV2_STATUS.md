@@ -85,9 +85,12 @@ movimiento lateral y la deriva lateral está medida.
 - huella dinámica cuando brazos y carga sobresalen del torso.
 
 No se seguirá afinando tolerancias de Nav2 para ocultar ese error. El próximo
-experimento útil es repetir sin deformación móvil: GPU Ampere o posterior, o
-el LiDAR PhysX oficial de Isaac 5.1 manteniendo el mismo contrato ROS. Para el
-robot real, el camino de referencia es LiDAR + IMU con Point-LIO de Unitree.
+experimento útil para la simulación es repetir con GPU Ampere o posterior. El
+LiDAR PhysX oficial ya aisló la deformación en una pared móvil con 5 mm de
+error, pero su plano 2D interceptó el propio G1 durante la marcha y activó la
+parada de emergencia; filtros de 10 cm y un montaje 10 cm más alto no lo
+resolvieron y la integración fue retirada. Para el robot real, el camino de
+referencia es LiDAR + IMU con Point-LIO de Unitree y filtrado del propio cuerpo.
 
 `tools/check_obstacle_navigation.py` rechaza la prueba antes de arrancar si el
 cajón ya figura en el mapa fijo o si el mapa vivo no lo agregó. Luego mide
