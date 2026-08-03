@@ -18,6 +18,14 @@ class OpenVocabularyCoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_search_request("cualquier cosa")
 
+    def test_clock_uses_a_bounded_open_vocabulary_label(self):
+        request = make_search_request("clock", request_id="clock-1")
+
+        self.assertEqual(
+            parse_search_request(json.dumps(request)),
+            ("clock-1", "clock", ["a digital wall clock"]),
+        )
+
     def test_rejects_missing_request_id(self):
         with self.assertRaises(ValueError):
             parse_search_request(json.dumps({"target": "blue_table"}))

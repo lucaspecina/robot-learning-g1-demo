@@ -5,9 +5,9 @@ Corre en la Jetson y sólo usa interfaces transferibles al G1 real: color,
 profundidad, calibración, la relación temporal entre cámara y mapa, y la
 detección 2D. No consulta posiciones internas de Isaac ni conoce la escena.
 
-Las mesas se miden por su color para no mezclar fondo. Los objetos pequeños se
-miden dentro de su caja. En ambos casos la salida es una superficie visible:
-no inventa el centro oculto ni una orientación completa para agarrar.
+Las mesas se miden por su color para no mezclar fondo. El reloj y los objetos
+pequeños se miden dentro de su caja. En todos los casos la salida es una
+superficie visible: no inventa el centro oculto ni una orientación completa.
 """
 import json
 import sys
@@ -47,6 +47,7 @@ from camera_stream import (  # noqa: E402
 )
 from depth_geometry import colored_table_point, visible_object_point  # noqa: E402
 from perception_core import (  # noqa: E402
+    CLOCK_CLASS_NAMES,
     TABLE_CLASS_NAMES,
     TRANSPORT_OBJECT_CLASS_NAMES,
     bounded_box,
@@ -87,6 +88,11 @@ class SpatialLocalizer(Node):
         self.object_detections_pub = self.create_publisher(
             Detection3DArray,
             "/g1/object_detections_3d",
+            qos_profile_sensor_data,
+        )
+        self.clock_detections_pub = self.create_publisher(
+            Detection3DArray,
+            "/g1/clock_detections_3d",
             qos_profile_sensor_data,
         )
         self.status_pub = self.create_publisher(
@@ -161,6 +167,18 @@ class SpatialLocalizer(Node):
             self.table_detections_pub,
             "mesa",
         )
+        selected_clocks = [
+            detection
+            for detection in message.detections
+            if self.class_name(detection) in CLOCK_CLASS_NAMES
+        ]
+        self.localize_message(
+            message,
+            selected_clocks,
+            self.localize_clock,
+            self.clock_detections_pub,
+            "reloj",
+        )
 
     def on_local_detections(self, message: Detection2DArray):
         # La búsqueda remota confirma qué mesa es. Durante la aproximación,
@@ -190,6 +208,18 @@ class SpatialLocalizer(Node):
             self.localize_object,
             self.object_detections_pub,
             "objeto",
+        )
+        selected_clocks = [
+            detection
+            for detection in message.detections
+            if self.class_name(detection) in CLOCK_CLASS_NAMES
+        ]
+        self.localize_message(
+            message,
+            selected_clocks,
+            self.localize_clock,
+            self.clock_detections_pub,
+            "reloj",
         )
 
     def localize_message(
@@ -345,6 +375,24 @@ class SpatialLocalizer(Node):
             header,
             self.map_point(camera_point, header),
             "transport_object",
+        )
+
+    def localize_clock(self, detection, header, frame) -> Detection3D:
+        """Mide la cara visible; la pose segura se calcula fuera de percepción."""
+        _color_message, depth_message, info, box = self.measurement_inputs(
+            detection,
+            frame,
+        )
+        camera_point = visible_object_point(
+            depth_array(depth_message),
+            np.asarray(info.k, dtype=np.float64).reshape(3, 3),
+            box,
+        )
+        return self.make_detection(
+            detection,
+            header,
+            self.map_point(camera_point, header),
+            "clock",
         )
 
 

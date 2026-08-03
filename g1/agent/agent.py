@@ -17,6 +17,7 @@ robot y conserva, por separado, tres tipos de evidencia:
                                           resultado nuevo del detector local
            /g1/perception/search_status   resultado de búsqueda puntual
            /g1/table_detections_3d        mesa ubicada desde sensores
+           /g1/clock_detections_3d        reloj ubicado desde sensores
            /g1/object_detections_3d       superficie visible del objeto
 
   usa:     /g1/navigate_to_pose           tarea de navegación cancelable
@@ -77,11 +78,14 @@ from active_search import (
 )
 from camera_geometry import horizontal_field_of_view_deg
 from execution_core import FeedbackWatchdog
+from landmark_geometry import select_consistent_landmark
 from mission_contract import MissionTracker, validate_plan
 from model_trace import build_model_event
 from navigation_core import normalize_angle
+from observation_geometry import compute_observation_pose
 from object_localization import select_object_near_table
 from open_vocabulary_core import make_search_request
+from perception_core import CLOCK_CLASS_NAMES
 from scene_layout import NAVIGATION_TARGETS, WORLD_BOUNDS
 from skill_catalog import (
     initial_world_facts_for_profile,
@@ -144,6 +148,14 @@ COLOR_SCOUT_MIN_PIXELS = 600
 # Un segundo barrido puede ser útil después de cambiar de lugar. Un tercero
 # sin evidencia nueva sólo acumula movimiento y deriva en un robot físico.
 MAX_ACTIVE_SCANS_PER_MISSION = 2
+CLOCK_LOCALIZATION_MAX_AGE_S = 8.0
+CLOCK_LOCALIZATION_TIMEOUT_PER_VIEW_S = 12.0
+CLOCK_LOCALIZATION_MINIMUM_SAMPLES = 2
+CLOCK_LOCALIZATION_MAXIMUM_SPREAD_M = 0.20
+CLOCK_OBSERVATION_STANDOFF_M = 1.20
+CLOCK_REMOTE_MINIMUM_CONFIDENCE = 0.70
+CLOCK_REMOTE_TIMEOUT_S = 90.0
+MAX_CLOCK_SCANS_PER_MISSION = 1
 # A 1,4 m la prueba dedicada sólo veía la botella y perdía la mesa por debajo
 # del cuadro; a 2,5 m del centro la mesa se midió repetidamente. Como la
 # profundidad entrega un punto de su borde visible, 2,2 m respecto de esa
@@ -201,6 +213,8 @@ class Agent(Node):
         self.search_status = None
         self.alignment_status = None
         self.localized_tables = {}
+        self.localized_clocks = []
+        self.clock_localization_condition = threading.Condition()
         self.localized_objects = []
         self.mission_thread = None
         self.clock_crop = None
@@ -337,6 +351,12 @@ class Agent(Node):
             Detection3DArray,
             "/g1/object_detections_3d",
             self.on_object_detections,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Detection3DArray,
+            "/g1/clock_detections_3d",
+            self.on_clock_detections,
             qos_profile_sensor_data,
         )
 
@@ -495,6 +515,40 @@ class Agent(Node):
         # El detector corre continuamente. Conservar una ventana acotada evita
         # que una misión posterior reutilice una observación vieja por error.
         self.localized_objects = self.localized_objects[-60:]
+
+    def on_clock_detections(self, message: Detection3DArray):
+        frame_reference = image_ref(
+            VISUAL_EVIDENCE_TOPIC,
+            message.header,
+        )
+        received_at = time.monotonic()
+        with self.clock_localization_condition:
+            for detection in message.detections:
+                if not detection.results:
+                    continue
+                hypothesis = detection.results[0].hypothesis
+                if hypothesis.class_id not in CLOCK_CLASS_NAMES:
+                    continue
+                point = detection.bbox.center.position
+                self.localized_clocks.append(
+                    {
+                        "class_id": "clock",
+                        "source": (
+                            "grounding_dino"
+                            if detection.id.startswith("grounding_dino:")
+                            else "rtdetr"
+                        ),
+                        "confidence": float(hypothesis.score),
+                        "x": float(point.x),
+                        "y": float(point.y),
+                        "z": float(point.z),
+                        "coordinate_frame": message.header.frame_id or "map",
+                        "frame_ref": frame_reference,
+                        "received_at": received_at,
+                    }
+                )
+            self.localized_clocks = self.localized_clocks[-30:]
+            self.clock_localization_condition.notify_all()
 
     def on_mission(self, message: String):
         """Ejecuta en otro hilo para no bloquear las entradas de sensores."""
@@ -1071,6 +1125,8 @@ class Agent(Node):
     def execute_skill(self, skill: str, argument) -> dict:
         if skill == "remember_home":
             return self.remember_home()
+        if skill == "find_clock":
+            return self.find_clock()
         if skill == "navigate_to":
             return self.navigate_to(str(argument))
         if skill == "look_at":
@@ -1116,11 +1172,316 @@ class Agent(Node):
             pose = self.mission_context.get("home")
             if pose is None:
                 return failed("home no fue guardado")
+        elif target == "clock":
+            pose = self.mission_context.get("clock_observation_pose")
+            if pose is None and self.operation_profile == "simulation_demo":
+                pose = SEMANTIC_MAP.get(target)
+            if pose is None:
+                return failed("el reloj todavía no fue ubicado con sensores")
         else:
             pose = SEMANTIC_MAP.get(target)
             if pose is None:
                 return failed(f"destino desconocido: {target}")
         return self.navigate_to_pose(pose, target)
+
+    def wait_for_clock_estimate(
+        self,
+        *,
+        after_received_at: float,
+        timeout_s: float,
+        minimum_samples: int = CLOCK_LOCALIZATION_MINIMUM_SAMPLES,
+        required_source: str = None,
+    ) -> dict | None:
+        """Espera un grupo consistente adquirido después del último giro."""
+        deadline = time.monotonic() + timeout_s
+        with self.clock_localization_condition:
+            while True:
+                now = time.monotonic()
+                candidates = self.localized_clocks
+                if required_source is not None:
+                    candidates = [
+                        sample
+                        for sample in candidates
+                        if sample.get("source") == required_source
+                    ]
+                estimate = select_consistent_landmark(
+                    candidates,
+                    class_id="clock",
+                    now=now,
+                    max_age_s=CLOCK_LOCALIZATION_MAX_AGE_S,
+                    minimum_samples=minimum_samples,
+                    maximum_spread_m=CLOCK_LOCALIZATION_MAXIMUM_SPREAD_M,
+                )
+                if (
+                    estimate is not None
+                    and estimate["received_at"] >= after_received_at
+                ):
+                    return estimate
+                remaining = deadline - now
+                if remaining <= 0.0:
+                    return None
+                self.clock_localization_condition.wait(
+                    timeout=min(0.25, remaining)
+                )
+
+    def locate_clock_in_current_view(self, after_received_at: float) -> dict:
+        """Usa RT-DETR primero y Grounding DINO sólo como respaldo puntual."""
+        estimate = self.wait_for_clock_estimate(
+            after_received_at=after_received_at,
+            timeout_s=CLOCK_LOCALIZATION_TIMEOUT_PER_VIEW_S,
+        )
+        if estimate is not None:
+            return {
+                "state": "succeeded",
+                "estimate": estimate,
+                "detection_source": "rtdetr",
+            }
+
+        request = make_search_request("clock")
+        request_id = request["request_id"]
+        self.search_status = None
+        remote_started_at = time.monotonic()
+        self.search_pub.publish(
+            String(data=json.dumps(request, ensure_ascii=False))
+        )
+        deadline = remote_started_at + CLOCK_REMOTE_TIMEOUT_S
+        while time.monotonic() < deadline:
+            status = self.search_status or {}
+            if status.get("request_id") != request_id:
+                time.sleep(0.1)
+                continue
+            if status.get("state") in ("failed", "rejected"):
+                return {
+                    "state": "failed",
+                    "message": "la confirmación remota del reloj falló: "
+                    + str(status.get("error", status)),
+                }
+            if status.get("state") == "complete":
+                if int(status.get("count", 0)) == 0:
+                    return {
+                        "state": "not_visible",
+                        "remote_elapsed_s": status.get("elapsed_s"),
+                    }
+                break
+            time.sleep(0.1)
+        else:
+            return {
+                "state": "failed",
+                "message": "la confirmación remota del reloj no respondió",
+            }
+
+        estimate = self.wait_for_clock_estimate(
+            after_received_at=remote_started_at,
+            timeout_s=6.0,
+            minimum_samples=1,
+            required_source="grounding_dino",
+        )
+        if estimate is None:
+            return {
+                "state": "failed",
+                "message": (
+                    "el detector remoto vio el reloj, pero no se pudo medir "
+                    "su profundidad"
+                ),
+            }
+        if estimate["confidence"] < CLOCK_REMOTE_MINIMUM_CONFIDENCE:
+            return {
+                "state": "not_visible",
+                "remote_confidence": round(estimate["confidence"], 3),
+            }
+        return {
+            "state": "succeeded",
+            "estimate": estimate,
+            "detection_source": "grounding_dino",
+            "remote_elapsed_s": (self.search_status or {}).get("elapsed_s"),
+        }
+
+    def accept_clock_estimate(
+        self,
+        estimate: dict,
+        *,
+        views_checked: int,
+        scan_attempt: int,
+        extra_measurements: dict = None,
+    ) -> dict:
+        if self.current_pose is None:
+            return failed("no llegó la posición para observar el reloj")
+        robot_x, robot_y, _robot_z, _robot_yaw = self.current_pose
+        try:
+            observation = compute_observation_pose(
+                observer_x=robot_x,
+                observer_y=robot_y,
+                target_x=estimate["x"],
+                target_y=estimate["y"],
+                standoff_m=CLOCK_OBSERVATION_STANDOFF_M,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            return failed(f"la medición del reloj no produjo una pose segura: {error}")
+        reference = estimate.get("frame_ref")
+        if reference is None or not self.set_review_evidence(
+            "cuadro exacto usado para ubicar el reloj",
+            reference,
+            detail="high",
+        ):
+            return failed(
+                "el reloj fue medido, pero no se conservó su cuadro exacto"
+            )
+        self.mission_context["clock_point"] = estimate
+        self.mission_context["clock_observation_pose"] = (
+            observation.x,
+            observation.y,
+            observation.yaw,
+        )
+        measurements = {
+            "confidence": round(estimate["confidence"], 3),
+            "samples": estimate["sample_count"],
+            "spread_m": round(estimate["spread_m"], 3),
+            "clock_x_m": round(estimate["x"], 3),
+            "clock_y_m": round(estimate["y"], 3),
+            "clock_z_m": round(estimate["z"], 3),
+            "observation_x_m": round(observation.x, 3),
+            "observation_y_m": round(observation.y, 3),
+            "observation_yaw_deg": round(
+                math.degrees(observation.yaw),
+                2,
+            ),
+            "requested_standoff_m": CLOCK_OBSERVATION_STANDOFF_M,
+            "views_checked": views_checked,
+            "scan_attempt": scan_attempt,
+        }
+        if extra_measurements:
+            measurements.update(extra_measurements)
+        return succeeded(
+            f"ubicó el reloj en ({estimate['x']:.2f}, {estimate['y']:.2f})",
+            measurements,
+        )
+
+    def find_clock(self) -> dict:
+        """Busca el reloj con cámara y profundidad sin leer la escena de Isaac."""
+        try:
+            scan_attempt, allowed = reserve_scan_attempt(
+                int(self.mission_context.get("clock_scan_attempts", 0)),
+                MAX_CLOCK_SCANS_PER_MISSION,
+            )
+        except (TypeError, ValueError) as error:
+            return failed(f"el contador de búsqueda del reloj es inválido: {error}")
+        if not allowed:
+            return blocked(
+                "ya se cubrió la sala buscando el reloj; repetir desde el "
+                "mismo lugar no agrega evidencia",
+                {"scan_attempts_used": scan_attempt},
+                blocker={
+                    "type": "missing_skill",
+                    "skill": "relocate_viewpoint",
+                    "target": "clock",
+                },
+            )
+        self.mission_context["clock_scan_attempts"] = scan_attempt
+
+        pattern = make_scan_pattern(
+            SEARCH_HORIZONTAL_FOV_DEG,
+            SEARCH_MINIMUM_OVERLAP_DEG,
+        )
+        if self.current_pose is None:
+            return failed("no llegó la posición inicial de la búsqueda")
+        start_x, start_y, _start_z, start_yaw = self.current_pose
+        first_cutoff = time.monotonic() - CLOCK_LOCALIZATION_MAX_AGE_S
+        for view_index in range(pattern.view_count):
+            cutoff = first_cutoff if view_index == 0 else time.monotonic()
+            observation = self.locate_clock_in_current_view(cutoff)
+            if observation["state"] == "succeeded":
+                return self.accept_clock_estimate(
+                    observation["estimate"],
+                    views_checked=view_index + 1,
+                    scan_attempt=scan_attempt,
+                    extra_measurements={
+                        key: observation[key]
+                        for key in ("detection_source", "remote_elapsed_s")
+                        if observation.get(key) is not None
+                    },
+                )
+            if observation["state"] == "failed":
+                return failed(observation["message"])
+            if view_index < pattern.view_count - 1:
+                turn_started_at = time.monotonic()
+                turn = self.spin_relative(pattern.turn_increment_rad)
+                if turn["state"] != "succeeded":
+                    # La inferencia local tarda unos segundos. Nav2 puede
+                    # frenar con seguridad después de que la cámara ya obtuvo
+                    # el cuadro útil pero antes de que RT-DETR lo publique.
+                    # Esperar ese resultado no reanuda ni evita el movimiento.
+                    observation = self.locate_clock_in_current_view(
+                        turn_started_at
+                    )
+                    if observation["state"] == "succeeded":
+                        return self.accept_clock_estimate(
+                            observation["estimate"],
+                            views_checked=view_index + 2,
+                            scan_attempt=scan_attempt,
+                            extra_measurements={
+                                "turn_stopped_safely": True,
+                                **{
+                                    key: observation[key]
+                                    for key in (
+                                        "detection_source",
+                                        "remote_elapsed_s",
+                                    )
+                                    if observation.get(key) is not None
+                                },
+                                **turn.get("measurements", {}),
+                            },
+                        )
+                    if observation["state"] == "failed":
+                        return failed(
+                            observation["message"],
+                            turn.get("measurements"),
+                        )
+                    return blocked(
+                        "Nav2 detuvo el barrido por seguridad y el reloj no "
+                        "apareció en los cuadros nuevos",
+                        {
+                            "views_checked": view_index + 1,
+                            **turn.get("measurements", {}),
+                        },
+                        blocker={
+                            "type": "missing_skill",
+                            "skill": "relocate_viewpoint",
+                            "target": "clock",
+                        },
+                    )
+
+        if self.current_pose is None:
+            return failed("se perdió la posición al cerrar la búsqueda")
+        remaining_turn = normalize_angle(start_yaw - self.current_pose[3])
+        if abs(remaining_turn) > math.radians(1.0):
+            restore = self.spin_relative(remaining_turn)
+            if restore["state"] != "succeeded":
+                return failed(
+                    "no se encontró el reloj y falló el regreso a la "
+                    "orientación inicial: " + restore["message"],
+                    restore.get("measurements"),
+                )
+        if self.current_pose is None:
+            return failed("no llegó la medición posterior a la búsqueda")
+        final_x, final_y, _final_z, final_yaw = self.current_pose
+        return blocked(
+            "no se encontró un reloj consistente después de cubrir 360 grados",
+            {
+                "views_checked": pattern.view_count,
+                "orientation_error_deg": round(
+                    math.degrees(abs(normalize_angle(start_yaw - final_yaw))),
+                    2,
+                ),
+                "position_drift_m": round(
+                    math.hypot(final_x - start_x, final_y - start_y),
+                    3,
+                ),
+            },
+            blocker={
+                "type": "unresolved_perception",
+                "target": "clock",
+            },
+        )
 
     def navigate_to_pose(
         self,
@@ -2105,11 +2466,17 @@ class Agent(Node):
             )
         if wrapped.status == GoalStatus.STATUS_SUCCEEDED:
             return succeeded("giro completado", measurements)
+        error_code = int(getattr(wrapped.result, "error_code", 0))
+        if error_code:
+            measurements["error_code"] = error_code
         error_message = str(
             getattr(wrapped.result, "error_msg", "")
         ).strip()
         if not error_message:
-            error_message = f"el giro terminó con estado {wrapped.status}"
+            if error_code == Spin.Result.COLLISION_AHEAD:
+                error_message = "Nav2 previó una colisión y detuvo el giro"
+            else:
+                error_message = f"el giro terminó con estado {wrapped.status}"
         return failed(error_message, measurements)
 
     def set_arm_pose(self, target: str) -> dict:

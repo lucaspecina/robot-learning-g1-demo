@@ -39,6 +39,12 @@ def build_demo_plan() -> list[dict]:
             "label": "Guardar el punto de partida",
         },
         {
+            "id": "find_clock",
+            "skill": "find_clock",
+            "argument": None,
+            "label": "Encontrar y ubicar el reloj",
+        },
+        {
             "id": "navigate_to_clock",
             "skill": "navigate_to",
             "argument": "clock",

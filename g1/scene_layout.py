@@ -13,6 +13,7 @@ WORLD_BOUNDS = {
     "ymax": 4.0,
 }
 ROOM_WALL_THICKNESS = 0.12
+CLOCK_HEIGHT = 1.55
 # Los límites describen el centro de cada pared porque Isaac coloca allí los
 # cubos. Distancias y seguridad deben usar la cara que mira hacia la sala.
 ROOM_INTERIOR_BOUNDS = {

@@ -416,8 +416,11 @@ La persona enviará por texto la misión; la voz se agregará después. El model
 armará el plan inicial y el tablero lo mostrará. El robot:
 
 1. guardará `home`;
-2. irá al reloj conocido;
-3. comprobará con una imagen que realmente lo está mirando;
+2. en `deployment_rehearsal`, buscará el reloj girando con Nav2 y calculará
+   su posición desde visión y profundidad; `simulation_demo` puede conservar
+   el punto conocido sólo como comparación explícita;
+3. navegará a la pose de observación medida y comprobará con una imagen que
+   realmente lo está mirando;
 4. leerá la hora desde su recorte;
 5. elegirá la mesa roja o azul mediante la regla determinista;
 6. buscará la mesa alrededor con cinco vistas superpuestas y sólo llamará al
@@ -429,8 +432,9 @@ armará el plan inicial y el tablero lo mostrará. El robot:
 9. cancelará cualquier paso trabado y quedará activamente en `STAND`;
 10. mostrará la entrada, respuesta, mediciones e imagen usadas para decidir.
 
-El sistema todavía se bloqueará honestamente si no encuentra la mesa después
-del barrido o si necesita cambiar físicamente el punto de observación. La
+El sistema todavía se bloqueará honestamente si el mapa local confunde el
+propio cuerpo con un obstáculo, si no encuentra la mesa después del barrido o
+si necesita cambiar físicamente el punto de observación. La
 alineación y el transporte con carga simulada ya funcionan; el agarre real
 sigue faltando y nunca se presenta la masa agregada como prueba de dedos,
 contacto o retención.
@@ -492,7 +496,8 @@ Adaptación propia de esta demo:
 - plan inicial completo y revisiones por evento;
 - imágenes puntuales en lugar de video continuo;
 - topics actuales que se migrarán gradualmente a Actions;
-- navegación simple hasta incorporar Nav2 y SLAM;
+- Nav2 integrado sobre mapa fijo, con localización móvil y filtrado corporal
+  todavía pendientes de aprobación;
 - preaproximación inspirada en el flujo de Nav2 Docking, pero con nuestra
   distancia medida y sin afirmar que el servidor oficial ya está integrado;
 - AGILE conserva locomoción y balance; el modelo no controla el cuerpo.

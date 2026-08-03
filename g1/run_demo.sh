@@ -5,7 +5,7 @@
 #   bash run_demo.sh up          arranca robot + skills + agente
 #   G1_OPERATION_PROFILE=deployment_rehearsal bash run_demo.sh up
 #                               arranca sin coordenadas ni carga mágicas
-#   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | home
+#   bash run_demo.sh check [cual] LA ESCALERA: stand | walk | goto | clock | clock-location | home
 #   bash run_demo.sh check obstacle exige un rodeo físico con Nav2
 #   bash run_demo.sh clock      va al reloj conocido y termina mirándolo
 #   bash run_demo.sh read-clock lee el recorte vivo mediante el servidor
@@ -400,6 +400,7 @@ up)
 layers)
     # Permite reconstruir la computadora de a bordo sin pagar otro arranque de
     # Isaac. El robot debe seguir corriendo en el host.
+    printf '%s\n' "$OPERATION_PROFILE" > "$OPERATION_PROFILE_FILE"
     pgrep -f "g1_robot.p[y]" >/dev/null \
         || { echo "el robot no está corriendo; usar: bash run_demo.sh up"; exit 1; }
     stop_navigation_stack
@@ -594,6 +595,11 @@ check)
     if [ "${2:-}" = "clock" ]; then
         sudo docker exec jetson bash -c \
             "$ROS && python3 $D/tools/check_clock.py"
+        exit $?
+    fi
+    if [ "${2:-}" = "clock-location" ]; then
+        sudo docker exec jetson bash -lc \
+            "$ROS && python3 $D/tools/check_clock_localization.py"
         exit $?
     fi
     if [ "${2:-}" = "home" ]; then

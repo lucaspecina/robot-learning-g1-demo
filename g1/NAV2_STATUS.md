@@ -88,7 +88,9 @@ movimiento lateral y la deriva lateral está medida.
 - repetición e inspección visual del rodeo completo;
 - localización móvil transferible: Isaac todavía entrega odometría perfecta y
   la T4 no compensa bien el movimiento del barrido RTX;
-- huella dinámica cuando brazos y carga sobresalen del torso.
+- huella dinámica cuando brazos y carga sobresalen del torso;
+- filtrar de la nube de profundidad los puntos del propio G1 antes de que
+  entren al mapa de obstáculos.
 
 No se seguirá afinando tolerancias de Nav2 para ocultar ese error. El próximo
 experimento útil para la simulación es repetir con GPU Ampere o posterior. El
@@ -108,6 +110,18 @@ midió 20.054 retornos del propio torso dentro de la zona de emergencia. Por
 eso Collision Monitor sigue usando el LaserScan hasta disponer de filtrado
 corporal basado en el URDF completo.
 
+La misma contaminación ya produjo una segunda firma: `Spin` abortó con
+`COLLISION_AHEAD` durante la búsqueda del reloj y DWB llegó a declarar que no
+había trayectorias legales. No se afinan críticos ni tolerancias para taparlo.
+Nav2 documenta que la huella debe representar el cuerpo completo y puede
+actualizarse cuando cambia un manipulador o se toma una carga; ése es el primer
+A/B pendiente. El paquete comunitario `robot_body_filter` expresa el patrón
+correcto —usar URDF y transformaciones—, pero su rama llamada `ros2` todavía
+compila con `catkin` y `roscpp` y no está publicada para Jazzy. No se tratará
+como dependencia soportada. Si la huella completa no alcanza, el adaptador
+ROS 2 deberá usar las bibliotecas mantenidas `urdf` y `geometric_shapes`, con
+una prueba explícita contra los 20.054 retornos medidos.
+
 ## Referencias oficiales
 
 - [Nav2: selección de algoritmos](https://docs.nav2.org/setup_guides/algorithm/select_algorithm.html)
@@ -121,3 +135,6 @@ corporal basado en el URDF completo.
 - [Unitree: Point-LIO para sus LiDAR](https://github.com/unitreerobotics/point_lio_unilidar)
 - [ROS 2 Jazzy: depth_image_proc](https://docs.ros.org/en/jazzy/p/depth_image_proc/doc/index.html)
 - [Nav2: selección de ObstacleLayer y VoxelLayer](https://docs.nav2.org/tuning/index.html#costmap2d-plugins)
+- [Nav2: huella actualizable para manipuladores y cargas](https://docs.nav2.org/configuration/packages/configuring-costmaps.html)
+- [ROS Index: estado no publicado de robot_body_filter](https://index.ros.org/p/robot_body_filter/)
+- [ROS 2 Jazzy: geometrías para excluir puntos dentro del robot](https://docs.ros.org/en/ros2_packages/jazzy/api/geometric_shapes/generated/namespace_bodies.html)

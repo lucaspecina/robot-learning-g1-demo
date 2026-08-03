@@ -22,6 +22,7 @@ class MissionContractTest(unittest.TestCase):
         steps = validate_plan(build_demo_plan())
         ids = [step["id"] for step in steps]
 
+        self.assertIn("find_clock", ids)
         self.assertIn("choose_table", ids)
         self.assertIn("scan_for_table", ids)
         self.assertIn("find_object", ids)

@@ -5,6 +5,7 @@ import numpy as np
 
 from perception_core import (
     CLASS_NAMES,
+    CLOCK_CLASS_NAMES,
     TABLE_CLASS_NAMES,
     TRANSPORT_OBJECT_CLASS_NAMES,
     ImageBox,
@@ -30,6 +31,11 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertEqual(CLASS_NAMES["cup"], "objeto")
         self.assertIn("cup", TRANSPORT_OBJECT_CLASS_NAMES)
         self.assertIn("bottle", TRANSPORT_OBJECT_CLASS_NAMES)
+
+    def test_clock_labels_from_both_detectors_share_one_role(self):
+        self.assertEqual(CLASS_NAMES["a digital wall clock"], "reloj")
+        self.assertIn("clock", CLOCK_CLASS_NAMES)
+        self.assertIn("a digital wall clock", CLOCK_CLASS_NAMES)
 
     def test_box_is_clipped_to_image(self):
         self.assertEqual(

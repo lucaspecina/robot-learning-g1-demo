@@ -50,7 +50,7 @@ Cada mecanismo quedará clasificado con una de estas cuatro etiquetas:
 | Mecanismo actual | Lectura preliminar | Resultado exigido |
 |---|---|---|
 | Plan local de respaldo para la misión conocida | **eliminado del ejecutor** | si Azure o el planificador fallan, la misión queda bloqueada y visible; `build_demo_plan` sólo permanece como referencia de pruebas |
-| Coordenada conocida del reloj | escalón temporal | obtenerla de una anotación hecha al preparar el mapa o encontrar el reloj con sensores; el agente no puede leer la escena de Isaac |
+| Coordenada conocida del reloj | **retirada en `deployment_rehearsal`** | `find_clock` gira con Nav2, confirma por visión y profundidad y guarda el punto medido; `simulation_demo` conserva la coordenada sólo como instrumento comparativo |
 | `/g1/odom` y transformaciones calculadas desde la pose perfecta de Isaac | adaptador hoy, bloqueante para despliegue | producir `odom -> base_link` con estimación local y `map -> odom` con localización basada en sensores |
 | Profundidad de Isaac | adaptador validado para navegación y aproximación | publica imagen, calibración y tiempo estándar; `depth_image_proc` produce la misma nube que consumirá Nav2 con una cámara física |
 | `attach_payload` | instrumento de prueba explícito | `simulation_demo` lo ofrece; `deployment_rehearsal` lo elimina del catálogo y se detiene en “agarre no disponible” |
@@ -62,6 +62,22 @@ Cada mecanismo quedará clasificado con una de estas cuatro etiquetas:
 La auditoría no consistirá sólo en buscar palabras como `fallback` o
 `mock`. Seguiremos cada dato desde su origen hasta la decisión física y
 probaremos qué ocurre al quitarlo.
+
+### Reloj encontrado sin coordenada interna — 2 de agosto de 2026
+
+`find_clock` ya cubre el hueco que antes llenaba la coordenada de Isaac. Hace
+un giro cancelable con la Action `Spin` de Nav2, toma detecciones fechadas,
+combina caja visual, profundidad y calibración, y transforma el punto al mapa
+con `tf2`. Exige dos cuadros distintos que coincidan dentro de 20 cm y usa la
+mediana, no una lectura aislada. Si RT-DETR no alcanza, puede pedir una sola
+confirmación acotada a Grounding DINO; nunca recibe la posición de la escena.
+
+La prueba pasiva obtuvo tres mediciones con 6 mm de dispersión y dejó el reloj
+a 10,7 cm de su referencia, sólo usada por el verificador. Una misión activa
+lo encontró en dos vistas con 2,1 cm de dispersión. La navegación a la pose de
+observación llegó a 5,9 cm según Nav2, pero la confirmación visual inmediata no
+fue repetible. Por eso el bloque está integrado y probado por partes, pero la
+misión completa todavía no está aprobada.
 
 ## Perfil de ensayo de despliegue
 

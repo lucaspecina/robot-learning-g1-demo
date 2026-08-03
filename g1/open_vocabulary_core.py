@@ -9,6 +9,10 @@ SEARCH_TARGET_LABELS = {
     # confiable del modelo. El adaptador lo mide después dentro del recuadro.
     "red_table": ["a table"],
     "blue_table": ["a table"],
+    # El checkpoint general local queda cerca de su umbral con el display
+    # digital de la demo. Esta frase obtuvo 0,916 en el cuadro real de llegada
+    # y permite usar Grounding DINO como confirmación, no como control.
+    "clock": ["a digital wall clock"],
 }
 
 

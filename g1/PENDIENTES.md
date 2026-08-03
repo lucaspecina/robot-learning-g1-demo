@@ -215,8 +215,9 @@ ocho esferas de los pies contra MuJoCo.
   que todavía se sigue dato por dato incluye:
 
   1. ~~plan local de respaldo ante falla del modelo~~ — retirado;
-  2. coordenadas conocidas del reloj y cualquier posición interna leída de
-     Isaac;
+  2. ~~coordenada conocida del reloj en el ensayo sin ayudas~~ — `find_clock`
+     ya la obtiene de visión y profundidad; falta aprobar llegada y
+     confirmación juntas;
   3. detectores por color o forma ajustados sólo a esta habitación;
   4. profundidad perfecta o sin ruido usada como si fuera medición real;
   5. `attach_payload`, que prueba carga pero no agarre;
@@ -234,6 +235,17 @@ ocho esferas de los pies contra MuJoCo.
   deberá activar un reemplazo silencioso. La clasificación, el perfil sin
   ayudas y sus criterios están fijados en
   [`DEPLOYMENT_READINESS_PLAN.md`](DEPLOYMENT_READINESS_PLAN.md).
+
+- **Búsqueda del reloj basada en sensores, integrada y validada por partes**:
+  `deployment_rehearsal` gira con la Action `Spin`, exige dos detecciones 3D
+  coherentes y calcula una pose de observación sin leer la escena. La medición
+  pasiva dio 6 mm de dispersión y 10,7 cm de error; Grounding DINO confirmó el
+  cuadro real con 0,916. La misión todavía no se aprueba: la nube de cámara
+  incluye el cuerpo del G1, contamina el mapa local y puede abortar el giro o
+  dejar a DWB sin trayectorias. El próximo A/B es representar la huella
+  completa; si no basta, filtrar el cuerpo usando URDF y geometrías mantenidas
+  de ROS 2. `robot_body_filter` no se instalará como si fuera compatible: su
+  rama `ros2` sigue siendo código ROS 1 y está sin publicar para Jazzy.
 
 - **Recuperación visual desde otro lugar**: todavía no existe la capacidad
   `relocate_viewpoint`. Después de dos barridos el agente debe pedir ayuda; no

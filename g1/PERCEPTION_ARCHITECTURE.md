@@ -179,6 +179,29 @@ encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
 
 El punto representa la superficie vista, no el centro completo de la mesa.
 
+## Encontrar el reloj sin conocer su coordenada: validado por partes el 2 de agosto de 2026
+
+El perfil `deployment_rehearsal` ya no recibe la posición del reloj. La
+capacidad `find_clock` busca con giros de Nav2 y localiza cada candidato usando
+el mismo contrato transferible de color, profundidad, calibración y
+transformaciones fechadas. Rechaza alturas imposibles, exige dos imágenes
+distintas coherentes dentro de 20 cm y calcula una pose de observación a 1,2 m
+del lado desde el que realmente fue visto.
+
+Quedó medido:
+
+| Prueba | Resultado |
+|---|---|
+| robot mirando al reloj | tres muestras, 6 mm de dispersión y 10,7 cm de error respecto de la escena |
+| búsqueda activa | dos vistas, dos muestras y 2,1 cm de dispersión; punto `(0,13; 2,46; 1,553)` m |
+| Grounding DINO sobre el cuadro real de llegada | reloj correcto, confianza 0,916; 25,14 s de inferencia y 43,42 s totales en el servidor simulado |
+| navegación al punto medido | Nav2 terminó a 5,9 cm, pero la comprobación visual inmediata falló y apareció más tarde |
+
+El último caso no se considera éxito completo. Reveló que el costo local puede
+marcar como obstáculos puntos de la cámara que pertenecen al propio G1 y que
+la llegada debe comprobar reposo más visión, no sólo distancia. La mejora del
+criterio de reposo se ensayó y se revirtió al no aislar ese problema.
+
 ## Búsqueda activa validada el 30 de julio de 2026
 
 La búsqueda usa la lente realmente configurada, de 108,1° horizontales. El
@@ -192,11 +215,11 @@ dio 0,819 y profundidad ubicó la superficie en `(3,674; 2,370; 0,671)` m.
 Hubo un candidato local y una sola consulta remota. El cuerpo terminó en
 `STAND`; el barrido desplazó su base 0,171 m.
 
-La interfaz coincide con Nav2, pero nuestra implementación todavía no tiene
-el mapa local de colisiones que usa el comportamiento `Spin` completo. Por
-eso el barrido actual sólo es seguro en la sala abierta de la demo. Cuando
-LiDAR y Nav2 estén validados, el servidor oficial podrá reemplazar este
-adaptador sin cambiar el agente.
+La interfaz ya usa el comportamiento `Spin` y el mapa local de colisiones de
+Nav2. La prueba activa descubrió que ese mapa recibe puntos de profundidad del
+propio torso y puede abortar el giro por una colisión inexistente. El próximo
+paso no es otro barrido propio: es corregir la huella y filtrar el cuerpo antes
+de entregar la nube a Nav2.
 
 El umbral 0,70 mostrado en un flujo de manipulación de NVIDIA no se copió:
 corresponde a otro modelo especializado. Para nuestro checkpoint general,

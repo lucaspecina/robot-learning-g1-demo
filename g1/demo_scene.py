@@ -12,6 +12,7 @@ import os
 import isaaclab.sim as sim_utils
 
 from scene_layout import (
+    CLOCK_HEIGHT,
     COLORED_TABLES,
     NAVIGATION_TARGETS,
     NAVIGATION_TEST_OBSTACLE,
@@ -22,7 +23,6 @@ from scene_layout import (
 )
 
 TABLE_HEIGHT = 0.75
-CLOCK_HEIGHT = 1.55
 ROOM_HEIGHT = 2.7
 WALL_THICKNESS = ROOM_WALL_THICKNESS
 CLOCK_APPROACH = NAVIGATION_TARGETS["reloj"][:2]

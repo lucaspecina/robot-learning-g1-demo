@@ -25,6 +25,7 @@ class ImageBox:
 
 CLASS_NAMES = {
     "clock": "reloj",
+    "a digital wall clock": "reloj",
     "bottle": "botella",
     # El objeto de la demo es un cilindro liso: en seis cuadros RT-DETR lo
     # clasificó de forma estable como cup (0,49--0,62), no como bottle
@@ -43,6 +44,7 @@ TRANSPORT_OBJECT_CLASS_NAMES = {
     "bottle",
     "cup",
 }
+CLOCK_CLASS_NAMES = {"clock", "a digital wall clock"}
 TABLE_CLASS_NAMES = {
     "diningtable",
     "dining table",

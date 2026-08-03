@@ -31,7 +31,7 @@ class SkillCatalogTest(unittest.TestCase):
             initial_facts=INITIAL_WORLD_FACTS,
         )
 
-        self.assertEqual(len(validated), 13)
+        self.assertEqual(len(validated), 14)
         self.assertEqual(
             next(
                 step
@@ -113,13 +113,28 @@ class SkillCatalogTest(unittest.TestCase):
             {skill["name"] for skill in catalog},
         )
 
-    def test_deployment_rehearsal_does_not_know_clock_position(self):
+    def test_deployment_rehearsal_must_measure_clock_position(self):
         facts = initial_world_facts_for_profile("deployment_rehearsal")
 
         self.assertEqual(facts, ["robot_pose_known"])
+        clock_prefix = build_demo_plan()[:3]
+        validated = validate_plan(
+            clock_prefix,
+            skill_catalog=skill_catalog_for_profile(
+                "deployment_rehearsal"
+            ),
+            initial_facts=facts,
+        )
+        self.assertEqual(validated[1]["skill"], "find_clock")
+
+        plan_without_measurement = [
+            step
+            for step in clock_prefix
+            if step["skill"] != "find_clock"
+        ]
         with self.assertRaisesRegex(ValueError, "clock_location_known"):
             validate_plan(
-                build_demo_plan(),
+                plan_without_measurement,
                 skill_catalog=skill_catalog_for_profile(
                     "deployment_rehearsal"
                 ),

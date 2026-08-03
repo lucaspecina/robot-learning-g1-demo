@@ -30,6 +30,25 @@ SKILL_CATALOG = [
         ],
     },
     {
+        "name": "find_clock",
+        "description": (
+            "Busca activamente el reloj alrededor del robot. Exige dos "
+            "detecciones coherentes, combina cada caja con profundidad y "
+            "calibración, transforma la medición al mapa y calcula una pose "
+            "segura desde la cual observarlo. No conoce su coordenada de "
+            "antemano."
+        ),
+        "availability": "ready",
+        "variants": [
+            {
+                "argument": None,
+                "argument_description": "No recibe argumento.",
+                "preconditions": ["robot_pose_known"],
+                "effects": ["clock_location_known"],
+            }
+        ],
+    },
+    {
         "name": "navigate_to",
         "description": (
             "Lleva la base del robot hasta un destino ya localizado y espera "
@@ -41,7 +60,8 @@ SKILL_CATALOG = [
             {
                 "argument": "clock",
                 "argument_description": (
-                    "Usa la pose de observación conocida del reloj."
+                    "Usa la pose de observación medida por find_clock o, "
+                    "sólo en la demo simulada, la referencia preparada."
                 ),
                 "preconditions": ["clock_location_known"],
                 "effects": ["at_clock"],
