@@ -110,17 +110,21 @@ midió 20.054 retornos del propio torso dentro de la zona de emergencia. Por
 eso Collision Monitor sigue usando el LaserScan hasta disponer de filtrado
 corporal basado en el URDF completo.
 
-La misma contaminación ya produjo una segunda firma: `Spin` abortó con
-`COLLISION_AHEAD` durante la búsqueda del reloj y DWB llegó a declarar que no
-había trayectorias legales. No se afinan críticos ni tolerancias para taparlo.
-Nav2 documenta que la huella debe representar el cuerpo completo y puede
-actualizarse cuando cambia un manipulador o se toma una carga; ése es el primer
-A/B pendiente. El paquete comunitario `robot_body_filter` expresa el patrón
-correcto —usar URDF y transformaciones—, pero su rama llamada `ros2` todavía
-compila con `catkin` y `roscpp` y no está publicada para Jazzy. No se tratará
-como dependencia soportada. Si la huella completa no alcanza, el adaptador
+`Spin` abortó una vez con `COLLISION_AHEAD`, pero el A/B discriminante corrigió
+la atribución inicial. Sin profundidad completó 72°; al repetir desde un
+reinicio limpio también completó 72° con profundidad. La diferencia era estado
+viejo: `freeze` llevaba el cuerpo al origen sin cancelar la misión ni reiniciar
+AMCL. Ese comando ahora invalida ambos antes del siguiente ensayo.
+
+El filtrado corporal sigue pendiente para conectar profundidad a Collision
+Monitor, pero ya no se lo presenta como causa probada del giro. Nav2 documenta
+que la huella debe representar el cuerpo completo y puede actualizarse cuando
+cambia un manipulador o se toma una carga. El paquete comunitario
+`robot_body_filter` expresa el patrón correcto —usar URDF y transformaciones—,
+pero su rama llamada `ros2` todavía compila con `catkin` y `roscpp` y no está
+publicada para Jazzy. No se tratará como dependencia soportada. El adaptador
 ROS 2 deberá usar las bibliotecas mantenidas `urdf` y `geometric_shapes`, con
-una prueba explícita contra los 20.054 retornos medidos.
+una prueba explícita contra los retornos del cuerpo medidos.
 
 ## Referencias oficiales
 

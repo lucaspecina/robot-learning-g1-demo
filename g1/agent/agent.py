@@ -1627,6 +1627,54 @@ class Agent(Node):
         detection_name = DETECTION_NAMES.get(target)
         if detection_name is None:
             return failed(f"objeto visual desconocido: {target}")
+
+        if target == "clock":
+            # La confirmación al llegar debe provenir de una imagen nueva. El
+            # respaldo remoto existe porque el detector rápido puede perder un
+            # reloj pequeño aun cuando el robot esté correctamente ubicado.
+            confirmation = self.locate_clock_in_current_view(
+                after_received_at=time.monotonic()
+            )
+            if confirmation.get("state") != "succeeded":
+                measurements = {
+                    key: confirmation[key]
+                    for key in ("remote_confidence", "remote_elapsed_s")
+                    if key in confirmation
+                }
+                message = confirmation.get(
+                    "message", "la cámara no confirmó reloj en la vista actual"
+                )
+                return failed(message, measurements)
+
+            estimate = confirmation["estimate"]
+            reference = estimate.get("frame_ref")
+            if reference is None or not self.set_review_evidence(
+                "cuadro exacto que confirmó reloj al llegar",
+                reference,
+                detail="high",
+            ):
+                return failed(
+                    "se detectó reloj, pero no se conservó su cuadro"
+                )
+            measurements = {
+                "confidence": round(float(estimate["confidence"]), 3),
+                "source": confirmation["detection_source"],
+                "x": round(float(estimate["x"]), 3),
+                "y": round(float(estimate["y"]), 3),
+                "z": round(float(estimate["z"]), 3),
+                "sample_count": int(estimate["sample_count"]),
+                "spread_m": round(float(estimate["spread_m"]), 3),
+            }
+            if "remote_elapsed_s" in confirmation:
+                measurements["remote_elapsed_s"] = confirmation[
+                    "remote_elapsed_s"
+                ]
+            return succeeded(
+                "confirmó reloj en una imagen nueva con confianza "
+                f"{measurements['confidence']}",
+                measurements,
+            )
+
         previous = self.detections.get(detection_name, {}).get("frame_ref")
         detection = self.wait_for_detection(
             detection_name,

@@ -74,10 +74,19 @@ confirmación acotada a Grounding DINO; nunca recibe la posición de la escena.
 
 La prueba pasiva obtuvo tres mediciones con 6 mm de dispersión y dejó el reloj
 a 10,7 cm de su referencia, sólo usada por el verificador. Una misión activa
-lo encontró en dos vistas con 2,1 cm de dispersión. La navegación a la pose de
-observación llegó a 5,9 cm según Nav2, pero la confirmación visual inmediata no
-fue repetible. Por eso el bloque está integrado y probado por partes, pero la
-misión completa todavía no está aprobada.
+lo encontró en dos vistas con 2,1 cm de dispersión. La primera navegación llegó
+a 5,9 cm según Nav2, pero la confirmación visual inmediata no fue repetible y
+esa corrida no se aprobó.
+
+La repetición limpia encontró el reloj en `(0,15; 2,43; 1,556)` m con 0,905 de
+confianza, navegó a la pose calculada y tomó una imagen nueva al llegar. Como
+RT-DETR no confirmó el objeto pequeño, el respaldo acotado de Grounding DINO
+lo confirmó con 0,963 y la misión terminó en `succeeded`. Esta cadena queda
+aprobada sin coordenada interna ni reutilización de una imagen anterior.
+
+El mismo ensayo reveló que `freeze` teletransportaba el cuerpo pero conservaba
+la misión y la localización previas. Ahora detiene Nav2 y AMCL, reinicia las
+capas de ejecución y obliga a relocalizar antes de aceptar otra ruta.
 
 ## Perfil de ensayo de despliegue
 

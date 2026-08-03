@@ -179,7 +179,7 @@ encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
 
 El punto representa la superficie vista, no el centro completo de la mesa.
 
-## Encontrar el reloj sin conocer su coordenada: validado por partes el 2 de agosto de 2026
+## Encontrar el reloj sin conocer su coordenada: validado de punta a punta el 2 de agosto de 2026
 
 El perfil `deployment_rehearsal` ya no recibe la posición del reloj. La
 capacidad `find_clock` busca con giros de Nav2 y localiza cada candidato usando
@@ -196,11 +196,18 @@ Quedó medido:
 | búsqueda activa | dos vistas, dos muestras y 2,1 cm de dispersión; punto `(0,13; 2,46; 1,553)` m |
 | Grounding DINO sobre el cuadro real de llegada | reloj correcto, confianza 0,916; 25,14 s de inferencia y 43,42 s totales en el servidor simulado |
 | navegación al punto medido | Nav2 terminó a 5,9 cm, pero la comprobación visual inmediata falló y apareció más tarde |
+| repetición completa tras corregir el reinicio | reloj `(0,15; 2,43; 1,556)` m con 0,905; navegación terminada; cuadro nuevo confirmado con 0,963 y misión en `succeeded` |
 
-El último caso no se considera éxito completo. Reveló que el costo local puede
-marcar como obstáculos puntos de la cámara que pertenecen al propio G1 y que
-la llegada debe comprobar reposo más visión, no sólo distancia. La mejora del
-criterio de reposo se ensayó y se revirtió al no aislar ese problema.
+La primera llegada no se consideró éxito porque faltó la comprobación visual.
+La repetición exige una imagen posterior a la llegada: prueba RT-DETR y, si el
+reloj pequeño no supera su umbral, hace una sola consulta a Grounding DINO.
+Así se aprobó la cadena completa sin reutilizar la imagen de búsqueda ni una
+coordenada de la escena. La mejora del criterio de reposo se ensayó y se
+revirtió al no aislar el problema.
+
+Un A/B adicional mostró que un giro de 72° pasa tanto con la profundidad
+apagada como encendida si la localización se reinicia: el aborto anterior
+había mezclado una pose vieja con un cuerpo teletransportado por `freeze`.
 
 ## Búsqueda activa validada el 30 de julio de 2026
 
@@ -216,10 +223,10 @@ Hubo un candidato local y una sola consulta remota. El cuerpo terminó en
 `STAND`; el barrido desplazó su base 0,171 m.
 
 La interfaz ya usa el comportamiento `Spin` y el mapa local de colisiones de
-Nav2. La prueba activa descubrió que ese mapa recibe puntos de profundidad del
-propio torso y puede abortar el giro por una colisión inexistente. El próximo
-paso no es otro barrido propio: es corregir la huella y filtrar el cuerpo antes
-de entregar la nube a Nav2.
+Nav2. La nube cruda sí contiene puntos del torso y todavía no puede conectarse
+a la barrera final, pero el A/B no demostró que cause el aborto de `Spin`. El
+fallo reproducible fue conservar misión y localización después de devolver el
+cuerpo al origen; `freeze` ahora descarta ambos estados.
 
 El umbral 0,70 mostrado en un flujo de manipulación de NVIDIA no se copió:
 corresponde a otro modelo especializado. Para nuestro checkpoint general,

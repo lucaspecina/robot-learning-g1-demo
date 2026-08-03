@@ -509,9 +509,16 @@ start)
     ;;
 
 freeze)
-    # Lo congela de nuevo en el punto de partida, sin recargar Isaac.
+    # Congelar teletransporta el cuerpo. Conservar Nav2, AMCL o una misión
+    # después de ese salto mezcla dos mundos y falsea la prueba siguiente.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: freeze}\""         >/dev/null 2>&1
-    echo "robot CONGELADO en el origen. Soltarlo: bash run_demo.sh start"
+    stop_navigation_stack
+    stop_localization_stack
+    stop_layers
+    sleep 2
+    start_layers
+    echo "robot CONGELADO; misión y posición anterior descartadas."
+    echo "Soltar y relocalizar: bash run_demo.sh start"
     ;;
 
 pose)
@@ -723,7 +730,18 @@ status)
     echo "== el robot =="
     echo "  perfil: $OPERATION_PROFILE"
     pgrep -f "g1_robot.p[y]" >/dev/null && echo "  corriendo" || echo "  detenido"
-    tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 | sed 's/^/  /'
+    robot_mode=$(
+        sudo docker exec jetson bash -lc \
+            "$ROS && timeout 4 ros2 topic echo --once --field data /g1/robot_status" \
+            2>/dev/null | head -1
+    )
+    if [ -n "$robot_mode" ]; then
+        echo "  estado físico: $robot_mode"
+    fi
+    # Esta línea es diagnóstico histórico de física; el estado vivo anterior
+    # evita interpretar como actual el último comando impreso antes de congelar.
+    tr '\r' '\n' < ~/g1.log 2>/dev/null | grep RTF | tail -1 \
+        | sed 's/^/  última métrica del log: /'
     echo "== las capas de arriba =="
     for p in mobility_authority stand_hold nav2_adapter align_with_table object_detector open_vocabulary_detector table_localizer detection_adapter agent dashboard; do
         if sudo docker exec jetson \
@@ -742,13 +760,22 @@ status)
         fi
     done
     echo "== mapa y posición =="
-    for p in laser_scan_adapter point_cloud_xyz_node async_slam_toolbox_node amcl map_server; do
+    for p in laser_scan_adapter point_cloud_xyz_node async_slam_toolbox_node; do
         if sudo docker exec jetson pgrep -f "$p" >/dev/null 2>&1; then
             echo "  $p: corriendo"
         else
             echo "  $p: DETENIDO"
         fi
     done
+    if localization_is_active; then
+        echo "  amcl: corriendo"
+        echo "  map_server: corriendo"
+    else
+        # pgrep cuenta procesos zombi acumulados por launch como si estuvieran
+        # vivos; el ciclo de vida ROS es la fuente confiable para estos nodos.
+        echo "  amcl: DETENIDO"
+        echo "  map_server: DETENIDO"
+    fi
     if navigation_is_active; then
         echo "  Nav2: activo (ruta global + esquive local)"
     else
