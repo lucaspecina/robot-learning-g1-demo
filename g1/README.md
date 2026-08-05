@@ -189,6 +189,7 @@ una carga anexada por un agarre.
 | `model_trace.py` | contrato de trazabilidad de modelos, incluido el texto literal |
 | `agent/agent.py` | valida y ejecuta localmente el plan; nunca entrega motores al LLM |
 | `AGENT_EXECUTION_PLAN.md` | estado y criterios de la ejecución adaptable paso por paso |
+| `AGILE_TRAINING_REFERENCE.md` | el taller de entrenamiento de NVIDIA que hoy sólo consumimos; el mapa para cuando toque entrenar |
 | `../systems/server/intelligence_service.py` | modelos lentos en el servidor externo |
 | `run_g1.sh` | lanzador |
 
