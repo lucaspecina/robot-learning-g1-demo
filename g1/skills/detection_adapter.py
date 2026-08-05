@@ -23,6 +23,7 @@ from perception_core import (  # noqa: E402
     bounded_box,
     classify_table_color,
     color_pixel_counts,
+    is_clock_class,
     legacy_detection,
     merge_source_detections,
     padded_box,
@@ -155,7 +156,7 @@ class DetectionAdapter(Node):
             )
             compact["frame_ref"] = frame_reference
             output[name] = compact
-            if class_name == "clock":
+            if is_clock_class(class_name):
                 self.publish_clock_crop(source_header, rgb, box)
         self.publish_visual_evidence(source_header, rgb)
         now = time.monotonic()

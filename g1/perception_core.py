@@ -58,6 +58,11 @@ SOURCE_TTL_S = {
 }
 
 
+def is_clock_class(class_name: str) -> bool:
+    """Mantiene un único contrato aunque cambie el vocabulario del detector."""
+    return class_name in CLOCK_CLASS_NAMES
+
+
 def color_pixel_counts(rgb_image: np.ndarray) -> dict[str, int]:
     """Cuenta píxeles rojos y azules como señal barata, no como detección."""
     if rgb_image.ndim != 3 or rgb_image.shape[2] != 3:

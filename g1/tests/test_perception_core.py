@@ -12,6 +12,7 @@ from perception_core import (
     bounded_box,
     classify_table_color,
     color_pixel_counts,
+    is_clock_class,
     legacy_detection,
     merge_source_detections,
     padded_box,
@@ -36,6 +37,9 @@ class PerceptionCoreTest(unittest.TestCase):
         self.assertEqual(CLASS_NAMES["a digital wall clock"], "reloj")
         self.assertIn("clock", CLOCK_CLASS_NAMES)
         self.assertIn("a digital wall clock", CLOCK_CLASS_NAMES)
+        self.assertTrue(is_clock_class("clock"))
+        self.assertTrue(is_clock_class("a digital wall clock"))
+        self.assertFalse(is_clock_class("watch"))
 
     def test_box_is_clipped_to_image(self):
         self.assertEqual(
