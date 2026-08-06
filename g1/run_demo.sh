@@ -519,7 +519,17 @@ start)
     # Suelta el robot: la policy toma el control con la memoria limpia.
     sudo docker exec jetson bash -c         "$ROS && timeout 8 ros2 topic pub --once /g1/control std_msgs/msg/String \"{data: start}\""         >/dev/null 2>&1
     echo "robot SOLTADO; espero reloj y posición antes de entregar rutas..."
-    start_localization_stack
+    # Mapear y localizar publican los dos la corrección map->odom. Soltar el
+    # robot durante un mapeo levantaba AMCL igual, y entonces dos fuentes con
+    # opiniones distintas escribían la misma transformación: todo lo dibujado
+    # en el marco del mapa saltaba entre ambas versiones. SLAM ya cubre esa
+    # corrección mientras dura el mapeo.
+    if sudo docker exec jetson pgrep -f "[a]sync_slam_toolbox_node" \
+        >/dev/null 2>&1; then
+        echo "   modo mapeo activo: no se levanta AMCL"
+    else
+        start_localization_stack
+    fi
     if ! sudo docker exec jetson bash -lc \
         "$ROS && python3 $D/tools/check_time_and_tf.py"; then
         echo "ERROR: el robot no publicó una posición utilizable" >&2
