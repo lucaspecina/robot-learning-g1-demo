@@ -1,9 +1,9 @@
 # robot-learning-g1-demo
 
-Laboratorio sim → real para robots Unitree. **Objetivo: una demo end-to-end con
-el G1 EDU (humanoide)** — una persona le habla al robot; según la hora que lee
-en un reloj, va a buscar un objeto a una mesa y se lo entrega a la persona
-correcta (remera roja antes de las 6, azul después), buscándola por la sala.
+Laboratorio sim → real para robots Unitree. **Objetivo: una demo completa con
+el G1 EDU (humanoide)**. Una persona le habla al robot; el robot guarda dónde
+empezó, encuentra y lee un reloj, busca la mesa roja o azul que corresponde a
+la hora, toma el objeto que haya sobre ella y vuelve al punto de partida.
 
 Principio del proyecto: **todo simulado, pero realista** — no solo la física
 del robot, sino también las computadoras donde corre cada cosa (la de a bordo,
@@ -16,12 +16,17 @@ El código que se desarrolla acá debe correr en el robot real sin cambios.
 |---|---|---|
 | 1 | Laboratorio local: Go2 en MuJoCo, control por DDS crudo, policies RL | hecha (base de aprendizaje; docs abajo) |
 | 2 | Laboratorio cloud: Isaac Sim en Azure, ROS 2, sistemas simulados | funcionando |
-| 3 | G1: locomoción, navegación, percepción, agente, manipulación, la demo | arrancando |
+| 3 | G1: locomoción, navegación, percepción, agente, manipulación, la demo | en integración |
 
 Contexto de fondo: [docs/00_mapa_simuladores.md](docs/00_mapa_simuladores.md),
 [docs/01_unitree_ecosistema_datos.md](docs/01_unitree_ecosistema_datos.md),
 [docs/02_arquitectura_inteligencia.md](docs/02_arquitectura_inteligencia.md),
 [docs/GLOSARIO.md](docs/GLOSARIO.md).
+
+Estado y próximo tramo del G1:
+[g1/README.md](g1/README.md),
+[g1/DEMO_TARGET.md](g1/DEMO_TARGET.md) y
+[g1/AGENT_EXECUTION_PLAN.md](g1/AGENT_EXECUTION_PLAN.md).
 
 ## Fase 2: laboratorio cloud (Isaac Sim + ROS 2 + sistemas simulados)
 
@@ -29,9 +34,23 @@ Corre en una VM de Azure con GPU (`rg-go2-lab` / `vm-go2-isaac` — nombres
 internos de la época Go2, sin valor semántico). Encendido y apagado:
 
 ```bash
-bash scripts/lab_up.sh      # VM -> simulador -> jupyter -> túnel (la terminal queda de túnel)
+bash scripts/lab_up.sh      # GitHub -> VM -> simulador -> túnel (la terminal queda de túnel)
 bash scripts/lab_down.sh    # cierra todo y desasigna la VM (deja de facturar)
 ```
+
+El código se modifica y publica desde Windows. `lab_up.sh` verifica que el
+commit local ya exista en GitHub, exige que el clon de la VM no tenga cambios
+ocultos y lo actualiza únicamente mediante un avance directo de Git. Si sólo
+se quiere sincronizar una VM que ya está encendida:
+
+```bash
+bash scripts/lab_sync.sh
+```
+
+La copia ejecutable vive en
+`~/go2-lab/robot-learning-g1-demo`; `~/go2-lab/g1` es un enlace compatible
+para los scripts históricos. Modelos generados, logs y secretos permanecen
+ignorados por Git. Los archivos fuente no se despliegan con `scp`.
 
 - **El simulador**: fork propio de isaac-go2-ros2 porteado a Isaac Sim 5.1 /
   IsaacLab / ROS 2 Jazzy ([isaac-go2-ros2-port](https://github.com/lucaspecina/isaac-go2-ros2-port),

@@ -1,0 +1,35 @@
+# La orden cambia una sola vez de caminar a detenerse para medir por separado
+# el seguimiento de velocidad y el reposo posterior sin alterar la física.
+evaluation:
+  task_name: "Velocity-Height-G1-Distillation-Recurrent-v0"
+  num_envs: 1
+  episode_length_s: 30.0
+  num_episodes: 1
+  env_overrides:
+    events:
+      disable_all: true
+  environments:
+    - env_ids: [0]
+      name: "walk_stop"
+      schedule:
+        - time: 0.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 5.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.3
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 15.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72

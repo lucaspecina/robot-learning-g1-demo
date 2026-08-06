@@ -1,0 +1,383 @@
+# Percepción: qué ve el robot y qué pasa con cada imagen
+
+La imagen de **Lo que ve el robot** es la imagen RGB completa de su cámara
+frontal. El tablero sólo agrega una franja negra con el número de cuadro y
+comprime la imagen como JPEG para mostrarla en el navegador. No existe otra
+vista más amplia que el robot use a escondidas.
+
+## Flujo actual
+
+```text
+cámara frontal
+      |
+      +--> RT-DETR local continuo --> `/g1/object_detections` --------+
+      |          + señal amplia de color                               |
+      |                         |                                      |
+      |                    candidato barato                            |
+      |                         v                                      |
+      +--> barrido de cinco vistas con `/g1/spin`                      |
+      |                                                               |
+      +--> pedido puntual --> servidor Grounding DINO                 |
+                              --> `/g1/open_vocabulary_detections` ----+
+                                          |
+ color + profundidad + calibración + pose histórica de cámara
+                                          |
+                                          v
+                                localizador de mesas
+                                `/g1/table_detections_3d`
+                                                                      v
+                                                          adaptador de la demo
+      |
+      +--> reloj / botella / mesa roja o azul en `/g1/detections`
+      |
+      +--> sólo el recorte del reloj en `/g1/clock_crop/compressed`
+                                |
+                                v
+                    modelo visual remoto, al leer la hora
+
+      +--> cuadro enlazado en `/g1/perception/evidence/compressed`
+                                |
+                 sólo si una revisión visual lo necesita
+                                v
+                    `/g1/model_input/compressed`
+                    + pedido remoto de revisión
+```
+
+RT-DETR es un modelo liviano que encuentra objetos conocidos y devuelve un
+rectángulo para cada uno. Corre a bordo y no necesita Internet. El modelo
+remoto recibe únicamente un recorte cuando la tarea requiere entender un
+detalle, por ejemplo leer los dígitos del reloj.
+
+Grounding DINO es otro modelo remoto. Sólo se activa por un pedido interno
+acotado (`red_table` o `blue_table`) y recibe un cuadro JPEG. Encuentra la
+clase general `mesa`; no decide el color. Una prueba le pidió “mesa azul” sobre
+una mesa roja y respondió incorrectamente con confianza 0,805. Por eso el
+adaptador mide rojo o azul dentro del recuadro. El detector local y el conteo
+amplio de píxeles de color sólo deciden si vale la pena hacer esa llamada:
+nunca pueden declarar que la mesa fue encontrada. Navegar y quedarse de pie
+no dependen de ninguno de estos modelos ni de la red externa.
+
+## Memoria de imágenes
+
+No se graba video infinito:
+
+- El detector conserva sólo el cuadro más nuevo mientras trabaja. Si llegan
+  más, descarta los viejos para no tomar decisiones atrasadas.
+- El adaptador conserva en RAM hasta 180 cuadros identificados por su hora,
+  aproximadamente un minuto a 3 cuadros por segundo. Esto permite unir una
+  respuesta lenta con la imagen exacta que la produjo.
+- El localizador conserva hasta 120 juegos de color, profundidad y calibración,
+  y 120 segundos de posiciones de cámara. No aproxima horarios: si falta el
+  instante exacto, rechaza la medición.
+- El video general tolera perder cuadros, pero el localizador 3D escucha
+  color, profundidad y calibración con la misma entrega garantizada que usa
+  la cámara. Antes de igualar ese contrato sólo pudo reconstruir 3 de 7
+  llamadas exitosas; después conservó 3 de 3 repeticiones consecutivas.
+- El agente conserva sólo el último recorte del reloj y lo considera vencido
+  después de 10 segundos.
+- El agente conserva hasta 24 cuadros de evidencia en RAM. Cuando una
+  revisión realmente necesita uno, exige la misma fecha del sensor, lo envía
+  una sola vez y republica ese JPEG exacto para el tablero.
+- El tablero usa otro historial acotado de 180 cuadros para dibujar las cajas
+  sobre el cuadro correcto. Conserva el último resultado puntual durante un
+  minuto para que el operador alcance a inspeccionarlo. No escribe esas
+  imágenes en disco.
+
+Para investigar una falla concreta se podrá grabar una corrida acotada con las
+herramientas de ROS 2. La grabación permanente no debe ser el modo normal del
+robot físico por almacenamiento y privacidad.
+
+## Qué puede observar Lucas
+
+El tablero muestra:
+
+1. el video vivo completo;
+2. el último cuadro que realmente analizó el detector, con cajas y confianza;
+3. la imagen exacta enviada al modelo remoto;
+4. el nombre del modelo y el tiempo de la llamada;
+5. el texto literal que devolvió, sin resumirlo ni corregirlo;
+6. el dato estructurado que aceptó el validador antes de que el robot actuara;
+7. qué paso de la misión está activo, qué decisión se tomó y con qué evidencia.
+
+Grounding DINO publica un evento propio antes de salir por HTTP y lo actualiza
+con éxito o falla al terminar. El evento enlaza el JPEG publicado en
+`/g1/model_input/compressed`; ambos usan la fecha original de adquisición de
+la cámara. Así una respuesta perdida no borra qué cuadro se intentó enviar.
+
+Esto permite distinguir cuatro casos diferentes: el objeto no entró en la
+cámara, entró pero el detector no lo reconoció, fue reconocido pero la tarea
+no reaccionó, o falló el modelo remoto. También deja visible una quinta falla:
+que el texto del modelo sea correcto pero nuestro validador lo interprete mal.
+
+Las revisiones generales usan detalle bajo para limitar demora y costo. El
+reloj usa detalle alto porque sus dígitos son pequeños; es la recomendación
+oficial para lectura de texto y objetos pequeños. No se envía una imagen al
+revisar navegación, guardado de `home` ni decisiones puramente numéricas.
+
+## Coincidencia con los flujos oficiales
+
+| Parte | Referencia | Estado local |
+|---|---|---|
+| Cámara G1 simulada | Unitree: 7,6 mm, apertura 20 mm, 640×480, recta | mismos valores principales; montaje sobre nuestro `head_link` y 3 Hz son adaptaciones que deben medirse |
+| Detección | NVIDIA Isaac ROS ofrece RT-DETR y publica cajas estándar de ROS 2 | mismo modelo conceptual y mismo tipo de mensaje |
+| Búsqueda de categorías nuevas | NVIDIA ofrece Grounding DINO con una descripción escrita y recomienda usarlo de forma intercalada por su costo | integrado a pedido en el servidor; no corre dentro del control |
+| Ejecución en la VM | Isaac ROS actual requiere una GPU más nueva que la T4 | backend compatible en CPU dentro de la Jetson simulada |
+| Uso de modelo grande | procesar sólo cuando una tarea lo necesita | recorte para el reloj; un cuadro para buscar una mesa |
+| Ubicación 3D | `vision_msgs/Detection3DArray` y relaciones temporales `tf2` | la Jetson publica el punto observado en `map` con la hora del cuadro |
+
+Antes de instalar el paquete acelerado en el G1 físico habrá que fijar una
+combinación compatible entre la Jetson real, su versión de JetPack, ROS 2 e
+Isaac ROS. “Es oficial” no garantiza que cualquier versión funcione con
+cualquier Jetson.
+
+## Experimentos de cámara del 29 de julio de 2026
+
+| Cambio único | Resultado |
+|---|---|
+| cámara documentada como 20° abajo | el cálculo y la imagen probaron que miraba 20° arriba |
+| cámara recta, lente anterior de 60° | mostró suelo y horizonte, pero dejó el reloj arriba del cuadro |
+| cámara recta, lente oficial de unos 106° | reloj completo y centrado; 2/3 detecciones, todavía inestable |
+| mesa con base maciza | entró completa en cuadro, pero visualmente parecía un cajón; 0/3 |
+| base reemplazada por cuatro patas | ya parece mesa, pero a 320×240 sus partes son demasiado pequeñas; 0/3 |
+| resolución oficial 640×480 | reloj 3/3, 0/3 falsos, RTF 0,23–0,24; la mesa entró completa pero RT-DETR quedó debajo del umbral |
+| confianza cruda de RT-DETR sobre la mesa | `diningtable` fue la mejor clase, 0,574, con la caja correcta; también reveló una diferencia de nombre corregida |
+| Grounding DINO pequeño, consulta “mesa roja / mesa azul” | mesa roja correcta a 0,618; 18,9 s en los dos CPU simulados, demasiado lento para ejecutarlo continuamente a bordo |
+| Grounding DINO después de reconstruir el servidor, primer pedido | carga perezosa confirmada: dos mesas a 0,798 y 0,636; 20,2 s de inferencia y 36,4 s totales; `/health` pasó de `ready=false` a `ready=true` |
+| servidor separado, consulta genérica “mesa” | mesa roja 0,897; evita confiar en el atributo de color del modelo |
+| navegación + mesa roja + servidor | llegada a 0,115 m y 4,9°; roja 3/3, azul 0/3; 17,05 s |
+| navegación + mesa azul + servidor | llegada a 0,104 m y 5,0°; azul 3/3, roja 0/3; 16,78 s |
+| misma mesa azul, wifi malo | azul 3/3, roja 0/3; 15,62 s; cuerpo a 0,734 m y orden cero |
+| enlace cortado | falla explícita en 14,30 s; `stand` conserva el control y el cuerpo queda a 0,734 m |
+| brazos en `reposo` | las manos tapan dos esquinas grandes de la cámara |
+| brazos en `listo` | manos fuera del cuadro; pose y cuerpo aprobados; mesa azul 3/3 y caja visualmente correcta |
+| umbral RT-DETR general 0,25 | mesa visible 6/6 con confianza 0,285–0,408; pared vacía 0/5 incluso probando 0,15 |
+| barrido activo de 360° | cinco vistas, 72° entre ellas, 36,1° de superposición; roja confirmada en la cuarta vista con una sola llamada remota |
+
+Una prueba numérica no cierra la cámara hasta que Lucas confirme también que
+la imagen y las cajas tienen sentido.
+
+## De recuadro a coordenada: validado el 30 de julio de 2026
+
+Una caja 2D dice dónde aparece la mesa en la foto, no dónde está en la
+habitación. El G1 real incluye cámara de profundidad y LiDAR 3D según la ficha
+de Unitree. El flujo transferible implementado es:
+
+1. publicar color, profundidad y calibración de la misma cámara;
+2. medir la distancia sólo en los píxeles rojos o azules del recuadro;
+3. transformar ese punto al mapa usando la pose histórica del sensor;
+4. publicar una `Detection3DArray` estándar en `/g1/table_detections_3d`.
+
+Isaac Lab ofrece `distance_to_image_plane`, calibración y pose de cámara. Su
+opción `update_latest_camera_pose` está desactivada por defecto por rendimiento;
+encenderla mantuvo RTF 0,23–0,24. No se usa la coordenada interna del objeto.
+
+| Prueba | Punto medido | Referencia física |
+|---|---|---|
+| mesa roja | `(3,63; 2,45; 0,52)` m | cayó dentro de su superficie |
+| mesa azul | `(3,62; -2,53; 0,52)` m | cayó dentro de su superficie |
+| nodo permanente, azul | `(3,63; -2,65; 0,52)` m, confianza 0,923 | coincidió con el verificador independiente |
+
+El punto representa la superficie vista, no el centro completo de la mesa.
+
+## Encontrar el reloj sin conocer su coordenada: validado de punta a punta el 2 de agosto de 2026
+
+El perfil `deployment_rehearsal` ya no recibe la posición del reloj. La
+capacidad `find_clock` busca con giros de Nav2 y localiza cada candidato usando
+el mismo contrato transferible de color, profundidad, calibración y
+transformaciones fechadas. Rechaza alturas imposibles, exige dos imágenes
+distintas coherentes dentro de 20 cm y calcula una pose de observación a 1,2 m
+del lado desde el que realmente fue visto.
+
+Quedó medido:
+
+| Prueba | Resultado |
+|---|---|
+| robot mirando al reloj | tres muestras, 6 mm de dispersión y 10,7 cm de error respecto de la escena |
+| búsqueda activa | dos vistas, dos muestras y 2,1 cm de dispersión; punto `(0,13; 2,46; 1,553)` m |
+| Grounding DINO sobre el cuadro real de llegada | reloj correcto, confianza 0,916; 25,14 s de inferencia y 43,42 s totales en el servidor simulado |
+| navegación al punto medido | Nav2 terminó a 5,9 cm, pero la comprobación visual inmediata falló y apareció más tarde |
+| repetición completa tras corregir el reinicio | reloj `(0,15; 2,43; 1,556)` m con 0,905; navegación terminada; cuadro nuevo confirmado con 0,963 y misión en `succeeded` |
+
+La primera llegada no se consideró éxito porque faltó la comprobación visual.
+La repetición exige una imagen posterior a la llegada: prueba RT-DETR y, si el
+reloj pequeño no supera su umbral, hace una sola consulta a Grounding DINO.
+Así se aprobó la cadena completa sin reutilizar la imagen de búsqueda ni una
+coordenada de la escena. La mejora del criterio de reposo se ensayó y se
+revirtió al no aislar el problema.
+
+Un A/B adicional mostró que un giro de 72° pasa tanto con la profundidad
+apagada como encendida si la localización se reinicia: el aborto anterior
+había mezclado una pose vieja con un cuerpo teletransportado por `freeze`.
+
+## Búsqueda activa validada el 30 de julio de 2026
+
+La búsqueda usa la lente realmente configurada, de 108,1° horizontales. El
+patrón mínimo con al menos 30° de superposición son cinco vistas separadas
+72°; la superposición efectiva queda en 36,1°. Cada giro usa la Action
+estándar `nav2_msgs/Spin`, por lo que tiene progreso, plazo y cancelación.
+
+La corrida completa guardó el inicio, llegó al reloj, lo confirmó, leyó
+`09:00`, eligió la mesa roja y la encontró en la cuarta vista. Grounding DINO
+dio 0,819 y profundidad ubicó la superficie en `(3,674; 2,370; 0,671)` m.
+Hubo un candidato local y una sola consulta remota. El cuerpo terminó en
+`STAND`; el barrido desplazó su base 0,171 m.
+
+La interfaz ya usa el comportamiento `Spin` y el mapa local de colisiones de
+Nav2. La nube cruda sí contiene puntos del torso y todavía no puede conectarse
+a la barrera final, pero el A/B no demostró que cause el aborto de `Spin`. El
+fallo reproducible fue conservar misión y localización después de devolver el
+cuerpo al origen; `freeze` ahora descarta ambos estados.
+
+El umbral 0,70 mostrado en un flujo de manipulación de NVIDIA no se copió:
+corresponde a otro modelo especializado. Para nuestro checkpoint general,
+seis cuadros reales de mesa dieron 0,285–0,408 y cinco cuadros de pared no
+produjeron mesas ni siquiera a 0,15. Se fijó 0,25 porque conservó 6/6 positivos
+y 0/5 falsos en ese control. Es una calibración local medida, no un valor
+“oficial”.
+
+## De superficie a preaproximación: validado el 30 de julio de 2026
+
+El flujo estándar de Nav2 Docking no navega directamente al contacto. Primero
+calcula una pose de espera que todavía deja el objetivo visible, navega hasta
+ella, vuelve a detectar y recién después entra en un lazo de control visual
+que actualiza el objetivo continuamente.
+
+Nuestra adaptación implementa las dos etapas con contratos separados. La
+profundidad entrega un punto de la parte visible de la mesa, no su centro ni
+su orientación completa. La base primero se coloca sobre la línea
+robot–punto a 2,2 m y exige una detección nueva. Luego `DockRobot` sigue las
+mediciones locales y conserva 0,70 m desde esa superficie visible.
+
+La distancia no se copió de Nav2: se midió con esta cámara. A 0,9 m, una prueba
+terminó a 0,543 m y otras perdieron la mesa del cuadro. En la validación
+integral, la nueva etapa:
+
+- llegó a la pose gruesa con 0,098 m de error;
+- volvió a ubicar la superficie a 1,968 m y confianza 0,94;
+- conservó 0,737 m de altura y terminó en `STAND`;
+- preparó los brazos con 0,0254 rad de error máximo;
+- la alineación roja terminó a 0,016 m y 1,58°;
+- la azul se estancó una vez y el reintento idéntico terminó a 0,002 m y
+  0,25°.
+
+Esto coincide con la separación oficial entre llegada gruesa y control visual
+refinado. Usa la Action `DockRobot`, filtro 0,1, máximo 0,15 m/s y un único
+reintento medido. No es el servidor completo de Nav2 ni una alineación de
+agarre: el navegador actual todavía no tiene mapa local de obstáculos.
+
+### Corrección del contrato de alineación, 31 de julio de 2026
+
+La primera misión integral reveló que la afirmación anterior era demasiado
+amplia. La mesa roja fue ubicada y confirmada varias veces, el objeto apareció
+cada unos 2,2 s, pero después de preparar los brazos RT-DETR dejó de publicar
+la clase `diningtable`. El alineador abortó dos veces sin siquiera empezar a
+corregir la base porque exigía una caja nueva de mesa. No fallaron la cámara,
+la profundidad ni la búsqueda remota: falló esa clasificación local concreta.
+
+El error estructural fue mezclar dos modos que Nav2 mantiene separados:
+
+- infraestructura estática: el controlador usa la pose registrada que recibió;
+- objetivo seguido por visión: una fuente especializada debe renovar su pose
+  durante todo el control y una pérdida reciente aborta la maniobra.
+
+El modo actual es explícitamente `requested_pose`. La preaproximación vuelve a
+medir la superficie elegida con Grounding DINO, profundidad y la posición de la
+cámara; `DockRobot` recibe ese punto y la corrección fina lo conserva como
+objetivo fijo. El detector general puede seguir publicando cajas, pero ya no se
+lo presenta como un seguidor continuo y no puede cancelar una alineación por
+dejar de llamar “mesa” al mismo objeto.
+
+`G1_TABLE_USE_EXTERNAL_DETECTION=true` conserva el segundo modo para cuando
+exista un estimador de pose continuo validado. En ese modo siguen vigentes el
+filtro y el plazo de 11 s. Activarlo antes de medir su disponibilidad sería
+volver a introducir la falla. Esta separación sigue el contrato de Nav2
+Docking, pero nuestro nodo continúa siendo una adaptación Python: todavía no
+es el servidor oficial completo ni aporta la posición y orientación del objeto
+que necesitará un agarre real.
+
+Referencias verificadas para esta decisión:
+
+- [Nav2: configuración del Docking Server](https://docs.nav2.org/configuration/packages/configuring-docking-server.html)
+  distingue `use_external_detection_pose` y la pose fija del acople;
+- [Nav2: flujo completo de docking](https://docs.nav2.org/tutorials/docs/using_docking.html)
+  explica la preaproximación, detección opcional y corrección final;
+- [NVIDIA Isaac ROS Object Detection](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html)
+  delimita RT-DETR a presencia y ubicación 2D mediante cajas.
+
+La prueba integral posterior confirmó el contrato nuevo: después de preparar
+los brazos, el objeto siguió apareciendo pero la alineación no dependió de una
+caja nueva de mesa. Usó el punto vuelto a medir `(3,695; 2,696)` m, terminó en
+71,9 s a 2,9 cm y 1,96°, con 1,32 cm/s de velocidad lineal y 0,013 rad/s de
+giro en la última muestra. Informó `requested_pose`, cero refinamientos
+visuales y cero reintentos; luego la misión pudo aplicar la carga y regresar.
+
+## Del objeto visible a una posición 3D: validado el 30 de julio de 2026
+
+El flujo oficial de manipulación de NVIDIA separa dos datos que no deben
+confundirse:
+
+1. RT-DETR o Grounding DINO entrega una caja 2D del objeto;
+2. FoundationPose combina esa evidencia con color, profundidad y una malla 3D
+   para estimar la posición y orientación completas del objeto;
+3. publica `vision_msgs/Detection3DArray` para que planificación y agarre no
+   dependan del detector concreto.
+
+La VM T4 actual no ejecuta el paquete acelerado de Isaac ROS que usará la
+Jetson real. Como peldaño compatible, el mismo localizador que mide mesas ahora
+puede medir la **superficie visible** dentro de una caja RT-DETR y publicar
+`/g1/object_detections_3d`. El tamaño queda en cero y la orientación identidad:
+son marcas explícitas de que todavía no existe una pose completa de agarre.
+`find_object` sólo acepta ese punto si está a menos de 0,75 m del punto de la
+mesa elegida.
+
+El objeto simulado actual es un cilindro liso sin cuello. En seis cuadros
+consecutivos desde la preaproximación, RT-DETR colocó la misma caja y lo llamó
+`cup` con 0,49–0,62, `vase` con 0,21–0,26 y `bottle` con 0,15–0,17. En cinco
+cuadros sin objeto, `cup` quedó en 0,03–0,04. Por eso el contrato interno se
+llama `transport_object` y acepta `cup` o `bottle`; el umbral general permaneció
+en 0,25 y dio 6/6 positivos y 0/5 falsos en este control.
+
+Desde la pose de observación roja, tres cuadros independientes produjeron:
+
+| Confianza | Punto medido `(x, y, z)` m | Error horizontal | Error vertical |
+|---:|---|---:|---:|
+| 0,655 | `(3,968; 2,604; 0,885)` | 3,2 cm | 5,5 mm |
+| 0,657 | `(3,968; 2,604; 0,884)` | 3,2 cm | 5,6 mm |
+| 0,716 | `(3,968; 2,604; 0,884)` | 3,2 cm | 5,6 mm |
+
+La referencia física era `(4,0; 2,6; 0,89)` m y sólo la usó el verificador.
+El robot terminó a 0,739 m de altura y con `STAND` como único dueño. Falta
+ejecutar la misión integral con el nuevo paso `find_object`; la medición y su
+asociación geométrica ya están cerradas.
+
+Esto habilita búsqueda y aproximación. No habilita el agarre: para eso se
+integrará FoundationPose o la policy/VLA de manipulación prevista, con la malla
+del objeto, y se medirá su pose completa.
+
+Referencias oficiales:
+
+- Unitree G1, sensores: https://www.unitree.com/mobile/g1/
+- Cámara y profundidad de Isaac Lab:
+  https://isaac-sim.github.io/IsaacLab/develop/source/overview/core-concepts/sensors/camera.html
+- Conversión oficial a puntos 3D:
+  https://isaac-sim.github.io/IsaacLab/develop/source/how-to/save_camera_output.html
+- Transformaciones temporales de ROS 2:
+  https://docs.ros.org/en/jazzy/p/tf2/generated/doxygen/html/index.html
+- Sincronización por fecha y QoS de ROS 2:
+  https://docs.ros.org/en/jazzy/p/message_filters/doc/Tutorials/Approximate-Synchronizer-Cpp.html
+- Mensaje 3D estándar de ROS 2:
+  https://docs.ros.org/en/jazzy/p/vision_msgs/msg/Detection3D.html
+- Detección de objetos de Isaac ROS:
+  https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_object_detection/index.html
+- Action de giro de Nav2:
+  https://api.nav2.org/actions/rolling/spin.html
+- Configuración del servidor de comportamientos de Nav2:
+  https://docs.nav2.org/configuration/packages/configuring-behavior-server.html
+- Flujo de preaproximación y refinamiento visual de Nav2 Docking:
+  https://docs.nav2.org/tutorials/docs/using_docking.html
+- Configuración y tolerancias de Nav2 Docking:
+  https://docs.nav2.org/configuration/packages/configuring-docking-server.html
+- Flujo oficial de manipulación de NVIDIA:
+  https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_manipulation/packages/isaac_ros_manipulation_bringup/index.html
+- FoundationPose y su salida `Detection3DArray`:
+  https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_pose_estimation/isaac_ros_foundationpose/

@@ -1,0 +1,30 @@
+diff --git a/agile/rl_env/tasks/locomotion_height/g1/velocity_height_env_cfg.py b/agile/rl_env/tasks/locomotion_height/g1/velocity_height_env_cfg.py
+index c6b4762..c3532dc 100644
+--- a/agile/rl_env/tasks/locomotion_height/g1/velocity_height_env_cfg.py
++++ b/agile/rl_env/tasks/locomotion_height/g1/velocity_height_env_cfg.py
+@@ -287,6 +287,22 @@ class ActionsCfg:
+         joint_names_exclude=unitree_g1.LEG_JOINT_NAMES,
+         joint_pos_limits={
++            # La comparación fija la parte superior para separar su movimiento
++            # aleatorio de la deriva producida por las piernas.
+             "waist_roll_joint": (-0.0, 0.0),
+             "waist_pitch_joint": (-0.0, 0.0),
+-            "waist_yaw_joint": (-math.radians(15.0), math.radians(15.0)),
++            "waist_yaw_joint": (0.0, 0.0),
++            "left_shoulder_pitch_joint": (0.0, 0.0),
++            "right_shoulder_pitch_joint": (0.0, 0.0),
++            "left_shoulder_roll_joint": (0.0, 0.0),
++            "right_shoulder_roll_joint": (0.0, 0.0),
++            "left_shoulder_yaw_joint": (0.0, 0.0),
++            "right_shoulder_yaw_joint": (0.0, 0.0),
++            "left_elbow_joint": (0.0, 0.0),
++            "right_elbow_joint": (0.0, 0.0),
++            "left_wrist_roll_joint": (0.0, 0.0),
++            "right_wrist_roll_joint": (0.0, 0.0),
++            "left_wrist_pitch_joint": (0.0, 0.0),
++            "right_wrist_pitch_joint": (0.0, 0.0),
++            "left_wrist_yaw_joint": (0.0, 0.0),
++            "right_wrist_yaw_joint": (0.0, 0.0),
+         },
+         sample_range=(0.1, 2.0),
+         velocity_profile_cfg=mdp.TrapezoidalVelocityProfileCfg(
