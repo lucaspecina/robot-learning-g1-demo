@@ -25,9 +25,14 @@
 # Se prende una vez (tablero on) y se queda vivo mientras el robot nace, se
 # cae y vuelve a arrancar — que es justo cuando uno mas necesita mirarlo.
 #
-# Para mirarlo desde tu maquina, dos ventanas:
+# Para mirarlo desde tu maquina, tres ventanas:
 #   - el tablero:  ssh -L 8080:localhost:8080 lucas@<IP>  -> http://localhost:8080
+#   - el visor:    ssh -L 8765:localhost:8765 lucas@<IP>  -> ws://localhost:8765
 #   - el robot:    cliente de Isaac apuntando a la IP de la VM
+#
+# El tablero responde "que esta haciendo la mision"; el visor responde "que
+# cree el robot del espacio". Son preguntas distintas y por eso no se
+# fusionaron en una sola pantalla.
 #
 # En Isaac, mantener la vista en Perspective: rueda para zoom, boton central
 # para desplazar, Alt + boton izquierdo para girar y F para centrar el objeto
@@ -226,6 +231,27 @@ start_mapping() {
         slam_params_file:=$D/config/slam_toolbox.yaml use_sim_time:=true \
         >> /tmp/slam_toolbox.log 2>&1; sleep 3; done"
     echo "   mapa SLAM Toolbox"
+}
+
+stop_viewer() {
+    sudo docker exec jetson pkill -f \
+        "[f]oxglove_bridge" \
+        2>/dev/null || true
+}
+
+start_viewer() {
+    # Observador puro: publica lo que ya existe y no suscribe a nadie que
+    # controle el cuerpo. Puede morirse entero sin que el robot se entere,
+    # igual que el tablero. Usa el reloj de simulación porque todo el resto
+    # del sistema lo usa; sin eso las marcas de tiempo no coinciden y las
+    # capas se dibujan desfasadas.
+    stop_viewer
+    sudo docker exec -d jetson bash -c \
+        "$ROS && while true; do \
+        ros2 launch foxglove_bridge foxglove_bridge_launch.xml \
+        port:=8765 use_sim_time:=true \
+        >> /tmp/foxglove_bridge.log 2>&1; sleep 3; done"
+    echo "   visor (puerto 8765)"
 }
 
 stop_localization_stack() {
@@ -583,6 +609,51 @@ tablero)
     esac
     ;;
 
+viewer)
+    # El visor muestra las capas que el tablero no dibuja: mapa guardado,
+    # mapa de costos vivo, barrido del láser, nube de partículas, ruta y
+    # huella. Desde ahí también se puede marcar una pose objetivo, que entra
+    # por la Action de Nav2 sin pasar por el agente: sirve para probar
+    # navegación aislada del planificador remoto.
+    case "${2:-on}" in
+    on)
+        start_viewer
+        sleep 3
+        echo "visor prendido. Desde tu maquina:"
+        echo "  ssh -L 8765:localhost:8765 lucas@<IP>"
+        echo "  y conectar un cliente Foxglove a ws://localhost:8765"
+        ;;
+    off)
+        stop_viewer
+        for _ in 1 2 3 4 5; do
+            sudo docker exec jetson pgrep -f foxglove_bridge >/dev/null 2>&1 \
+                || break
+            sleep 1
+        done
+        echo "visor apagado"
+        ;;
+    status)
+        # Que el proceso exista no prueba que esté sirviendo: el puerto es la
+        # única evidencia de que un cliente podría conectarse.
+        if sudo docker exec jetson pgrep -f foxglove_bridge >/dev/null 2>&1; then
+            echo "proceso: vivo"
+        else
+            echo "proceso: NO corre"
+        fi
+        if sudo docker exec jetson bash -c \
+            "ss -ltn 2>/dev/null | grep -q ':8765'"; then
+            echo "puerto 8765: escuchando"
+        else
+            echo "puerto 8765: cerrado"
+        fi
+        ;;
+    *)
+        echo "uso: bash run_demo.sh viewer {on|off|status}"
+        exit 1
+        ;;
+    esac
+    ;;
+
 check)
     # La escalera de pruebas, de lo mas simple a lo mas complejo.
     if [ "${2:-}" = "safety" ]; then
@@ -847,5 +918,5 @@ down)
     echo "misión detenida (robot, autoridad, stand_hold y tablero siguen)"
     ;;
 
-*) echo "uso: $0 {up|layers|map [on|off|check|status]|localize [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [safety|safety-wall|authority|stand|walk|turn|goto|clock|home|obstacle|all]|mission [texto]|kill|tablero [on|off]|status|down}"; exit 1;;
+*) echo "uso: $0 {up|layers|map [on|off|check|status]|localize [on|off|check|status]|start|freeze|clock|read-clock [HH:MM]|table [red|blue]|search-table [red|blue]|pose [reposo|listo|transporte]|payload [attach KG|detach]|check [safety|safety-wall|authority|stand|walk|turn|goto|clock|home|obstacle|all]|mission [texto]|kill|tablero [on|off]|viewer [on|off|status]|status|down}"; exit 1;;
 esac

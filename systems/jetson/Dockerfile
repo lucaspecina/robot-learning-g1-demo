@@ -57,6 +57,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-nav2-bringup \
     && rm -rf /var/lib/apt/lists/*
 
+# Puente para observar mapa, barrido, partículas, ruta y costos desde afuera.
+# Se eligió sobre RViz porque la VM es headless: este publica por websocket y
+# entra por el mismo túnel SSH que el tablero, en vez de exigir reenvío de
+# ventanas X. Es un observador más, fuera de todo lazo de control.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-foxglove-bridge \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # El entrypoint de la imagen base ya hace `source /opt/ros/jazzy/setup.bash`
