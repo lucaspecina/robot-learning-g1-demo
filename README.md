@@ -21,6 +21,7 @@ El código que se desarrolla acá debe correr en el robot real sin cambios.
 Contexto de fondo: [docs/00_mapa_simuladores.md](docs/00_mapa_simuladores.md),
 [docs/01_unitree_ecosistema_datos.md](docs/01_unitree_ecosistema_datos.md),
 [docs/02_arquitectura_inteligencia.md](docs/02_arquitectura_inteligencia.md),
+[docs/03_arquitectura_inteligencia_humanoide.md](docs/03_arquitectura_inteligencia_humanoide.md),
 [docs/GLOSARIO.md](docs/GLOSARIO.md).
 
 Estado y próximo tramo del G1:
