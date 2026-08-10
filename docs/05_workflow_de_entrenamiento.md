@@ -18,28 +18,59 @@ medible, después se cambia la tarea.
 
 ---
 
-## 1. AGILE y GR00T no compiten: se apilan
+## 1. AGILE y GR00T no compiten
 
-Esta es la confusión más natural y conviene sacarla de encima primero. Los dos
-usan Isaac, los dos terminan en el robot, y sin embargo **entrenan cosas
-distintas de maneras distintas**.
+Es la confusión más natural y conviene sacarla de encima primero. Y hay que
+decirla con precisión, porque la versión corta —*"AGILE entrena las piernas"*—
+**es incorrecta**.
+
+### Qué entrena AGILE, según su propia tabla de tareas
+
+| Tarea | Qué articulaciones controla |
+|---|---|
+| Locomoción | **solo piernas** (12) |
+| Locomoción con altura | solo piernas (12) |
+| Pararse desde el suelo | **todas** |
+| Imitación de movimiento | **todas** |
+| **Agarrar y colocar** | **solo cuerpo superior** |
+
+**AGILE es el taller de entrenar por refuerzo, no el taller de las piernas.**
+Entrena lo que se defina en la configuración de la tarea, y **también entrena
+manipulación**: en esa última tarea, textual del paper, *"una política de
+refuerzo controla solamente el brazo derecho y la cintura"*.
+
+Lo que sí es específico de la tarea de locomoción es el patrón desacoplado:
+*"la política de refuerzo controla exclusivamente las articulaciones de las
+piernas, mientras las de cintura y brazos se aleatorizan durante el
+entrenamiento"* — deliberadamente, para que en despliegue otro controlador
+(cinemática inversa o un VLA) se haga cargo del torso y los brazos.
+
+### La diferencia real: cómo aprende cada uno
 
 | | **AGILE** | **Flujo de GR00T** |
 |---|---|---|
-| Qué entrena | piernas y equilibrio | brazos y manos |
-| Cómo aprende | probando millones de veces, guiado por una recompensa | copiando demostraciones humanas |
+| Cómo aprende | **probando**, guiado por una recompensa | **copiando** demostraciones |
 | Qué datos pide | ninguno: sólo simulación | demostraciones grabadas |
 | Qué recibe el modelo | el estado del cuerpo | imagen + instrucción en texto |
-| Qué devuelve | ángulos de las doce articulaciones de las piernas | movimientos de brazo |
-| Para nosotros | **ya está hecho, se consume** | **es lo que vamos a entrenar** |
+| Para nosotros | la policy de locomoción **ya está hecha, se consume** | **es lo que vamos a entrenar** |
 
-**Y se apilan.** En el flujo de GR00T hay un paso llamado *"teleoperación y
-control de cuerpo completo"*: ese control de cuerpo completo **es AGILE,
-corriendo congelado por debajo**. Mientras el operador mueve los brazos, las
-piernas se sostienen solas y compensan el peso desplazado.
+### Y se apilan
 
-Es la arquitectura desacoplada del paper de AGILE: **la locomoción se congela y
-se usa como base; encima se controla la parte superior.**
+En el flujo de GR00T hay un paso llamado *"teleoperación y control de cuerpo
+completo"*: ese control de cuerpo completo **es la policy de locomoción de
+AGILE, corriendo congelada por debajo**. Mientras el operador mueve los brazos,
+las piernas se sostienen solas y compensan el peso desplazado.
+
+### Hay un tercer camino que conviene no perder de vista
+
+La tarea 5 de AGILE **es un camino de entrenamiento de manipulación completo y
+sin teleoperar**: se entrena por refuerzo un experto que controla brazo y
+cintura usando información privilegiada, ese experto **genera cien
+demostraciones solo**, y con eso se afina el VLA.
+
+O sea que para entrenar manipulación hay dos rutas, y las dos son de NVIDIA:
+**teleoperar y copiar**, o **entrenar un experto y destilarlo**. La segunda no
+necesita casco ni operador humano.
 
 Detalle del taller de AGILE en
 [`../g1/AGILE_TRAINING_REFERENCE.md`](../g1/AGILE_TRAINING_REFERENCE.md).
@@ -93,19 +124,34 @@ Las piezas sueltas que fuimos encontrando son estaciones de este mismo camino:
 
 ---
 
-## 4. Lo que nos falta para empezar
+## 4. Lo que nos falta para empezar, y la decisión de hardware
 
-Una sola cosa: **una placa de video que aguante el paso de teleoperación.**
+Una sola cosa: **una placa de video que aguante el paso de teleoperación** —si
+elegimos la ruta de teleoperar. La ruta del experto por refuerzo no la necesita.
 
-Todo lo demás lo tenemos o se alquila por horas. El estado de esa búsqueda está
-en [`04_generacion_de_datos.md`](04_generacion_de_datos.md); el resumen es que
-CloudXR exige generación Ada o Blackwell, y que hay tres caminos posibles —una
-máquina física local, AWS con L40S, o Azure con RTX PRO 6000 Blackwell en vista
-previa— pero los dos de nube quedan lejos de Argentina y arrastran latencia.
+CloudXR exige generación Ada o Blackwell. Caminos posibles: una máquina física
+local, AWS con L40S, o Azure con RTX PRO 6000 Blackwell en vista previa; los dos
+de nube quedan lejos de Argentina y arrastran latencia. Detalle en
+[`04_generacion_de_datos.md`](04_generacion_de_datos.md).
 
 **Con el robot real ese problema desaparece**, porque teleoperar hardware no
 exige renderizar un mundo 3D: se transmite el video de las cámaras y todo ocurre
 en la misma red local.
+
+### Dos necesidades de hardware que no hay que confundir
+
+| | **La máquina donde corre Isaac** | **La máquina que dibuja para el casco** |
+|---|---|---|
+| Para qué | desarrollar navegación, percepción, el agente | teleoperar contra la simulación |
+| Qué la limita hoy | procesador, memoria, y que la T4 deforma el barrido del LiDAR | generación de la placa |
+| Qué la resuelve | una A10 (Ampere) alcanza | **hace falta Ada o Blackwell; la A10 no sirve** |
+
+**Y el detalle que ordena la decisión: en el flujo de NVIDIA esas dos máquinas
+son la misma**, porque se teleopera contra la simulación. Así que subir a A10
+mejora el trabajo de navegación pero **no habilita el entrenamiento**, y haría
+falta otra máquina después.
+
+No se puede decidir el hardware sin decidir antes qué se hace primero.
 
 ---
 
