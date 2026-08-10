@@ -53,6 +53,12 @@
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: false
+      # DWB trae 0,1 s por defecto y con esta VM saturada la corrección
+      # map->odom de SLAM llega justo por encima de ese umbral: una llegada a
+      # 7 cm del objetivo abortó con "Transform data too old" por 100 ms de
+      # atraso. Los mapas ya usan 0,3 s; esto alinea al controlador con ellos
+      # y deja margen. No cambia velocidades ni tolerancias de llegada.
+      transform_tolerance: 0.5
       min_vel_x: 0.0
       min_vel_y: 0.0
       max_vel_x: 0.30
