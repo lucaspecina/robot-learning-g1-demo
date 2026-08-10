@@ -22,6 +22,8 @@ Contexto de fondo: [docs/00_mapa_simuladores.md](docs/00_mapa_simuladores.md),
 [docs/01_unitree_ecosistema_datos.md](docs/01_unitree_ecosistema_datos.md),
 [docs/02_arquitectura_inteligencia.md](docs/02_arquitectura_inteligencia.md),
 [docs/03_arquitectura_inteligencia_humanoide.md](docs/03_arquitectura_inteligencia_humanoide.md),
+[docs/04_generacion_de_datos.md](docs/04_generacion_de_datos.md),
+[docs/05_workflow_de_entrenamiento.md](docs/05_workflow_de_entrenamiento.md),
 [docs/GLOSARIO.md](docs/GLOSARIO.md).
 
 Estado y próximo tramo del G1:
