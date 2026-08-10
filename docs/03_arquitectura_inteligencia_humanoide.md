@@ -351,15 +351,24 @@ pierde y cómo se disipa el calor.**
 
 ### 5.2 El camino, de menor a mayor riesgo
 
-**Uno.** Cambiar el modelo de razonamiento por `gemini-robotics-er-2-preview`.
-Es reemplazar una pieza dentro de la arquitectura actual, no rediseñarla. Se
-gana señalamiento espacial, detección de éxito y fracaso, y **lectura de
-instrumentos industriales al 93 %**, que en una refinería es una capacidad de
-producto y no una demo. Reversible en un día.
+> **Decisión del 10-ago-2026 que corrige lo que decía este documento.** La
+> versión anterior recomendaba cambiar el modelo de razonamiento por el de
+> Google. **Se descartó**: Humandroid trabaja dentro del ecosistema NVIDIA y
+> meter una pieza de Google fragmenta el stack. **Nos quedamos en NVIDIA**:
+> Isaac para simular, Cosmos para razonar y multiplicar datos, GR00T para
+> manipular, AGILE para entrenar por refuerzo.
 
-**Dos.** Tratar la **detección de éxito** como una capacidad de primera clase.
+**Uno.** Tratar la **detección de éxito** como una capacidad de primera clase.
 Es lo que convierte un catálogo de habilidades en un agente que se recupera de
-sus errores.
+sus errores. El candidato dentro del stack de NVIDIA es **Cosmos Reason como
+verificador visual** — mirar el video y responder si el paso salió bien.
+Disponible como API hospedada, sin necesidad de placa propia. Ojo: **no es un
+planificador de misiones**, no hay ejemplos oficiales de ese uso; para armar el
+plan sigue sirviendo un modelo de lenguaje general.
+
+**Dos.** Conservar el modelo de lenguaje actual para la planificación. Es la
+pieza más barata de cambiar más adelante si el catálogo de capacidades se
+mantiene como interfaz estable.
 
 **Tres.** **Una sola** habilidad de manipulación aprendida. La más simple y
 repetitiva del almacén. Recolectar las 200 demostraciones, afinar GR00T N1.7 en

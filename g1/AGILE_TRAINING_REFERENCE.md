@@ -20,6 +20,34 @@ ajuste fino del balance), este documento es el mapa para no empezar de cero.
 
 AGILE significa **"A Generic Isaac-Lab based Engine"**.
 
+## Aclaración importante: AGILE no es "el taller de las piernas"
+
+Es el error en el que caímos y conviene dejarlo escrito. **AGILE entrena lo que
+se defina en la configuración de la tarea.** Su propia tabla de tareas lo
+muestra:
+
+| Tarea | Qué articulaciones controla |
+|---|---|
+| Locomoción | **solo piernas** (12 en el G1) |
+| Locomoción con altura | solo piernas (12) |
+| Pararse desde el suelo | **todas** |
+| Imitación de movimiento | **todas** |
+| **Agarrar y colocar** | **solo cuerpo superior** |
+
+En esa última, textual del paper: *"una política de refuerzo controla solamente
+el brazo derecho y la cintura"*.
+
+Lo que sí es específico de la tarea de locomoción es el patrón desacoplado:
+*"la política de refuerzo controla exclusivamente las articulaciones de las
+piernas, mientras las de cintura y brazos se aleatorizan durante el
+entrenamiento"* — a propósito, para que en despliegue otro controlador se haga
+cargo de arriba.
+
+**Consecuencia práctica:** AGILE ofrece un camino de entrenamiento de
+manipulación **sin teleoperar** — el de su tarea 5, donde un experto por
+refuerzo genera las cien demostraciones solo. Ver
+[`../docs/05_workflow_de_entrenamiento.md`](../docs/05_workflow_de_entrenamiento.md).
+
 ## Qué es AGILE y qué no es
 
 AGILE es un **flujo de ingeniería para fabricar y validar programas de control

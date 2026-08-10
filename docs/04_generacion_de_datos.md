@@ -13,9 +13,11 @@
    modelos de video. Las tres están documentadas y las tres se pueden combinar.
 2. **Con diez demostraciones alcanza para empezar.** Isaac Lab Mimic las
    multiplica a cientos. Ese número —diez— es el que hay que retener.
-3. **El casco no se puede usar en Azure. Con ninguna VM.** CloudXR exige placas
-   de generación Ada o Blackwell, y la familia de visualización de Azure llega
-   hasta Ampere. Es un bloqueo de hardware, no de configuración.
+3. **El casco exige una placa de generación Ada o Blackwell.** La A10 de Azure
+   es Ampere y no está en la lista de CloudXR. Sí califican la L40S de AWS y la
+   RTX PRO 6000 Blackwell que Azure tiene **en vista previa**, pero las dos
+   quedan lejos de Argentina y arrastran latencia. Con el robot real el problema
+   desaparece.
 4. **Pero hay un experimento completo que sí corre hoy en la T4**, sin casco y
    sin cámaras, y enseña el ciclo entero.
 5. **Cosmos Reason no es un planificador de misiones.** Es un verificador visual.
@@ -126,13 +128,27 @@ simulador, renderiza y transmite al casco. Y sus requisitos son duros:
 
 **Nuestra T4 es Turing, dos generaciones por debajo del mínimo.**
 
-Y el dato que cierra la puerta: **la familia de visualización de Azure llega
-hasta A10, que es Ampere.** No hay ninguna VM pública de Azure con placa Ada o
-Blackwell. Las familias de cómputo con A100 o H100 tampoco sirven, porque Isaac
-Sim las excluye explícitamente por no tener núcleos de trazado de rayos.
+### 3.3 Qué placas de nube sí califican, y dónde están
 
-**Conclusión: el camino del casco no se desbloquea cambiando de VM. Se
-desbloquea con una máquina física con placa RTX moderna.**
+Verificado con el catálogo de Azure y la lista oficial de CloudXR, que acepta
+RTX 4090, 5080, 5090, RTX 5000/6000 (Ada), RTX 5000/6000 Pro (Blackwell), **L40
+y L40S**:
+
+| Opción | ¿Califica? | Dónde | Distancia desde Argentina |
+|---|---|---|---|
+| Azure, **A10** (NVads A10 v5) | **no** — es Ampere, no está en la lista | East US 2 y muchas más | cerca |
+| Azure, **RTX PRO 6000 Blackwell** (`NC..._RTXPRO6000BSE_v6`) | **sí** | **sólo West US 2 y Sudeste Asiático**, en vista previa | lejos |
+| AWS, **L40S** (instancias G6e) | **sí**, y NVIDIA soporta Isaac Sim ahí oficialmente | Virginia, Ohio, Oregón, Tokio, Fráncfort… **no en San Pablo** | lejos |
+| Máquina física local | sí, con RTX 4090/5090 o RTX 6000 Ada/Blackwell | acá | **latencia de wifi local** |
+
+**Conclusión corregida: la nube sí puede, técnicamente.** Lo que la complica no
+es la tecnología sino la geografía: desde Buenos Aires, Virginia son unos 120 a
+140 milisegundos de ida y vuelta y Oregón todavía más. Para realidad virtual eso
+es mucho — el giro de cabeza se disimula, pero **el movimiento de las manos no**,
+y con lag se graban demostraciones malas.
+
+Y hay un dato adicional: los tamaños de Azure con RTX PRO 6000 arrancan en 24
+núcleos, así que no hay opción modesta.
 
 ### 3.3 Un atajo útil, con letra chica
 
@@ -244,14 +260,24 @@ Resumiendo las tres necesidades, que son distintas:
 subir a A10 —que es Ampere y destraba además la compensación de movimiento del
 LiDAR— y sobre todo salir de los 28 GB de RAM.
 
-**Para teleoperar con el casco y generar datos con cámaras**: hace falta una
-**máquina física con placa RTX Ada o Blackwell**. Azure no lo ofrece.
+**Para teleoperar con el casco y generar datos con cámaras**: hace falta placa
+**Ada o Blackwell**. La A10 no sirve. Califican la RTX PRO 6000 de Azure en
+vista previa, la L40S de AWS, o una máquina física local — y sólo la última
+evita el problema de latencia.
 
 **Para afinar el modelo**: 48 GB de memoria de video. Se alquila por horas
 cuando haga falta; no se necesita tener prendido.
 
 Son tres máquinas distintas, o una muy grande. Conviene decidirlo con esa
 separación en la cabeza.
+
+**Y una advertencia importante**: en el flujo de NVIDIA se teleopera **contra la
+simulación**, así que la primera y la segunda **son la misma máquina**. Subir a
+A10 mejora el trabajo de navegación pero no habilita el entrenamiento por
+teleoperación.
+
+**La ruta que esquiva todo esto**: entrenar por refuerzo un experto que genere
+las demostraciones solo, sin casco ni operador. Es la tarea 5 de AGILE.
 
 ## Fuentes
 

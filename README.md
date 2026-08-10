@@ -18,6 +18,10 @@ El código que se desarrolla acá debe correr en el robot real sin cambios.
 | 2 | Laboratorio cloud: Isaac Sim en Azure, ROS 2, sistemas simulados | funcionando |
 | 3 | G1: locomoción, navegación, percepción, agente, manipulación, la demo | en integración |
 
+**Dónde estamos parados y qué opciones hay abiertas:
+[docs/06_estado_y_estrategias.md](docs/06_estado_y_estrategias.md)** — el mapa
+de situación, y el documento por el que conviene empezar.
+
 Contexto de fondo: [docs/00_mapa_simuladores.md](docs/00_mapa_simuladores.md),
 [docs/01_unitree_ecosistema_datos.md](docs/01_unitree_ecosistema_datos.md),
 [docs/02_arquitectura_inteligencia.md](docs/02_arquitectura_inteligencia.md),
