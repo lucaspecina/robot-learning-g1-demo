@@ -7,14 +7,14 @@
 ## Por qué este y no otro
 
 Porque es de NVIDIA, está escrito **para el robot exacto que vamos a comprar**,
-usa las mismas piezas que ya tenemos instaladas, y **Humandroid también trabaja
+usa las mismas piezas que ya tenemos instaladas, y **el equipo socio también trabaja
 dentro del ecosistema NVIDIA**. Seguir el mismo camino nos da vocabulario común
 con ellos y evita fragmentar el stack.
 
 La tarea que propone es deliberadamente simple: **el G1, parado en equilibrio
-activo, agarra una manzana de una mesa y la deja en un plato.** No es el almacén
-ni la refinería, y está bien que así sea: primero se recorre el molde con algo
-medible, después se cambia la tarea.
+activo, agarra una manzana de una mesa y la deja en un plato.** No es la tarea
+final del despliegue, y está bien que así sea: primero se recorre el molde con
+algo medible, después se cambia la tarea.
 
 ---
 
@@ -93,7 +93,7 @@ Son **dos recorridos que se espejan**, de tres a seis horas cada uno.
 | **6. Evaluar** | ponerlo a hacerla solo, muchas veces, desde posiciones distintas | **la tasa de éxito: el resultado real** |
 
 El paso 2 parece de relleno y no lo es: es donde se aprende a **definir** una
-tarea, que es lo que hará falta para inventar una del almacén.
+tarea, que es lo que hará falta para inventar una del sitio real.
 
 ### 2.2 Con el robot real
 
@@ -144,7 +144,14 @@ en la misma red local.
 |---|---|---|
 | Para qué | desarrollar navegación, percepción, el agente | teleoperar contra la simulación |
 | Qué la limita hoy | procesador, memoria, y que la T4 deforma el barrido del LiDAR | generación de la placa |
-| Qué la resuelve | una A10 (Ampere) alcanza | **hace falta Ada o Blackwell; la A10 no sirve** |
+| Qué la resuelve | una A10 (Ampere) alcanza | **RTX PRO 6000 o RTX 5090 o superior; la A10 no sirve** |
+
+> **Verificado el 13-ago-2026** contra la
+> [documentación de CloudXR en Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/source/how-to/cloudxr_teleoperation.html),
+> que pide textualmente *"1x RTX PRO 6000 (o equivalente ej. 1x RTX 5090) o
+> superior"*, más CPU de 16 núcleos clase Threadripper Pro y 64 GB de RAM, y
+> sostener 45 FPS con física a 120 Hz. **Una RTX 5080 simula bien pero no llega
+> a este requisito.**
 
 **Y el detalle que ordena la decisión: en el flujo de NVIDIA esas dos máquinas
 son la misma**, porque se teleopera contra la simulación. Así que subir a A10
@@ -158,11 +165,11 @@ No se puede decidir el hardware sin decidir antes qué se hace primero.
 ## 5. Cómo lo vamos a recorrer
 
 1. **Hacer el flujo de simulación tal cual, con la manzana y el plato.** Sin
-   cambiar la tarea, sin usar el almacén, sin optimizar nada. Aunque el
+   cambiar la tarea, sin usar el sitio real, sin optimizar nada. Aunque el
    resultado sea mediocre.
 2. **Anotar cuánto cuesta cada paso** en tiempo real, no en teoría: cuántos
    minutos por demostración, cuántas salen mal, cuánto tarda el ajuste.
-3. **Recién entonces**, aplicar el mismo molde a una tarea del almacén.
+3. **Recién entonces**, aplicar el mismo molde a una tarea del sitio real.
 
 Es la misma progresión que funcionó con navegación: primero entender el
 mecanismo en la salita de cuatro paredes, después discutir de igual a igual.

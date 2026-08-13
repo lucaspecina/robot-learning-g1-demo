@@ -41,9 +41,9 @@ Fuente: [guía de desarrollo del G1 de Weston Robot](https://docs.westonrobot.co
 distribuidor oficial. Advierten explícitamente que no se debe reinstalar el
 sistema del módulo Orin con imágenes de terceros: hay que usar el de Unitree.
 
-Esto explica y confirma lo que vimos en el código de Humandroid: su nodo de
-odometría se suscribe a `/lf/odommodestate`, o sea consume lo que publica la
-computadora cerrada en vez de estimar movimiento por su cuenta.
+Esto explica y confirma un patrón que se repite en las integraciones sobre este
+robot: el nodo de odometría se suscribe a `/lf/odommodestate`, o sea consume lo
+que publica la computadora cerrada en vez de estimar movimiento por su cuenta.
 
 La página oficial de Unitree es deliberadamente vaga sobre el módulo — dice
 “CPU de 8 núcleos” y “varias marcas y modelos disponibles, como Orin NX”. Los
@@ -82,11 +82,20 @@ Unitree*. Si el Orin NX alcanzara, no pondrían otra computadora encima.
 | Memoria | 16 GB | **128 GB** |
 | Ancho de banda | 102,4 GB/s | 273 GB/s |
 | Potencia | 10–25 W | **40–130 W** |
-| Precio del kit | ~500–700 USD | **3.499 USD** |
+| Precio del kit | ~500–700 USD | **5.499 USD** |
 
-La mochila que la monta en el G1 se vende por unos **15.200 USD** en
-revendedores y estaba **agotada** al consultar. **No pudimos confirmar precio ni
-disponibilidad en fuente primaria de Unitree.**
+> **Actualizado el 13-ago-2026.** NVIDIA subió los precios de Jetson el
+> 22-jul-2026, hasta un **+101%**: el devkit de AGX Thor pasó de 3.499 a
+> **5.499 USD**, y el módulo T5000 suelto de 2.999 a 4.999.
+
+El kit mide **243 × 112 × 57 mm** e incluye el módulo con disipador, portadora,
+SSD de 1 TB, WiFi 6E y fuente de 140 W. **El módulo suelto es de 100 × 87 mm** y
+no se puede usar solo: necesita una placa portadora.
+
+La placa de expansión que lo monta sobre el G1 **sí existe como producto** —
+*NVIDIA Jetson AGX Thor Backplate Expansion for Unitree G1*, unos **15.200 USD**
+en revendedores— pero estaba **agotada y sin fecha** al consultar. Los 9.700 de
+diferencia contra el devkit son soporte, gabinete e integración de la energía.
 
 Dos riesgos que nadie documentó y que conviene preguntar antes de comprar:
 
@@ -122,7 +131,7 @@ El **UnifoLM-OmniA de Unitree**, que apareció en nuestra investigación anterio
 está peor documentado todavía: **no hay repositorio, ni pesos, ni paper, ni
 métricas.** Lo que Unitree sí liberó son piezas anteriores —un modelo de mundo y
 un VLA sobre Qwen2.5-VL— pero **con licencia no comercial**: sirven para
-aprender, no para desplegar en una refinería.
+aprender, no para desplegar en una planta industrial.
 
 ### 2.2 Razonador arriba, ejecutor abajo
 
@@ -133,7 +142,7 @@ Es la familia con más evidencia publicada.
 2026 el razonador está disponible como `gemini-robotics-er-2-preview`; **el VLA
 sigue cerrado a socios seleccionados**, igual que la versión que corre a bordo.
 
-Un número muy relevante para una refinería: la versión anterior del razonador
+Un número muy relevante para una planta industrial: la versión anterior del razonador
 **lee instrumentos industriales con 93 % de acierto**, contra 23 % de la
 anterior — manómetros circulares, indicadores de nivel, displays digitales,
 visores de líquido
@@ -325,7 +334,7 @@ generalización a propósito.
 **HumanoidMimicGen es el hallazgo más relevante de toda la investigación para
 nuestro caso**: es de NVIDIA con UT Austin, corre **sobre Unitree G1**, y su
 banco de pruebas son **nueve tareas industriales** —levantar cajas, taladrar,
-empujar, sortear obstáculos—. Es literalmente el caso de uso del almacén.
+empujar, sortear obstáculos—. Es literalmente el caso de uso del sitio real.
 
 El costo escondido: las herramientas de generación por video piden del orden de
 **80 GB de memoria de video**. Eso es alquiler de placa grande, no la VM actual.
@@ -353,7 +362,7 @@ pierde y cómo se disipa el calor.**
 
 > **Decisión del 10-ago-2026 que corrige lo que decía este documento.** La
 > versión anterior recomendaba cambiar el modelo de razonamiento por el de
-> Google. **Se descartó**: Humandroid trabaja dentro del ecosistema NVIDIA y
+> Google. **Se descartó**: el equipo socio trabaja dentro del ecosistema NVIDIA y
 > meter una pieza de Google fragmenta el stack. **Nos quedamos en NVIDIA**:
 > Isaac para simular, Cosmos para razonar y multiplicar datos, GR00T para
 > manipular, AGILE para entrenar por refuerzo.
@@ -371,14 +380,14 @@ pieza más barata de cambiar más adelante si el catálogo de capacidades se
 mantiene como interfaz estable.
 
 **Tres.** **Una sola** habilidad de manipulación aprendida. La más simple y
-repetitiva del almacén. Recolectar las 200 demostraciones, afinar GR00T N1.7 en
+repetitiva del sitio real. Recolectar las 200 demostraciones, afinar GR00T N1.7 en
 la nube por menos de 20 dólares, desplegar a 5 Hz sobre la Thor con la GPU
 particionada. **Esperar 60–70 %, no 95 %.** Ese número es el aprendizaje.
 
 **Cuatro.** Recién después, multiplicar demostraciones con HumanoidMimicGen o
 Isaac Lab Mimic. Es la mayor palanca publicada, pero exige tener el entorno
 modelado en simulación primero — que es justamente donde el gemelo digital del
-almacén se vuelve útil.
+sitio se vuelve útil.
 
 ### 5.3 Qué no hacer
 
@@ -403,7 +412,7 @@ interfaz de velocidad.
 siquiera posible; **el formato y la calidad de las demostraciones**, que es el
 activo más caro y el que se tira entero si se recolecta mal; colapsar la
 arquitectura en un modelo único, que es camino de ida y pierde la auditabilidad
-que una refinería probablemente exija; y poner el ejecutor en la nube, porque la
+que una planta industrial probablemente exija; y poner el ejecutor en la nube, porque la
 degradación sin red no es graciosa.
 
 ---

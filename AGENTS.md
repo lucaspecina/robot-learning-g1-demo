@@ -40,3 +40,25 @@ Antes de diseñar o cambiar una parte del sistema:
   el código.
 - Explicar robótica en lenguaje humano; definir cualquier término técnico la
   primera vez que se use.
+
+## Qué NO va en este repositorio
+
+**Este repositorio es público.** Todo lo que se commitea queda accesible, y el
+historial no se borra sacando el texto de un archivo.
+
+Nunca escribir en archivos versionados:
+
+- Nombres de la empresa, del grupo, de clientes o de socios comerciales.
+- Presupuestos, cotizaciones, precios negociados, condiciones de compra o
+  nombres de proveedores y sus contactos.
+- Ubicaciones o instalaciones reales de despliegue.
+- Credenciales, direcciones IP internas o nombres de máquinas de la
+  organización.
+
+Todo eso va a **`notas/`**, que está en `.gitignore`.
+
+En los documentos versionados se habla en general: "el equipo socio", "el sitio
+real", "una planta industrial". El contenido técnico —arquitectura, mediciones,
+decisiones de ingeniería, precios de lista públicos— sí puede ir versionado.
+
+Ante la duda, va a `notas/`.

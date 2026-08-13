@@ -231,3 +231,6 @@ g1/logs/
 # trazas binarias que el cliente WebRTC/NvStreamer escribe en el directorio
 # actual; no son código ni evidencia resumida del experimento
 NvStreamer-*.etli
+
+# Notas internas de compras y hardware: NO se suben
+notas/

@@ -24,7 +24,7 @@ Quién hace qué, y en qué estado está cada decisión.
 
 **Decisión de ecosistema (10-ago-2026):** nos quedamos **dentro de NVIDIA**.
 Isaac para simular, Cosmos para razonar y multiplicar datos, GR00T para
-manipular, AGILE para entrenar por refuerzo. Motivo: Humandroid trabaja ahí
+manipular, AGILE para entrenar por refuerzo. Motivo: el equipo socio trabaja ahí
 adentro y fragmentar el stack nos deja sin vocabulario común.
 
 ---
@@ -106,7 +106,7 @@ flujo de NVIDIA.
 | Para qué | Qué pide | Qué tenemos |
 |---|---|---|
 | **Correr Isaac y desarrollar el stack** | procesador, memoria, y Ampere o superior para el LiDAR | T4 de 4 núcleos y 28 GB — **por debajo del mínimo de Isaac Sim, que pide 32** |
-| **Renderizar para el casco** | **Ada o Blackwell** | nada que califique |
+| **Renderizar para el casco** | **RTX PRO 6000 o RTX 5090 o superior** | nada que califique |
 | **Afinar el modelo** | 48 GB de memoria de video | nada — se alquila por horas, menos de 20 dólares |
 
 ⚠️ **Trampa que ya nos confundió:** en el flujo de NVIDIA se teleopera **contra
@@ -139,13 +139,13 @@ una máquina física local — **la única sin problema de latencia**.
 - Si Cosmos Reason entra como verificador visual.
 - Qué manos va a traer el G1 — **condiciona todo lo de manipulación**.
 
-**Para preguntarle a Humandroid**
+**Para preguntarle al equipo socio**
 
 - ¿Generan datos en simulación o sólo teleoperan el robot real?
 - ¿Con qué máquina teleoperan?
 - ¿Qué configuración de manos recomiendan comprar?
 - ¿Por qué hay que reestampar el LiDAR y qué se pierde con eso?
-- ¿Cómo piensan validar la navegación contra el gemelo del almacén?
+- ¿Cómo piensan validar la navegación contra el gemelo del sitio real?
 
 ---
 
@@ -158,7 +158,7 @@ Se dejan escritos a propósito: cada uno costó tiempo y volver a caer es fácil
    PRO 6000 Blackwell en vista previa. Lo que no tiene es una cerca de acá.
 3. **Mezclar "dónde corre el simulador" con "qué hace falta para el casco"** —
    son dos preguntas distintas, y la respuesta a una no responde la otra.
-4. **Recomendar el razonador de Google** sin considerar que Humandroid trabaja
+4. **Recomendar el razonador de Google** sin considerar que el equipo socio trabaja
    en el stack de NVIDIA.
 5. **Suponer que el LiDAR sólo ve a su altura** — depende de la franja que se
    elija al aplanar la nube 3D; en nuestra simulación el `/scan` es un plano de
