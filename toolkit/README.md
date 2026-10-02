@@ -42,6 +42,14 @@ python -m toolkit.checks.normalization \
     --policy-dir data/checkpoints/act_cheap_v1/pretrained_model
 ```
 
+## Trampas conocidas
+
+- **`LeRobotDataset(..., episodes=[...])` no filtra filas en LeRobot 0.4.1**
+  cuando el dataset es local o todos sus episodios comparten archivo: sólo
+  decide qué archivos bajar del Hub. Para separar entrenamiento y evaluación,
+  partir el dataset con `lerobot.datasets.dataset_tools.split_dataset`.
+  Detalle en `notebooks/learn/L2_lerobot_dataset.ipynb`.
+
 ## Notas de plataforma
 
 En la Mac, los videos se leen con `video_backend="pyav"`. El decodificador por
