@@ -1,6 +1,6 @@
 # Cómo se arma la máquina de simulación, desde cero
 
-> Escrito el 10-ago-2026, capturando lo que había en `vm-go2-isaac` antes de
+> Escrito el 10-ago-2026, capturando lo que había en la VM de simulación antes de
 > montar una máquina nueva. **Hasta hoy este entorno se había armado a mano y
 > nunca se documentó** — era el hueco más grande del proyecto.
 
@@ -31,7 +31,7 @@ simulador portado del Go2 (fase 2) y no a la línea del G1.
 
 ## Lo que hay hoy en la máquina, para reproducirlo
 
-Capturado de `vm-go2-isaac` el 10-ago-2026:
+Capturado de la VM de simulación el 10-ago-2026:
 
 | Pieza | Versión / ubicación |
 |---|---|

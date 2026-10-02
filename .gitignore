@@ -234,3 +234,13 @@ NvStreamer-*.etli
 
 # Notas internas de compras y hardware: NO se suben
 notas/
+
+# Nombres de recursos de Azure del laboratorio (ver scripts/lab.env.example)
+scripts/lab.env
+
+# Certificado autofirmado del servidor de video (mediamtx), generado localmente
+auto.crt
+auto.key
+
+# Ajustes personales del editor
+.vscode/

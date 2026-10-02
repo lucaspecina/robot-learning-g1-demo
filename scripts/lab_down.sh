@@ -3,8 +3,16 @@
 # (deja de facturar compute; solo queda el disco).
 # Correr desde Git Bash o WSL:  bash scripts/lab_down.sh
 set -euo pipefail
-RG=rg-go2-lab
-VM=vm-go2-isaac
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Los nombres de los recursos de Azure no se versionan (el repo es público):
+# viven en scripts/lab.env, que se arma copiando scripts/lab.env.example.
+if [ ! -f "$SCRIPT_DIR/lab.env" ]; then
+    echo "ERROR: falta scripts/lab.env (copiar scripts/lab.env.example y completar)." >&2
+    exit 2
+fi
+source "$SCRIPT_DIR/lab.env"
+RG=$AZURE_RESOURCE_GROUP
+VM=$AZURE_VM
 USER=lucas
 
 # WSL y Windows guardan las claves SSH en lugares distintos. Al lanzar este

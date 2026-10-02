@@ -6,10 +6,17 @@
 #
 # Seguridad: la IP se consulta a Azure en vivo y la clave ssh vive en ~/.ssh.
 set -euo pipefail
-RG=rg-go2-lab
-VM=vm-go2-isaac
-USER=lucas
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Los nombres de los recursos de Azure no se versionan (el repo es público):
+# viven en scripts/lab.env, que se arma copiando scripts/lab.env.example.
+if [ ! -f "$SCRIPT_DIR/lab.env" ]; then
+    echo "ERROR: falta scripts/lab.env (copiar scripts/lab.env.example y completar)." >&2
+    exit 2
+fi
+source "$SCRIPT_DIR/lab.env"
+RG=$AZURE_RESOURCE_GROUP
+VM=$AZURE_VM
+USER=lucas
 
 # PowerShell resuelve "bash" a WSL. En ese caso usamos el SSH de Windows
 # porque allí vive la clave; el SSH interno de WSL mira otro directorio.

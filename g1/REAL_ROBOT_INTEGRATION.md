@@ -52,11 +52,10 @@ significa que puedan conectarse directamente al G1 físico.
 | Adaptadores de cámara, batería, articulaciones, IMU, LiDAR y odometría | no implementados o no validados para esta unidad |
 | Parada ante pérdida de la computadora externa | no probada en hardware |
 
-Los scripts históricos `00_read_lowstate.py`, `01_stand.py`,
-`02_record_lowstate.py` y `03_walk_policy.py` usan mensajes y supuestos del Go2.
-Su opción llamada `--real` **no los convierte en herramientas válidas para el
-G1**. No deben ejecutarse contra este robot hasta reemplazarlos por interfaces
-G1 explícitas y pasar la escalera de pruebas de este documento.
+Los scripts históricos del Go2 (`00_read_lowstate.py` a `03_walk_policy.py`)
+se eliminaron del repositorio el 2-oct-2026; siguen en el historial de Git.
+Usaban mensajes y supuestos del Go2, y su opción `--real` nunca fue válida para
+el G1.
 
 ## Arquitectura objetivo inicial
 

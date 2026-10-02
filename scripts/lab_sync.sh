@@ -4,13 +4,19 @@
 # se detiene para que la versión ejecutada siga siendo auditable.
 set -euo pipefail
 
-AZURE_RESOURCE_GROUP=rg-go2-lab
-AZURE_VM=vm-go2-isaac
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Los nombres de los recursos de Azure no se versionan (el repo es público):
+# viven en scripts/lab.env, que se arma copiando scripts/lab.env.example.
+if [ ! -f "$SCRIPT_DIR/lab.env" ]; then
+    echo "ERROR: falta scripts/lab.env (copiar scripts/lab.env.example y completar)." >&2
+    exit 2
+fi
+source "$SCRIPT_DIR/lab.env"
+
 SSH_USER=lucas
 REMOTE_REPO=/home/lucas/go2-lab/robot-learning-g1-demo
 ACTIVE_DEMO=/home/lucas/go2-lab/g1
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel)
 LOCAL_BRANCH=$(git -C "$REPO_ROOT" branch --show-current)
 LOCAL_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)
