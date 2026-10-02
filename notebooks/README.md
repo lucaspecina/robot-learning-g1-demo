@@ -32,3 +32,4 @@ Cada uno arranca con lo principal y termina con secciones "para profundizar".
 | `L3_act_explained` | Por qué ACT tiene la forma que tiene, qué espera y devuelve, una predicción capa por capa, el VAE de nuestro modelo y cómo ejecutar los bloques |
 | `L1_lerobot_overview` | Qué es LeRobot y por qué existe, sus piezas, el ciclo de trabajo, cómo piden datos las distintas políticas, la configuración y el Hub |
 | `L2_lerobot_dataset` | Por qué el formato tiene esa forma, cada archivo por dentro, `LeRobotDataset`, ventanas de tiempo, aumentación, edición, y la trampa de `episodes=` |
+| `L4_normalization_and_processors` | Por qué normalizar, los cuatro modos, el pipeline de procesadores, qué se rompe sin ellos y un bug de 0.4.1 en las estadísticas de imagen |
