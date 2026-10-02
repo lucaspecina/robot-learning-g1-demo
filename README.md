@@ -39,10 +39,20 @@ toolkit/    herramientas reusables: inspeccionar datasets, evaluar, comparar
 robot/      recetas del G1 real: teleoperación, conversión, parches
 g1/         la demo de punta a punta (navegación, percepción, agente, skills)
 systems/    la Jetson y el servidor simulados, con red degradable
-scripts/    encender, sincronizar y apagar la VM de simulación
+scripts/    instalar el entorno de aprendizaje; encender y apagar la VM
 docs/       contexto: simuladores, ecosistema, arquitectura, glosario
 notas/      fuera de Git: lo interno que no va en un repo público
 ```
+
+## Empezar
+
+```bash
+bash scripts/setup_learning.sh     # entorno de Python con LeRobot (Mac, VM o workstation)
+source .venv/bin/activate
+pytest
+```
+
+Cómo seguir: [`learning/act/`](learning/act/) y [`toolkit/`](toolkit/).
 
 ## La demo en la VM de simulación
 

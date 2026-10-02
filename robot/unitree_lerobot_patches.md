@@ -44,8 +44,10 @@ El conversor declara imágenes de 480×640; nuestras grabaciones son de 360×640
 "shape": (360, 640, 3),
 ```
 
-Se verificó que el dataset convertido reproduce las mismas estadísticas de
-normalización que se usaron para entrenar.
+En este repo, ese conversor se reusa desde
+[`toolkit/dataset/convert_unitree.py`](../toolkit/dataset/convert_unitree.py),
+que lee el tamaño de la imagen de las grabaciones en vez de parchear el
+archivo, y registra la configuración de una cámara sin tocar `constants.py`.
 
 ## 3. Modo simulacro en la evaluación
 

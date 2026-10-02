@@ -244,3 +244,6 @@ auto.key
 
 # Ajustes personales del editor
 .vscode/
+
+# Metadatos de carpetas de macOS
+.DS_Store
