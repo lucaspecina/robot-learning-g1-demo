@@ -22,3 +22,11 @@ Los notebooks se versionan sin salidas: el filtro `nbstripout` (lo instala
 `setup_learning.sh`) las borra al commitear y en tu copia quedan intactas. Es
 importante porque las salidas incluyen imágenes del lugar real y el repo es
 público.
+
+## `learn/`: referencia para entender a fondo
+
+Cada uno arranca con lo principal y termina con secciones "para profundizar".
+
+| Notebook | Qué explica |
+|---|---|
+| `L3_act_explained` | Por qué ACT tiene la forma que tiene, qué espera y devuelve, una predicción capa por capa, el VAE de nuestro modelo y cómo ejecutar los bloques |

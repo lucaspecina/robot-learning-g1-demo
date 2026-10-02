@@ -12,7 +12,7 @@ import pytest
 
 from toolkit.paths import REPO_ROOT
 
-NOTEBOOKS = sorted((REPO_ROOT / "notebooks").glob("*.ipynb"))
+NOTEBOOKS = sorted((REPO_ROOT / "notebooks").rglob("*.ipynb"))
 
 
 def _git(*args: str) -> str:
@@ -27,9 +27,9 @@ def test_notebooks_go_through_nbstripout():
     )
 
 
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: str(p.relative_to(REPO_ROOT / "notebooks")))
 def test_committed_notebook_has_no_outputs(path):
-    committed = _git("show", f"HEAD:notebooks/{path.name}")
+    committed = _git("show", f"HEAD:{path.relative_to(REPO_ROOT)}")
     if not committed:
         pytest.skip("todavía no commiteado")
     cells = json.loads(committed)["cells"]
