@@ -87,6 +87,10 @@ Para investigar una falla concreta se podrá grabar una corrida acotada con las
 herramientas de ROS 2. La grabación permanente no debe ser el modo normal del
 robot físico por almacenamiento y privacidad.
 
+El cálculo de ancho de banda y memoria del camino físico, junto con el diseño
+de receptor, decoder y broker único de cuadros, está en
+[`REAL_ROBOT_INTEGRATION.md`](REAL_ROBOT_INTEGRATION.md#rendimiento-de-video-y-percepción).
+
 ## Qué puede observar Lucas
 
 El tablero muestra:

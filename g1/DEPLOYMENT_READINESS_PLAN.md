@@ -8,6 +8,11 @@ atajos de la demo y después incorporar percepción del espacio, mapa,
 localización y Nav2. La referencia es siempre el G1 físico; Isaac debe reemplazar
 sensores y física, no regalarle respuestas al agente.
 
+La arquitectura concreta para conectar este sistema al ejemplar físico, el
+adaptador de locomoción de alto nivel y la escalera de pruebas están en
+[`REAL_ROBOT_INTEGRATION.md`](REAL_ROBOT_INTEGRATION.md). Este plan sigue
+concentrado en quitar ayudas y validar navegación.
+
 ## Estado medido de esta migración
 
 | Parte estándar | Estado actual | Límite honesto |

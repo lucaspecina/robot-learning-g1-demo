@@ -96,6 +96,13 @@ La misión puede usar movilidad y brazos al mismo tiempo; por eso
                          robot / Unitree API
 ```
 
+En el primer G1 físico, el último bloque será un adaptador que convierte
+`/cmd_vel` en renovaciones cortas de `LocoClient.Move` y ejecuta una parada
+explícita cuando vence la orden. El controlador propietario de Unitree seguirá
+sosteniendo equilibrio y marcha; WBC-AGILE no reemplazará inicialmente ese
+nivel. La decisión, los riesgos y las pruebas están en
+[`REAL_ROBOT_INTEGRATION.md`](REAL_ROBOT_INTEGRATION.md).
+
 Sólo el monitor de colisiones publica en `/cmd_vel`. El árbitro publica la
 orden elegida en `/g1/cmd_vel/authorized`; así, perder al árbitro, el LiDAR o
 el propio monitor termina en velocidad cero y no en conservar una orden vieja.

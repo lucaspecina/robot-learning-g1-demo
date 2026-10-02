@@ -2,6 +2,12 @@
 
 El robot camina, ve, navega solo y ejecuta misiones dadas en castellano.
 
+El estado de esta página corresponde principalmente a simulación. Antes de
+conectar movimiento autónomo al G1 físico, leer
+[`REAL_ROBOT_INTEGRATION.md`](REAL_ROBOT_INTEGRATION.md): fija el uso inicial
+del controlador de locomoción de Unitree, la separación con WBC-AGILE y la
+escalera de pruebas sobre hardware.
+
 ```bash
 # robot, capas de la Jetson, LiDAR, mapa fijo y localización
 bash run_demo.sh up
