@@ -28,4 +28,8 @@ if [ "$(uname)" = "Darwin" ]; then
     chflags nohidden .venv/lib/python*/site-packages/*.pth
 fi
 
+# Notebook outputs include camera images of the real setup and this repository
+# is public: the nbstripout Git filter clears them on every commit.
+.venv/bin/nbstripout --install --attributes .gitattributes
+
 echo "Entorno listo. Activar con: source .venv/bin/activate"

@@ -21,6 +21,7 @@ dev = [
     "jupyterlab>=4",
     "ipykernel>=6",
     "matplotlib>=3.9",
+    "nbstripout>=0.9.1",
 ]
 
 [tool.uv.sources]

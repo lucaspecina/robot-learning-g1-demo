@@ -21,6 +21,8 @@ import dataclasses
 import shutil
 from pathlib import Path
 
+import json
+
 import cv2
 import tqdm
 import tyro
@@ -30,6 +32,7 @@ from unitree_lerobot.utils.constants import ROBOT_CONFIGS
 
 from toolkit.dataset.robot_configs import G1_BRAINCO_1CAM, register_robot_configs
 from toolkit.paths import DATASETS_DIR
+from toolkit.validation.episodes import SOURCE_EPISODES_FILE
 
 # The official converter writes every dataset at 30 FPS, and our recordings
 # declare the same rate in their data.json.
@@ -134,6 +137,10 @@ def convert(args: ConvertArgs) -> LeRobotDataset:
         dataset.save_episode()
 
     dataset.finalize()
+    # The conversion renumbers episodes 0..N-1; keeping the raw folder names makes
+    # every episode traceable to its recording (and to its place in recording order).
+    sources = [Path(p).name for p in reader.episode_paths[:n_episodes]]
+    (root / "meta" / SOURCE_EPISODES_FILE).write_text(json.dumps(sources, indent=1))
     print(f"Dataset listo en {root}: {dataset.meta.total_episodes} episodios, {dataset.meta.total_frames} cuadros.")
     return dataset
 

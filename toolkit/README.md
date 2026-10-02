@@ -26,6 +26,7 @@ Los datasets y modelos van a `data/`, que Git ignora.
 | `eval/offline` | ¿Predice bien sobre episodios que no vio? Error por articulación y horizonte, contra referencias | listo |
 | `eval/rollout_sim` | ¿Cumple la tarea cuando sus propios errores se acumulan? | por hacer |
 | `eval/dry_run` | ¿Qué haría en el robot sin moverlo? | por traer de `eval_g1.py` |
+| `validation/*` | Chequeos de datos por categoría (ver `docs/08_validacion_de_datos.md`) | listo |
 | `compare` | ¿Esta política es mejor que la anterior, con las mismas métricas? | por hacer |
 
 ## Ejemplos
