@@ -48,8 +48,27 @@ python -m toolkit.dataset.convert_unitree \
 **no normaliza internamente**; sin su preprocesador y postprocesador de
 LeRobot, los números salen inválidos.
 
+## Evaluación offline (2-oct-2026)
+
+Sobre los 7 episodios no vistos, con
+[`notebooks/05_offline_eval_act.ipynb`](../../notebooks/05_offline_eval_act.ipynb).
+Error absoluto medio en radianes, promediado sobre las 26 articulaciones y los
+48 pasos del bloque:
+
+| | ACT | quedarse quieto | repetir la última acción |
+|---|---|---|---|
+| Episodios no vistos (52 bloques) | **0,047** | 0,111 | 0,067 |
+| Episodios de entrenamiento (377 bloques) | 0,010 | 0,116 | 0,072 |
+
+- Le gana a las dos referencias en datos no vistos.
+- Sobreajusta: el error en datos no vistos es 4,5 veces el de entrenamiento.
+- El primer paso de cada bloque erra 0,029 rad, contra 0,002 de repetir la
+  última acción; ACT recién gana desde el paso 9. En el robot se vería como un
+  salto al empezar cada bloque. Candidato: *temporal ensembling*.
+
+Es *teacher forcing*: condición necesaria, no prueba de que la tarea salga.
+
 ## Próximo paso
 
-Reproducir este entrenamiento desde el repo, con un comando por etapa, y
-comprobar que la política reentrenada da los mismos números de evaluación.
-Ese es el criterio para dar por cerrado el flujo.
+Reentrenar ACT desde el repo con este mismo split y comprobar que da números
+comparables. Ese es el criterio para dar por cerrado el flujo.

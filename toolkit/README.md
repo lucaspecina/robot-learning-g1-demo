@@ -22,7 +22,8 @@ Los datasets y modelos van a `data/`, que Git ignora.
 | `dataset/stats` | ¿Qué estadísticas tendría un entrenamiento sobre estos episodios? | listo |
 | `checks/normalization` | ¿El dataset y la política comparten la normalización? | listo |
 | `dataset/inspect` | ¿Los episodios están sanos? Duración, saltos, cámaras | por traer del notebook de ACT |
-| `eval/offline` | ¿Predice bien sobre episodios que no vio? Error por articulación | por traer del notebook de ACT |
+| `policy/load` | Cargar una política con su pre y postprocesador | listo |
+| `eval/offline` | ¿Predice bien sobre episodios que no vio? Error por articulación y horizonte, contra referencias | listo |
 | `eval/rollout_sim` | ¿Cumple la tarea cuando sus propios errores se acumulan? | por hacer |
 | `eval/dry_run` | ¿Qué haría en el robot sin moverlo? | por traer de `eval_g1.py` |
 | `compare` | ¿Esta política es mejor que la anterior, con las mismas métricas? | por hacer |

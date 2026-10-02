@@ -21,4 +21,11 @@ GIT_LFS_SKIP_SMUDGE=1 git -C "$UNITREE_LEROBOT_DIR" checkout --quiet "$UNITREE_L
 
 uv sync
 
+# On macOS some .pth files in the venv end up with the "hidden" file flag, and
+# Python skips hidden .pth files since gh-113659. The
+# editable install of this repo would silently stop being importable.
+if [ "$(uname)" = "Darwin" ]; then
+    chflags nohidden .venv/lib/python*/site-packages/*.pth
+fi
+
 echo "Entorno listo. Activar con: source .venv/bin/activate"
