@@ -57,6 +57,18 @@ python -m toolkit.checks.normalization \
 
 ## Notas de plataforma
 
+**`ModuleNotFoundError: toolkit` o `unitree_lerobot` en la Mac.** En esta Mac,
+algo del sistema le pone la marca de "oculto" a las carpetas que empiezan con
+punto (`.venv`, `.git`) y a su contenido, y Python 3.10 ignora los archivos
+`.pth` ocultos, que son los que le dicen dónde está el código del repo. Se
+arregla con:
+
+```bash
+chflags -R nohidden .venv
+```
+
+(`setup_learning.sh` lo hace solo.) La causa exacta no está confirmada.
+
 En la Mac, los videos se leen con `video_backend="pyav"`. El decodificador por
 defecto de LeRobot (torchcodec) necesita bibliotecas de FFmpeg para arm64, y el
 FFmpeg instalado con Homebrew en esa máquina es de Intel.

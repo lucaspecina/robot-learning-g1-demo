@@ -25,7 +25,7 @@ uv sync
 # Python skips hidden .pth files since gh-113659. The
 # editable install of this repo would silently stop being importable.
 if [ "$(uname)" = "Darwin" ]; then
-    chflags nohidden .venv/lib/python*/site-packages/*.pth
+    chflags -R nohidden .venv
 fi
 
 # Notebook outputs include camera images of the real setup and this repository
