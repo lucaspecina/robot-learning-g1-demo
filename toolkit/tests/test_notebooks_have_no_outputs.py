@@ -12,7 +12,7 @@ import pytest
 
 from toolkit.paths import REPO_ROOT
 
-NOTEBOOKS = sorted((REPO_ROOT / "notebooks").rglob("*.ipynb"))
+NOTEBOOKS = sorted(p for p in (REPO_ROOT / "notebooks").rglob("*.ipynb") if ".ipynb_checkpoints" not in p.parts)
 
 
 def _git(*args: str) -> str:
