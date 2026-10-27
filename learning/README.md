@@ -16,3 +16,11 @@ métrica debería mejorar y cuál es el criterio de aprobación (ver
 
 RL y world models quedan para más adelante: tienen otra cadena (simulación y
 recompensa en vez de datos grabados) y hoy ninguna tarea del G1 los pide.
+
+## Ideas propias
+
+Ideas de arquitectura para mejorar las políticas, antes de convertirse en
+experimentos: [`ideas/`](ideas/).
+
+- [`ideas/memoria_e_historia.md`](ideas/memoria_e_historia.md): seis formas de
+  darle memoria a ACT sin caer en la confusión causal.
