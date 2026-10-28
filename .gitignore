@@ -223,3 +223,33 @@ __marimo__/
 
 # assets generados (se regeneran con convert_urdf.py; pesan y son binarios)
 g1/assets/
+
+# telemetría cruda de Isaac; los resultados resumidos viven en la documentación
+g1/tools/wbc_*.csv
+g1/logs/
+
+# trazas binarias que el cliente WebRTC/NvStreamer escribe en el directorio
+# actual; no son código ni evidencia resumida del experimento
+NvStreamer-*.etli
+
+# Notas internas de compras y hardware: NO se suben
+notas/
+
+# Nombres de recursos de Azure del laboratorio (ver scripts/lab.env.example)
+scripts/lab.env
+
+# Certificado autofirmado del servidor de video (mediamtx), generado localmente
+auto.crt
+auto.key
+
+# Ajustes personales del editor
+.vscode/
+
+# Metadatos de carpetas de macOS
+.DS_Store
+
+# iCloud ignora las carpetas que terminan en .nosync; .venv y data son accesos
+# directos a ellas, para que el entorno y los datos no se sincronicen.
+.venv.nosync/
+data.nosync/
+data

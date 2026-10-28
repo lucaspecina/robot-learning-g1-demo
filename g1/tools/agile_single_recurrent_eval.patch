@@ -1,0 +1,25 @@
+--- eval.py
++++ eval_single_recurrent.py
+@@ -280,11 +280,15 @@ def load_policy(resume_path, env, agent_cfg):
+-        # Check if it's a recurrent policy - if so, skip TorchScript and use regular checkpoint
+-        # Recurrent TorchScript policies are exported for single-env inference, which doesn't
+-        # work well with batched evaluation (would require per-env policy calls)
++        # El export recurrente oficial acepta una sola observación sin la
++        # dimensión de lote. Para una sola réplica basta adaptar esas formas;
++        # con varias se conserva el comportamiento original del evaluador.
+         if hasattr(policy, "is_recurrent") and policy.is_recurrent:
+-            print(
+-                f"[INFO] Detected recurrent TorchScript policy, falling back to regular checkpoint for batched evaluation"
+-            )
+-            # Fall through to regular checkpoint loading
++            if env.num_envs == 1:
++                def single_env_policy(observation):
++                    return policy(observation.squeeze(0)).unsqueeze(0)
++
++                print("[INFO] Loaded recurrent TorchScript policy for one environment")
++                return single_env_policy, None
++            print("[INFO] Detected recurrent TorchScript policy, falling back "
++                  "to regular checkpoint for batched evaluation")
+         else:
+             print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
+             print("[INFO] TorchScript policies are self-contained (include normalizer)")
