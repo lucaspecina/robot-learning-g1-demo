@@ -23,6 +23,7 @@ Los datasets y modelos van a `data/`, que Git ignora.
 | `checks/normalization` | ¿El dataset y la política comparten la normalización? | listo |
 | `dataset/inspect` | ¿Los episodios están sanos? Duración, saltos, cámaras | por traer del notebook de ACT |
 | `policy/load` | Cargar una política con su pre y postprocesador | listo |
+| `policy/act_internals` | ACT desarmado en sus piezas (encoder del VAE, `z`, tokens, encoder, decoder, atención) para mirarlas | listo |
 | `eval/offline` | ¿Predice bien sobre episodios que no vio? Error por articulación y horizonte, contra referencias | listo |
 | `eval/rollout_sim` | ¿Cumple la tarea cuando sus propios errores se acumulan? | por hacer |
 | `eval/dry_run` | ¿Qué haría en el robot sin moverlo? | por traer de `eval_g1.py` |
@@ -57,17 +58,19 @@ python -m toolkit.checks.normalization \
 
 ## Notas de plataforma
 
-**`ModuleNotFoundError: toolkit` o `unitree_lerobot` en la Mac.** En esta Mac,
-algo del sistema le pone la marca de "oculto" a las carpetas que empiezan con
-punto (`.venv`, `.git`) y a su contenido, y Python 3.10 ignora los archivos
-`.pth` ocultos, que son los que le dicen dónde está el código del repo. Se
-arregla con:
-
-```bash
-chflags -R nohidden .venv
-```
-
-(`setup_learning.sh` lo hace solo.) La causa exacta no está confirmada.
+**El repo está en el Escritorio, que iCloud sincroniza.** Eso rompió el
+entorno dos veces: iCloud marcaba como ocultos archivos `.pth` (Python 3.10
+ignora los `.pth` ocultos → `ModuleNotFoundError: toolkit`) y creó copias en
+conflicto ("`... 2.pth`") que dejó en la nube, sin contenido local: Python se
+colgaba al arrancar intentando leerlas. Arreglo (28-oct-2026): iCloud ignora
+las carpetas terminadas en `.nosync`, así que el entorno y los datos viven en
+`.venv.nosync/` y `data.nosync/`, y `.venv` y `data` son accesos directos a
+ellas. Aun así, algo más en la Mac vuelve a marcar los `.pth` como ocultos
+(causa no encontrada). Por eso `setup_learning.sh` escribe además un
+`sitecustomize.py` en el entorno, que Python carga siempre al arrancar y que
+agrega el repo y `unitree_lerobot` a la ruta sin depender de los `.pth`. Si
+igual aparece el error: volver a correr `setup_learning.sh` y buscar archivos
+"`* 2.*`" dentro del entorno.
 
 En la Mac, los videos se leen con `video_backend="pyav"`. El decodificador por
 defecto de LeRobot (torchcodec) necesita bibliotecas de FFmpeg para arm64, y el

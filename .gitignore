@@ -247,3 +247,9 @@ auto.key
 
 # Metadatos de carpetas de macOS
 .DS_Store
+
+# iCloud ignora las carpetas que terminan en .nosync; .venv y data son accesos
+# directos a ellas, para que el entorno y los datos no se sincronicen.
+.venv.nosync/
+data.nosync/
+data

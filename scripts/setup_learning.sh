@@ -25,7 +25,18 @@ uv sync
 # Python skips hidden .pth files since gh-113659. The
 # editable install of this repo would silently stop being importable.
 if [ "$(uname)" = "Darwin" ]; then
-    chflags -R nohidden .venv
+    chflags -R nohidden .venv/
+    # Something on the Mac keeps setting the hidden flag again (cause not found,
+    # see toolkit/README.md). sitecustomize is imported at every interpreter
+    # start and does not depend on .pth files, so the repo stays importable.
+    site_packages=$(.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+    cat > "$site_packages/sitecustomize.py" <<PY
+import sys
+
+for path in ("$PWD", "$PWD/external/unitree_lerobot"):
+    if path not in sys.path:
+        sys.path.append(path)
+PY
 fi
 
 # Notebook outputs include camera images of the real setup and this repository

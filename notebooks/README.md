@@ -29,7 +29,11 @@ Cada uno arranca con lo principal y termina con secciones "para profundizar".
 
 | Notebook | Qué explica |
 |---|---|
-| `L3_act_explained` | Por qué ACT tiene la forma que tiene, qué espera y devuelve, una predicción capa por capa, el VAE de nuestro modelo y cómo ejecutar los bloques |
+| `L3_1_act_data` | ACT · los datos: de la grabación al lote que entra al `forward` (ventanas, relleno, normalización) |
+| `L3_2_act_vae_encoder` | ACT · el encoder del VAE: tokens, CLS, μ y σ, el sorteo de la `z`, el KL, y el colapso de nuestro modelo |
+| `L3_3_act_decoder_policy` | ACT · el decoder (la policy): imagen → tokens, posiciones 2D, encoder, casilleros y mapas de cross-attention sobre la imagen |
+| `L3_4_act_training` | ACT · el entrenamiento: un paso desarmado (error, gradientes) y un modelo desde cero con fotos de cómo aprende |
+| `L3_5_act_inference` | ACT · en uso: `z = 0`, latencia, bloques contra *temporal ensembling*, y las perillas |
 | `L1_lerobot_overview` | Qué es LeRobot y por qué existe, sus piezas, el ciclo de trabajo, cómo piden datos las distintas políticas, la configuración y el Hub |
 | `L2_lerobot_dataset` | Por qué el formato tiene esa forma, cada archivo por dentro, `LeRobotDataset`, ventanas de tiempo, aumentación, edición, y la trampa de `episodes=` |
 | `L4_normalization_and_processors` | Por qué normalizar, los cuatro modos, el pipeline de procesadores, qué se rompe sin ellos y un bug de 0.4.1 en las estadísticas de imagen |
